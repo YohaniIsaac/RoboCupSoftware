@@ -10,10 +10,23 @@ def movimiento_vertical(t):
 
     return a * t**2 + b * t + c
 
+def circulo(img, equipo, tag):
+    cv.circle(img, (x,y), 30, (255,255,255), -1)
+    cv.circle(img, (x,y-15), 10 , equipo, -1)
+    cv.circle(img, (x-15,y+10), tag, -1)
+    cv.circle(img, (x+15,y+10), tag, -1)
+
+
 # Parámetros de movimiento
 t_inicial = 0.0
 t_final = 1.0
 pasos = 25
+
+# Colores
+rojo    = (0,0,255)
+azul    = (255,0,0)
+cian    = (255,255,0)
+magenta = (255,0,255)
 
 # Calcular el cambio en la posición vertical en cada paso
 delta_t = (t_final - t_inicial) / pasos
@@ -53,10 +66,10 @@ cv.line(fondo,(int(320 * ratio_x), int(5 * ratio_y)),(int(320 * ratio_x), int(47
 
 # Diccionario de los jugadores
 jugadores = [
-    {"x": 200,              "y": int(alto/2),   "equipo" : (0,0,255), "id1": (255,255,0), "id2": (255,0,255)},  # Jugador rojo
-    {"x": int(ancho-200),   "y": int(alto/2),   "equipo" : (0,0,255), "id1": (255,0,255), "id2": (255,255,0)},  # Jugador rojo
-    {"x": int(ancho/2),     "y": 250,           "equipo" : (255,0,0), "id1": (255,255,0), "id2": (255,0,255)},  # Jugador azul
-    {"x": int(ancho/2),     "y": int(alto-250), "equipo" : (255,0,0), "id1": (255,0,255), "id2": (255,255,0)}   # Jugador azul
+    {"x": 200,              "y": int(alto/2),   "equipo" : rojo, "id1": cian, "id2": cian},  # Jugador rojo
+    {"x": int(ancho-200),   "y": int(alto/2),   "equipo" : rojo, "id1": magenta, "id2": magenta},  # Jugador rojo
+    {"x": int(ancho/2),     "y": 250,           "equipo" : azul, "id1": cian, "id2": cian},  # Jugador azul
+    {"x": int(ancho/2),     "y": int(alto-250), "equipo" : azul, "id1": magenta, "id2": magenta}   # Jugador azul
 ]
 # Pelota
 pelota = {"x": int(ancho/2), "y": int(alto/2), "color": (24,194,243)}
@@ -67,19 +80,14 @@ for i in range(frames):
 
     # Dibujar los jugadores en el fotograma actual
     fotograma = fondo.copy()
-
+    circulo(fotograma, jugador["x"], jugador["y"], jugador[i])
     for jugador in jugadores:
         # Pelota con contorno
         cv.circle(fotograma, (pelota["x"],pelota["y"]), 30, pelota["color"], -1)
         cv.circle(fotograma, (pelota["x"],pelota["y"]), 32, (0), 1)
 
         # Jugador en negro
-        cv.circle(fotograma, (jugador["x"], jugador["y"]), 30, (0), -1)
-
-        # Código de color para jugadores
-        cv.circle(fotograma, (jugador["x"], jugador["y"]-15), 10, jugador["equipo"], -1)
-        cv.circle(fotograma, (jugador["x"]-15, jugador["y"]+10), 10, jugador["id1"], -1)
-        cv.circle(fotograma, (jugador["x"]+15, jugador["y"]+10), 10, jugador["id2"], -1)
+        
 
 
     # Actualizar la posición de los jugadores

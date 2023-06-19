@@ -5,15 +5,18 @@ import numpy as np
 
 
 cir             = 10
-rango_y         = 50
-rango_x         = 50
+rango_y         = 45
+rango_x         = 45
 centros_totales = []
+
 
 def encontrar_centro(p1, p2, p3):
     centro_x = (p1[0] + p2[0] + p3[0]) / 3
+    
     centro_y = (p1[1] + p2[1] + p3[1]) / 3
     centro = (int(centro_x), int(centro_y))
     return centro
+
 def centros(contornos):
     M = cv2.moments(contornos)
     if M["m00"] == 0: M["m00"]=1 
@@ -42,19 +45,17 @@ def equipo_rojo(hsv,frame):
         for contour in contornos_cian:
             x_cian, y_cian = centros(contour)
             x_cian, y_cian = x_cian +(x-rango_x), y_cian + (y-rango_y)
-            puntos_cian.append([x_cian, y_cian])  
-            print(puntos_cian)
+            puntos_cian.append([x_cian, y_cian])
+            
         for contour in contornos_magenta:
             x_magenta ,y_magenta = centros(contour)
-            x_magenta , y_magenta = x_magenta + (x-rango_x), y_magenta + (y-15)
+            x_magenta , y_magenta = x_magenta + (x-rango_x), y_magenta + (y-rango_y)
             puntos_magenta.append([x_magenta,y_magenta])
-            cv2.rectangle(frame,(int(x_magenta-cir),int(y_magenta-cir)), (int(x_magenta+cir),int(y_magenta+cir)), (255,255,255), 2)
-    
-    #centro = encontrar_centro(puntos_rojos[0],puntos_cian[0], puntos_magenta[0])
-    
-    #cv2.line(frame, puntos_cian[0], puntos_cian[1], (0,0,0), 3)
-    #cv2.circle(frame,centro, 3, (0, 0, 0), -1)
 
+    if len(puntos_cian) == 2:
+        cv2.line(frame, puntos_cian[0],puntos_cian[1],(0,0,0),3)
+    if len(puntos_magenta) == 2:
+        cv2.line(frame, puntos_magenta[0],puntos_magenta[1],(0,0,0),3)
 
 def contorno(hsv,frame):
     """
@@ -96,7 +97,6 @@ def contorno(hsv,frame):
     #     cv2.rectangle(frame, (int(x-cir),int(y-cir)), (int(x+cir),int(y+cir)), (255,255,255), 2)
 
     return 
-
 
 def Rojo(hsv):
     """
@@ -195,7 +195,7 @@ if __name__ == "__main__":
     cap = cv2.VideoCapture(ruta)
     while cap.read()[0] == True:
         ret, frame = cap.read()
-        
+        print(ret)
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
         if ret == False:
