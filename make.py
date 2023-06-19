@@ -3,18 +3,31 @@ import numpy as np
 import random
 import os
 
-def movimiento_vertical(t):
-    a = 0.5  # Coeficiente cuadrático
-    b = -2.0  # Coeficiente lineal
-    c = 1.0  # Término independiente
+class Jugador:
+    def __init__(self, x, y, equipo, etiqueta, angulo,dx,dy,theta):
+        self.x          = x
+        self.y          = y
+        self.equipo     = equipo
+        self.etiqueta   = etiqueta
+        self.angulo     = angulo
+        self.dx         = dx
+        self.dy         = dy
+        self.theta      = theta
+    def mover(self):
+        self.x      += self.dx
+        self.y      += self.dy
+        self.angulo += self.theta
 
-    return a * t**2 + b * t + c
 
-def circulo(img, equipo, tag):
-    cv.circle(img, (x,y), 30, (255,255,255), -1)
-    cv.circle(img, (x,y-15), 10 , equipo, -1)
-    cv.circle(img, (x-15,y+10), tag, -1)
-    cv.circle(img, (x+15,y+10), tag, -1)
+def circulo(img, x, y, equipo, tag, angle):
+    cv.circle(img, (x,y), 30, (0,0,0), -1)
+    M = cv.getRotationMatrix2D((x, y), angle, 1)
+    tf1 = np.dot(M, np.array([[x], [y+15], [1]]))
+    tf2 = np.dot(M, np.array([[x+15], [y-10], [1]]))
+    tf3 = np.dot(M, np.array([[x-15], [y-10], [1]]))
+    cv.circle(img, (int(tf1[0]), int(tf1[1])), 10, equipo,-1)
+    cv.circle(img, (int(tf2[0]), int(tf2[1])), 10, tag,-1)
+    cv.circle(img, (int(tf3[0]), int(tf3[1])), 10, tag,-1)
 
 
 # Parámetros de movimiento
@@ -32,8 +45,6 @@ magenta = (255,0,255)
 delta_t = (t_final - t_inicial) / pasos
 t = t_inicial
 dy = 0.0  # Cambio inicial en la posición vertical
-
-########################################################################
 
 # Configuración del video
 ancho = 1280
@@ -64,13 +75,12 @@ cv.rectangle(fondo,(int(5 * ratio_x), int(5 * ratio_y)),(int(635 * ratio_x), int
 cv.circle(fondo,(int(ancho/2), int(alto/2)), int(73 * ratio_x), (255, 255, 255), 2)
 cv.line(fondo,(int(320 * ratio_x), int(5 * ratio_y)),(int(320 * ratio_x), int(470 * ratio_y)),(255, 255, 255), 2)
 
-# Diccionario de los jugadores
-jugadores = [
-    {"x": 200,              "y": int(alto/2),   "equipo" : rojo, "id1": cian, "id2": cian},  # Jugador rojo
-    {"x": int(ancho-200),   "y": int(alto/2),   "equipo" : rojo, "id1": magenta, "id2": magenta},  # Jugador rojo
-    {"x": int(ancho/2),     "y": 250,           "equipo" : azul, "id1": cian, "id2": cian},  # Jugador azul
-    {"x": int(ancho/2),     "y": int(alto-250), "equipo" : azul, "id1": magenta, "id2": magenta}   # Jugador azul
-]
+# Crear instancias de la clase Jugador
+player_1 = Jugador(200,             int(alto/2),    rojo, cian,     0,      1,  1,  .1)
+player_2 = Jugador(int(ancho-200),  int(alto/2),    rojo, magenta,  45,     1,  1,  -.1)
+player_3 = Jugador(int(ancho/2),    250,            azul, cian,     180,    1,  1,  .1)
+player_4 = Jugador(int(ancho/2),    int(alto-250),  azul, magenta,  270,    1,  1,  -.1)
+
 # Pelota
 pelota = {"x": int(ancho/2), "y": int(alto/2), "color": (24,194,243)}
 
@@ -80,23 +90,17 @@ for i in range(frames):
 
     # Dibujar los jugadores en el fotograma actual
     fotograma = fondo.copy()
-    circulo(fotograma, jugador["x"], jugador["y"], jugador[i])
-    for jugador in jugadores:
-        # Pelota con contorno
-        cv.circle(fotograma, (pelota["x"],pelota["y"]), 30, pelota["color"], -1)
-        cv.circle(fotograma, (pelota["x"],pelota["y"]), 32, (0), 1)
 
-        # Jugador en negro
-        
-
+    circulo(fotograma, int(player_1.x), int(player_1.y) , player_1.equipo , player_1.etiqueta, player_1.angulo)
+    circulo(fotograma, int(player_2.x), int(player_2.y) , player_2.equipo , player_2.etiqueta, player_2.angulo)
+    circulo(fotograma, int(player_3.x), int(player_3.y) , player_3.equipo , player_3.etiqueta, player_3.angulo)
+    circulo(fotograma, int(player_4.x), int(player_4.y) , player_4.equipo , player_4.etiqueta, player_4.angulo)
 
     # Actualizar la posición de los jugadores
-    for jugador in jugadores:
-        dx = 1
-        dy = 1
-        t += delta_t
-        jugador["x"] += dx
-        jugador["y"] += dy
+    player_1.mover()
+    player_2.mover()
+    player_3.mover()
+    player_4.mover()
 
     # Agregar el fotograma al video de salida
     video_salida.write(fotograma)
