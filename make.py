@@ -76,13 +76,13 @@ cv.circle(fondo,(int(ancho/2), int(alto/2)), int(73 * ratio_x), (255, 255, 255),
 cv.line(fondo,(int(320 * ratio_x), int(5 * ratio_y)),(int(320 * ratio_x), int(470 * ratio_y)),(255, 255, 255), 2)
 
 # Crear instancias de la clase Jugador
-player_1 = Jugador(200,             int(alto/2),    rojo, cian,     0,      1,  1,  .1)
-player_2 = Jugador(int(ancho-200),  int(alto/2),    rojo, magenta,  45,     1,  1,  -.1)
-player_3 = Jugador(int(ancho/2),    250,            azul, cian,     180,    1,  1,  .1)
-player_4 = Jugador(int(ancho/2),    int(alto-250),  azul, magenta,  270,    1,  1,  -.1)
+player_1 = Jugador(200,             int(alto/2),    rojo, cian,     0,      1.3,  -1.4,  1.5)
+player_2 = Jugador(int(ancho-200),  int(alto/2),    rojo, magenta,  45,     -1,  -1,  -1.1)
+player_3 = Jugador(int(ancho/2),    250,            azul, cian,     180,    -1,  1,  1.26)
+player_4 = Jugador(int(ancho/2),    int(alto-250),  azul, magenta,  270,    1,  -1,  -1.29)
 
 # Pelota
-pelota = {"x": int(ancho/2), "y": int(alto/2), "color": (24,194,243)}
+pelota   = Jugador(int(ancho/2),    int(alto/2),  azul, None,  270,    1,  -1,  -1.29)
 
 # Bucle principal para generar el video
 frames = duración * fps
@@ -96,12 +96,14 @@ for i in range(frames):
     circulo(fotograma, int(player_3.x), int(player_3.y) , player_3.equipo , player_3.etiqueta, player_3.angulo)
     circulo(fotograma, int(player_4.x), int(player_4.y) , player_4.equipo , player_4.etiqueta, player_4.angulo)
 
+    cv.circle(fotograma, (int(pelota.x), int(pelota.y)), 10, (6,100,255), -1 )
     # Actualizar la posición de los jugadores
     player_1.mover()
     player_2.mover()
     player_3.mover()
     player_4.mover()
 
+    pelota.mover()
     # Agregar el fotograma al video de salida
     video_salida.write(fotograma)
 
