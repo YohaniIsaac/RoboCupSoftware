@@ -191,7 +191,7 @@ def Cian(hsv):
 
 if __name__ == "__main__":
     # capture video
-    ruta = os.path.join(os.path.dirname(__file__), '../videos/cupigual.mp4')
+    ruta = os.path.join(os.path.dirname(__file__), 'video_futbol.avi')
     cap = cv2.VideoCapture(ruta)
     while cap.read()[0] == True:
         ret, frame = cap.read()
@@ -203,12 +203,11 @@ if __name__ == "__main__":
 
         equipo_rojo(hsv,frame)
         cv2.imshow("original", frame)
-        time.sleep(2)
+        #time.sleep(2)
         k = cv2.waitKey(5) & 0xFF
         if k == 27:
             break
         #print(puntos)
-        time.sleep(0.5)
 
     cv2.destroyAllWindows()
 
