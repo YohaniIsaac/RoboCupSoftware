@@ -2,6 +2,97 @@ import cv2
 import numpy as np
 import os 
 
+class ObjectDetector:
+		colores ={
+		"magenta": ((145, 150, 150), (165, 255, 255)),  # Rango de color para el magenta
+		"cian": ((85, 150, 150), (95, 255, 255))  # Rango de color para el cian		    
+		}
+	def __init__(self, colorBajo1, ColorAlto1, ColorBajo2, ColorAlto2, equipo,n_player):
+		self.color 		= color
+		self.colorBajo1 = ColorBajo1
+		self.ColorAlto1 = ColorAlto1
+		self.colorBajo2 = ColorBajo2
+		self.ColorAlto2 = ColorAlto2
+		self.equipo 	= equipo
+		self.n_player 	= n_player
+
+	def DetecEquipo(self, imagen_hsv, imagen):
+		# Crear una máscara utilizando los rangos de color especificados
+		mascara = cv2.inRange(imagen_hsv, color_bajo, color_alto)
+		if color_alto2 and color_bajo2 is not None:
+			mascara1 = mascara
+			mascara2 = cv2.inRange(imagen_hsv, color_bajo2, color_alto2)
+			mascara = cv2.add(mascara1, mascara2)
+
+		# Aplicar la máscara a la imagen original
+		imagen_filtrada = cv2.bitwise_and(imagen, imagen, mask=mascara)
+
+		# Convertir la imagen filtrada a escala de grises
+		imagen_gris = cv2.cvtColor(imagen_filtrada, cv2.COLOR_BGR2GRAY)
+
+		# Aplicar un filtro de suavizado para reducir el ruido
+		imagen_suavizada = cv2.GaussianBlur(imagen_gris, (5,5),0)
+		
+		# Aplicar la detección de bordes
+		# bordes = cv2.Canny(imagen_suavizada, 10, 200)
+
+		# Aplicar la transformada de Hough para detectar círculos
+		circulo = cv2.HoughCircles(imagen_suavizada, cv2.HOUGH_GRADIENT, 1, minDist=20,
+									param1=15, param2=15,
+									minRadius=radio_min, maxRadius=radio_max)
+		if circulo is not None:
+			circulo = np.round(circulos[0, :]).astype(int)
+			self.x , self.y, self,r = circulo[0][0], circulo[0][1], circulo[0][2]
+
+		return None
+
+	def DetecEtiqueta(self, imagen_hsv, imagen):
+		# Crear una máscara utilizando los rangos de color especificados
+		circulos_detectados = []
+
+		for color in colores:
+			color_bajo, color_alto = colores[color]
+			# Crear una máscara utilizando los rangos de color especificados
+			mascara = cv2.inRange(imagen_hsv, color_bajo, color_alto)
+
+			# Aplicar la máscara a la imagen original
+			imagen_filtrada = cv2.bitwise_and(imagen, imagen, mask=mascara)
+
+			# Convertir la imagen filtrada a escala de grises
+			imagen_gris = cv2.cvtColor(imagen_filtrada, cv2.COLOR_BGR2GRAY)
+
+			# Aplicar un filtro de suavizado para reducir el ruido
+			imagen_suavizada = cv2.GaussianBlur(imagen_gris, (5,5),0)
+			
+			# Aplicar la detección de bordes
+			# bordes = cv2.Canny(imagen_suavizada, 10, 200)
+
+			# Aplicar la transformada de Hough para detectar círculos
+			circulos = cv2.HoughCircles(imagen_suavizada, cv2.HOUGH_GRADIENT, 1, minDist=20,
+										param1=15, param2=15,
+										minRadius=radio_min, maxRadius=radio_max)
+
+			# Si se detectaron círculos, agregarlos a la lista de circulos_detectados
+			if circulos is not None:
+				
+				circulos = np.round(circulos[0, :]).astype(int)
+				print(circulos[0][0])
+				for (x, y, r) in circulos:
+					circulos_detectados.append({"color": color, "centro": (x, y), "radio": r})
+					print(circulos_detectados)
+		return circulos_detectados
+
+
+	def process_image(self, image_path):
+		# Cargar la imagen
+		image = cv2.imread(image_path)
+
+		# Realizar la detección de objetos
+		self.detect_objects(image)
+
+		# Realizar acciones con los objetos detectados
+		# (agregar aquí la lógica para trabajar con los objetos)
+
 
 def detectar_circulos_color(imagen_hsv, radio_min, radio_max, umbral_votacion, colores, imagen):
 
@@ -37,9 +128,12 @@ def detectar_circulos_color(imagen_hsv, radio_min, radio_max, umbral_votacion, c
 
 		# Si se detectaron círculos, agregarlos a la lista de circulos_detectados
 		if circulos is not None:
+			
 			circulos = np.round(circulos[0, :]).astype(int)
+			print(circulos[0][0])
 			for (x, y, r) in circulos:
 				circulos_detectados.append({"color": color, "centro": (x, y), "radio": r})
+				print(circulos_detectados)
 	return circulos_detectados
 
 def detectar_ball(imagen_hsv, radio_min, radio_max, umbral_votacion, colores, imagen):
@@ -93,10 +187,10 @@ if __name__ == "__main__":
 	# Definir los rangos de color para cada color
 	colores = {
 		"rojo": ((0, 100, 20), (8, 255, 255), (175, 100, 20), (179, 255, 255)),    # Rango de color para el rojo
-		"azul": ((110, 150, 150), (130, 255, 255), None, None),  # Rango de color para el azul
+		"azul": ((110, 150, 150), (130, 255, 255), None, None)  # Rango de color para el azul
 		#"magenta": ((145, 150, 150), (165, 255, 255), None, None),  # Rango de color para el magenta
 		#"cian": ((85, 150, 150), (95, 255, 255), None, None),  # Rango de color para el cian		    
-		"naranjo": ((10, 100, 20), (30, 255, 255), None, None)  # Rango de color para el naranjo
+		#"naranjo": ((10, 100, 20), (30, 255, 255), None, None)  # Rango de color para el naranjo
 	}
 
 	first_frame = True
@@ -109,6 +203,11 @@ if __name__ == "__main__":
 
 			# Aplicar la detección de círculos por color
 			circulos_detectados = detectar_circulos_color(hsv, radio_min, radio_max, umbral_votacion, colores, frame)
+			
+			ball = detectar_ball(hsv, radio_min, radio_max, umbral_votacion, colores, frame)
+			x, y = ball[0]["centro"] 
+			ball = Obj(x, y, ball[0]["color"], "ball")
+
 
 			# Mostrar los círculos detectados
 			dibujar(circulos_detectados, frame)
@@ -131,9 +230,6 @@ if __name__ == "__main__":
 			# Mostrar los círculos detectados
 			#dibujar(circulos_detectados, frame)
 
-
-
-
 		if ret == False:
 			break
 
@@ -147,6 +243,3 @@ if __name__ == "__main__":
 			break
 
 	cv2.destroyAllWindows()
-
-
-
