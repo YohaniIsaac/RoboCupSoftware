@@ -2,212 +2,133 @@ import cv2
 import os
 import time
 import numpy as np
+import math
+
+class Objeto:
+    def __init__(self, equipo, colorID, centro):
+        self.equipo = globals()[equipo]
+        self.colorID = colorID
+        self.x, self.y = centro
+
+    def recorte(self, hsv, imagen):
+        self.hsv = hsv
+        self.imagen = imagen
+        self.roi = hsv[self.y-30:self.y+30 , self.x-30:self.x+30]
+        cv2.imshow("sdas", self.roi)
+        cv2.waitKey(0)
+        detectar_circulos_color(self.hsv, self.equipo, self.imagen, None)
+
+rojo = ((0, 100, 20), (8, 255, 255), (175, 100, 20), (179, 255, 255))    # Rango de color para el rojo
+azul = ((110, 150, 150), (130, 255, 255), None, None)  # Rango de color para el azul
+magenta = ((145, 150, 150), (165, 255, 255), None, None)  # Rango de color para el magenta
+cian = ((85, 150, 150), (95, 255, 255), None, None)  # Rango de color para el cian           
+naranjo= ((10, 100, 20), (30, 255, 255), None, None)  # Rango de color para el naranjo
 
 
-cir             = 10
-rango_y         = 45
-rango_x         = 45
-centros_totales = []
+def detectar_circulos_color(imagen_hsv, colores, imagen, name):
+    circulos_detectados = []
 
+    color_bajo, color_alto, color_bajo2, color_alto2 = colores
+    color = name
+    # Crear una máscara utilizando los rangos de color especificados
+    mascara = cv2.inRange(imagen_hsv, color_bajo, color_alto)
+    if color_alto2 and color_bajo2 is not None:
+        mascara1 = mascara
+        mascara2 = cv2.inRange(imagen_hsv, color_bajo2, color_alto2)
+        mascara = cv2.add(mascara1, mascara2)
 
-def encontrar_centro(p1, p2, p3):
-    centro_x = (p1[0] + p2[0] + p3[0]) / 3
+    # Aplicar la máscara a la imagen original
+    imagen_filtrada = cv2.bitwise_and(imagen, imagen, mask=mascara)
+
+    # Convertir la imagen filtrada a escala de grises
+    imagen_gris = cv2.cvtColor(imagen_filtrada, cv2.COLOR_BGR2GRAY)
+
+    # Aplicar un filtro de suavizado para reducir el ruido
+    imagen_suavizada = cv2.GaussianBlur(imagen_gris, (5,5),0)
     
-    centro_y = (p1[1] + p2[1] + p3[1]) / 3
-    centro = (int(centro_x), int(centro_y))
-    return centro
+    # Aplicar la detección de bordes
+    # bordes = cv2.Canny(imagen_suavizada, 10, 200)
 
-def centros(contornos):
-    M = cv2.moments(contornos)
-    if M["m00"] == 0: M["m00"]=1 
-    x = int(M["m10"] / M["m00"])
-    y = int(M["m01"] / M["m00"])
-    return x,y
+    # Aplicar la transformada de Hough para detectar círculos
+    circulos = cv2.HoughCircles(imagen_suavizada, cv2.HOUGH_GRADIENT, 1, minDist=20,
+                                param1=15, param2=15,
+                                minRadius= 5, maxRadius= 50)
 
-def equipo_rojo(hsv,frame):
-    puntos_rojos    = []
-    puntos_cian     = []
-    puntos_magenta  = []
-    contornos_rojo  = Rojo(hsv)
+    # Si se detectaron círculos, agregarlos a la lista de circulos_detectados
+    if circulos is not None:
+        circulos = np.round(circulos[0, :]).astype(int)
+        for (x, y, r) in circulos:
+            circulos_detectados.append({"color": color, "centro": (x, y), "radio": r})
+    return circulos_detectados
 
-    for contour in contornos_rojo:
-        x,y = centros(contour)
-        puntos_rojos.append([x, y])
-        cv2.rectangle(frame, (int(x-cir),int(y-cir)), (int(x+cir),int(y+cir)), (255,255,255), 2)
-
-    for (x,y) in puntos_rojos:
-        # Extraer la región de interés alrededor del centro
-        roi = hsv[y - rango_y:y + rango_y, x - rango_x:x + rango_x]
-        cv2.imshow("roi",roi)
-        contornos_cian = Cian(roi)
-        contornos_magenta = Magenta(roi)
-        
-        for contour in contornos_cian:
-            x_cian, y_cian = centros(contour)
-            x_cian, y_cian = x_cian +(x-rango_x), y_cian + (y-rango_y)
-            puntos_cian.append([x_cian, y_cian])
-            
-        for contour in contornos_magenta:
-            x_magenta ,y_magenta = centros(contour)
-            x_magenta , y_magenta = x_magenta + (x-rango_x), y_magenta + (y-rango_y)
-            puntos_magenta.append([x_magenta,y_magenta])
-
-    if len(puntos_cian) == 2:
-        cv2.line(frame, puntos_cian[0],puntos_cian[1],(0,0,0),3)
-    if len(puntos_magenta) == 2:
-        cv2.line(frame, puntos_magenta[0],puntos_magenta[1],(0,0,0),3)
-
-def contorno(hsv,frame):
-    """
-    contorno.   Busca las coordenadas de los laseres mediante una busqueda de color blanco o verde.
-
-    Argumentos:
-    frame       -- (array) Array con los datos del frame actual.
-
-    Return:
-    puntos      -- (array) Contiene las coordenadas de los laseres encontrados.
-    """
-
-
-    puntos_azules       = []
-      # Función blanco o verde, dependiendo de cual se desee usar.
-    contornos_azul      = Azul(frame)
-    # contornos_cian      = Cian(frame)
-    # contornos_magenta   = Magenta(frame)
-
-
-
-
-
-
-
-    for contour in contornos_azul:
-        x,y = centros(contour)
-        puntos_azules.append([x, y])
-        cv2.rectangle(frame, (int(x-cir),int(y-cir)), (int(x+cir),int(y+cir)), (255,255,255), 2)
-
-    # for contour in contornos_cian:
-    #     x,y = centros(contour)  
-    #     puntos.append([x, y])
-    #     cv2.rectangle(frame, (int(x-cir),int(y-cir)), (int(x+cir),int(y+cir)), (255,255,255), 2)
-
-    # for contour in contornos_magenta:
-    #     x,y = centros(contour)
-    #     puntos.append([x, y])
-    #     cv2.rectangle(frame, (int(x-cir),int(y-cir)), (int(x+cir),int(y+cir)), (255,255,255), 2)
-
-    return 
-
-def Rojo(hsv):
-    """
-    verde.  Obtiene los bordes de las figuras que sean de color verde.
-
-    Argumentos:
-    frame       -- (array) Array con los datos del frame actual.
-
-    Return:
-    contornos   -- (array) Array con las coordenadas de los contornos encontrados.
-    """
-
-    #hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-
-    rojoBajo = np.array([0, 150, 150], np.uint8) 
-    rojoAlto = np.array([10, 255, 255], np.uint8)
-
-    maskRojo = cv2.inRange(hsv, rojoBajo, rojoAlto)
-
-    cnts = cv2.findContours(maskRojo, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0]
-    contornos = sorted(cnts, key=cv2.contourArea, reverse=True)[:2]
-
-    return contornos
-
-def Azul(hsv):
-    """
-    verde.  Obtiene los bordes de las figuras que sean de color verde.
-
-    Argumentos:
-    frame       -- (array) Array con los datos del frame actual.
-
-    Return:
-    contornos   -- (array) Array con las coordenadas de los contornos encontrados.
-    """
-
-    #hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-    
-    azulBajo = np.array([110, 150, 150], np.uint8) 
-    azulAlto = np.array([130, 255, 255], np.uint8)
-
-    maskAzul = cv2.inRange(hsv, azulBajo, azulAlto)
-
-    cnts = cv2.findContours(maskAzul, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0]
-    contornos_azul = sorted(cnts, key=cv2.contourArea, reverse=True)[:2]
-
-    return contornos_azul
-
-def Magenta(hsv):
-    """
-    verde.  Obtiene los bordes de las figuras que sean de color verde.
-
-    Argumentos:
-    frame       -- (array) Array con los datos del frame actual.
-
-    Return:
-    contornos   -- (array) Array con las coordenadas de los contornos encontrados.
-    """
-
-    #hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-
-    magentaBajo = np.array([145, 150, 150], np.uint8) 
-    magentaAlto = np.array([165, 255, 255], np.uint8)
-
-    maskMagenta = cv2.inRange(hsv, magentaBajo, magentaAlto)
-
-    cnts = cv2.findContours(maskMagenta, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0]
-    contornos = sorted(cnts, key=cv2.contourArea, reverse=True)[:2]
-
-    return contornos
-
-def Cian(hsv):
-    """
-    verde.  Obtiene los bordes de las figuras que sean de color verde.
-
-    Argumentos:
-    frame       -- (array) Array con los datos del frame actual.
-
-    Return:
-    contornos   -- (array) Array con las coordenadas de los contornos encontrados.
-    """
-
-
-    cianBajo = np.array([85, 150, 150], np.uint8) 
-    cianAlto = np.array([95, 255, 255], np.uint8)
-
-    maskCian = cv2.inRange(hsv, cianBajo, cianAlto)
-
-    cnts = cv2.findContours(maskCian, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0]
-    contornos = sorted(cnts, key=cv2.contourArea, reverse=True)[:2]
-
-    return contornos
 
 if __name__ == "__main__":
     # capture video
     ruta = os.path.join(os.path.dirname(__file__), 'video_futbol.avi')
     cap = cv2.VideoCapture(ruta)
+    
+    first_frame = True
+
     while cap.read()[0] == True:
         ret, frame = cap.read()
-        print(ret)
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+
+        print(first_frame)
+
+        if first_frame:
+            circulos_rojos      = detectar_circulos_color(hsv, rojo, frame, "rojo") 
+            circulos_azul       = detectar_circulos_color(hsv, azul, frame, "azul") 
+            circulos_cian       = detectar_circulos_color(hsv, cian, frame, "cian") 
+            circulos_magenta    = detectar_circulos_color(hsv, magenta, frame, "magenta") 
+
+            circulos_naranjo    = detectar_circulos_color(hsv, naranjo, frame, "naranjo")
+
+            equipo = circulos_rojos + circulos_azul
+            identificador = circulos_magenta + circulos_cian
+
+            Jugadores = []
+
+            for team in equipo:
+                x_aux, y_aux = None,None
+                for tag in identificador:
+                    x_val , y_val = tag["centro"]
+                    x_cen , y_cen = team["centro"]
+
+                    d = math.sqrt((x_val - x_cen)**2 + (y_val - y_cen)**2) 
+
+                    if d <= 30:
+                        if x_aux is None and y_aux is None:
+                            x_aux, y_aux = x_val , y_val
+                        else:
+                            x_centro = (x_cen + x_aux + x_val) / 3
+                            y_centro = (y_cen + y_aux + y_val) / 3
+                            centro = (int(x_centro), int(y_centro))
+                            Jugadores.append({'equipo': team["color"], 'colorID': tag["color"], \
+                                'centro1':(x_cen , y_cen), 'centro2':(x_aux, y_aux), 'centro3': (x_val , y_val), 'centro':centro})
+            
+            player_1 = Objeto(Jugadores[0]['equipo'], Jugadores[0]['colorID'], Jugadores[0]['centro'])
+            player_2 = Objeto(Jugadores[1]['equipo'], Jugadores[1]['colorID'], Jugadores[1]['centro'])
+            player_3 = Objeto(Jugadores[2]['equipo'], Jugadores[2]['colorID'], Jugadores[2]['centro'])
+            player_4 = Objeto(Jugadores[3]['equipo'], Jugadores[3]['colorID'], Jugadores[3]['centro'])
+
+            ball = Objeto(circulos_naranjo[0]['color'], None, circulos_naranjo[0]['centro'])
+        else:
+            ball.recorte(hsv, frame)
+
+            first_frame = False
+
+
 
         if ret == False:
             break
 
-        equipo_rojo(hsv,frame)
+
+        # Mostrar la imagen con los círculos detectados
         cv2.imshow("original", frame)
+        cv2.waitKey(0)
         #time.sleep(2)
         k = cv2.waitKey(5) & 0xFF
         if k == 27:
             break
-        #print(puntos)
 
     cv2.destroyAllWindows()
-
