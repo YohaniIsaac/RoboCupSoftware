@@ -43,7 +43,6 @@ def detectar_circulos_color(imagen_hsv, radio_min, radio_max, umbral_votacion, c
 	return circulos_detectados
 
 def detectar_ball(imagen_hsv, radio_min, radio_max, umbral_votacion, colores, imagen):
-
 	ball = []
 
 	color_bajo, color_alto = (10, 100, 20), (30, 255, 255)
@@ -122,7 +121,7 @@ if __name__ == "__main__":
 				if circulo["color"] == "naranjo":
 					x, y = circulo["centro"]
 					roi = hsv[y-30:y+30, x-30:x+30]
-					detectar_ball(hsv, radio_min, radio_max, umbral_votacion, colores, imagen):
+					detectar_ball(hsv, radio_min, radio_max, umbral_votacion, colores, frame)
 					cv2.imshow("asda", roi)
 					cv2.waitKey(0)
 
