@@ -5,22 +5,25 @@ import numpy as np
 import math
 
 class Objeto:
-    def __init__(self, equipo, colorID, centro):
+    def __init__(self, equipo, colorID, centro, frame):
         self.equipo = globals()[equipo]
         self.x, self.y = centro
-
         if colorID is not None:
             self.colorID = globals()[colorID]
 
     def seguimiento_players(self, hsv, imagen):
         self.hsv = hsv
         self.imagen = imagen
-        self.roi = hsv[self.y-30:self.y+30 , self.x-30:self.x+30]
+        self.roi = hsv[self.y-50:self.y+50 , self.x-50:self.x+50]
         self.team = detectar_circulos_color(self.hsv, self.equipo, self.imagen, None)
         self.tags = detectar_circulos_color(self.hsv, self.colorID, self.imagen, None)
         self.centros = detectar_centro(self.team, self.tags)
         print(self.centros)
-        cv2.imshow("sdas", self.roi)
+        if len(self.centros) > 0:
+            self.x , self.y = self.centros[0]["centro"]
+            cv2.circle(frame, (self.x, self.y) ,  2, (255,255,255),-1)
+            cv2.imshow("asda", self.roi)
+        
 
     def seguimiento_ball(self,hsv,imagen):
         self.hsv = hsv
@@ -28,6 +31,8 @@ class Objeto:
         self.roi = hsv[self.y-20:self.y+20 , self.x-20:self.x+20]
         self.ball = detectar_circulos_color(self.hsv, self.equipo, self.imagen, None)
         self.x, self.y = self.ball[0]["centro"]
+
+        cv2.circle(frame, (self.x, self.y) ,  1, (0,0,0),-1)
         cv2.imshow("sdas", self.roi)
 
 
@@ -38,11 +43,10 @@ cian = ((85, 150, 150), (95, 255, 255), None, None)  # Rango de color para el ci
 naranjo= ((10, 100, 20), (30, 255, 255), None, None)  # Rango de color para el naranjo
 
 
-def detectar_circulos_color(imagen_hsv, colores, imagen, name):
+def detectar_circulos_color(imagen_hsv, colores, imagen, color):
     circulos_detectados = []
 
     color_bajo, color_alto, color_bajo2, color_alto2 = colores
-    color = name
     # Crear una máscara utilizando los rangos de color especificados
     mascara = cv2.inRange(imagen_hsv, color_bajo, color_alto)
     if color_alto2 and color_bajo2 is not None:
@@ -123,16 +127,19 @@ if __name__ == "__main__":
             Jugadores = detectar_centro(equipo,identificador)
 
             
-            player_1 = Objeto(Jugadores[0]['equipo'], Jugadores[0]['colorID'], Jugadores[0]['centro'])
-            player_2 = Objeto(Jugadores[1]['equipo'], Jugadores[1]['colorID'], Jugadores[1]['centro'])
-            player_3 = Objeto(Jugadores[2]['equipo'], Jugadores[2]['colorID'], Jugadores[2]['centro'])
-            player_4 = Objeto(Jugadores[3]['equipo'], Jugadores[3]['colorID'], Jugadores[3]['centro'])
+            player_1 = Objeto(Jugadores[0]['equipo'], Jugadores[0]['colorID'], Jugadores[0]['centro'], frame)
+            player_2 = Objeto(Jugadores[1]['equipo'], Jugadores[1]['colorID'], Jugadores[1]['centro'], frame)
+            player_3 = Objeto(Jugadores[2]['equipo'], Jugadores[2]['colorID'], Jugadores[2]['centro'], frame)
+            player_4 = Objeto(Jugadores[3]['equipo'], Jugadores[3]['colorID'], Jugadores[3]['centro'], frame)
 
-            ball = Objeto(circulos_naranjo[0]['color'], None, circulos_naranjo[0]['centro'])
+            ball = Objeto(circulos_naranjo[0]['color'], None, circulos_naranjo[0]['centro'], frame)
             first_frame = False
         else:
             ball.seguimiento_ball(hsv, frame)
-
+            player_1.seguimiento_players(hsv, frame)
+            player_2.seguimiento_players(hsv, frame)
+            player_3.seguimiento_players(hsv, frame)
+            player_4.seguimiento_players(hsv, frame)
             
 
 
