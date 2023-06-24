@@ -7,16 +7,29 @@ import math
 class Objeto:
     def __init__(self, equipo, colorID, centro):
         self.equipo = globals()[equipo]
-        self.colorID = colorID
         self.x, self.y = centro
 
-    def recorte(self, hsv, imagen):
+        if colorID is not None:
+            self.colorID = globals()[colorID]
+
+    def seguimiento_players(self, hsv, imagen):
         self.hsv = hsv
         self.imagen = imagen
         self.roi = hsv[self.y-30:self.y+30 , self.x-30:self.x+30]
+        self.team = detectar_circulos_color(self.hsv, self.equipo, self.imagen, None)
+        self.tags = detectar_circulos_color(self.hsv, self.colorID, self.imagen, None)
+        self.centros = detectar_centro(self.team, self.tags)
+        print(self.centros)
         cv2.imshow("sdas", self.roi)
-        cv2.waitKey(0)
-        detectar_circulos_color(self.hsv, self.equipo, self.imagen, None)
+
+    def seguimiento_ball(self,hsv,imagen):
+        self.hsv = hsv
+        self.imagen = imagen
+        self.roi = hsv[self.y-20:self.y+20 , self.x-20:self.x+20]
+        self.ball = detectar_circulos_color(self.hsv, self.equipo, self.imagen, None)
+        self.x, self.y = self.ball[0]["centro"]
+        cv2.imshow("sdas", self.roi)
+
 
 rojo = ((0, 100, 20), (8, 255, 255), (175, 100, 20), (179, 255, 255))    # Rango de color para el rojo
 azul = ((110, 150, 150), (130, 255, 255), None, None)  # Rango de color para el azul
@@ -61,6 +74,27 @@ def detectar_circulos_color(imagen_hsv, colores, imagen, name):
             circulos_detectados.append({"color": color, "centro": (x, y), "radio": r})
     return circulos_detectados
 
+def detectar_centro(equipo, identificador):
+    Jugadores = []
+
+    for team in equipo:
+        x_aux, y_aux = None,None
+        for tag in identificador:
+            x_val , y_val = tag["centro"]
+            x_cen , y_cen = team["centro"]
+
+            d = math.sqrt((x_val - x_cen)**2 + (y_val - y_cen)**2) 
+
+            if d <= 30:
+                if x_aux is None and y_aux is None:
+                    x_aux, y_aux = x_val , y_val
+                else:
+                    x_centro = (x_cen + x_aux + x_val) / 3
+                    y_centro = (y_cen + y_aux + y_val) / 3
+                    centro = (int(x_centro), int(y_centro))
+                    Jugadores.append({'equipo': team["color"], 'colorID': tag["color"], \
+                        'centro1':(x_cen , y_cen), 'centro2':(x_aux, y_aux), 'centro3': (x_val , y_val), 'centro':centro})
+    return Jugadores
 
 if __name__ == "__main__":
     # capture video
@@ -86,25 +120,8 @@ if __name__ == "__main__":
             equipo = circulos_rojos + circulos_azul
             identificador = circulos_magenta + circulos_cian
 
-            Jugadores = []
+            Jugadores = detectar_centro(equipo,identificador)
 
-            for team in equipo:
-                x_aux, y_aux = None,None
-                for tag in identificador:
-                    x_val , y_val = tag["centro"]
-                    x_cen , y_cen = team["centro"]
-
-                    d = math.sqrt((x_val - x_cen)**2 + (y_val - y_cen)**2) 
-
-                    if d <= 30:
-                        if x_aux is None and y_aux is None:
-                            x_aux, y_aux = x_val , y_val
-                        else:
-                            x_centro = (x_cen + x_aux + x_val) / 3
-                            y_centro = (y_cen + y_aux + y_val) / 3
-                            centro = (int(x_centro), int(y_centro))
-                            Jugadores.append({'equipo': team["color"], 'colorID': tag["color"], \
-                                'centro1':(x_cen , y_cen), 'centro2':(x_aux, y_aux), 'centro3': (x_val , y_val), 'centro':centro})
             
             player_1 = Objeto(Jugadores[0]['equipo'], Jugadores[0]['colorID'], Jugadores[0]['centro'])
             player_2 = Objeto(Jugadores[1]['equipo'], Jugadores[1]['colorID'], Jugadores[1]['centro'])
@@ -112,10 +129,11 @@ if __name__ == "__main__":
             player_4 = Objeto(Jugadores[3]['equipo'], Jugadores[3]['colorID'], Jugadores[3]['centro'])
 
             ball = Objeto(circulos_naranjo[0]['color'], None, circulos_naranjo[0]['centro'])
-        else:
-            ball.recorte(hsv, frame)
-
             first_frame = False
+        else:
+            ball.seguimiento_ball(hsv, frame)
+
+            
 
 
 
@@ -125,7 +143,6 @@ if __name__ == "__main__":
 
         # Mostrar la imagen con los círculos detectados
         cv2.imshow("original", frame)
-        cv2.waitKey(0)
         #time.sleep(2)
         k = cv2.waitKey(5) & 0xFF
         if k == 27:
