@@ -5,35 +5,46 @@ import numpy as np
 import math
 
 class Objeto:
-    def __init__(self, equipo, colorID, centro, frame):
+    def __init__(self, equipo, colorID, centro, centro_tag1, centro_tag2):
         self.equipo = globals()[equipo]
         self.x, self.y = centro
         if colorID is not None:
             self.colorID = globals()[colorID]
 
-    def seguimiento_players(self, hsv, imagen):
-        self.hsv = hsv
-        self.imagen = imagen
-        self.roi = hsv[self.y-50:self.y+50 , self.x-50:self.x+50]
-        self.team = detectar_circulos_color(self.hsv, self.equipo, self.imagen, None)
-        self.tags = detectar_circulos_color(self.hsv, self.colorID, self.imagen, None)
-        self.centros = detectar_centro(self.team, self.tags)
-        print(self.centros)
-        if len(self.centros) > 0:
-            self.x , self.y = self.centros[0]["centro"]
-            cv2.circle(frame, (self.x, self.y) ,  2, (255,255,255),-1)
-            cv2.imshow("asda", self.roi)
-        
+    def dibujar(self):
 
-    def seguimiento_ball(self,hsv,imagen):
-        self.hsv = hsv
-        self.imagen = imagen
-        self.roi = hsv[self.y-20:self.y+20 , self.x-20:self.x+20]
-        self.ball = detectar_circulos_color(self.hsv, self.equipo, self.imagen, None)
-        self.x, self.y = self.ball[0]["centro"]
+        self.x_tag1, self.y_tag1 = self.tags[0]["centro"]
+        self.x_tag1, self.y_tag1 = self.x + self.x_tag1 - 50 , self.y + self.y_tag1 - 50
+        self.x_tag2, self.y_tag2 = self.tags[1]["centro"]
+        self.x_tag2, self.y_tag2 = self.x + self.x_tag2 - 50 , self.y + self.y_tag2 - 50
+        cv2.line(img, (self.x_tag1, self.y_tag1), (self.x_tag2, self.y_tag2), (255,255,255),2)
 
-        cv2.circle(frame, (self.x, self.y) ,  1, (0,0,0),-1)
-        cv2.imshow("sdas", self.roi)
+    def seguimiento_players(self):
+        self.roi_hsv = hsv[self.y-50:self.y+50 , self.x-50:self.x+50]
+        self.roi_img = frame[self.y-50:self.y+50 , self.x-50:self.x+50]
+        if len(self.roi_hsv) > 0: 
+            print(self.x,self.y)
+            self.team = detectar_circulos_color(self.roi_hsv, self.equipo, self.roi_img, None)
+            self.tags = detectar_circulos_color(self.roi_hsv, self.colorID, self.roi_img, None)
+            self.centros = detectar_centro(self.team, self.tags)
+            if len(self.centros) > 0:
+                self.dibujar()
+                self.x_nuevo, self.y_nuevo = self.centros[0]["centro"]
+                self.x, self.y = self.x + self.x_nuevo - 50 , self.y + self.y_nuevo - 50
+                cv2.circle(img, (self.x, self.y) ,  1, (255,255,255),-1)
+                
+
+
+    def seguimiento_ball(self):
+        self.roi_hsv = hsv[self.y-20:self.y+20 , self.x-20:self.x+20]
+        self.roi_img = frame[self.y-20:self.y+20 , self.x-20:self.x+20]
+        if len(self.roi_hsv) > 0: 
+            self.ball = detectar_circulos_color(self.roi_hsv, self.equipo, self.roi_img, None)
+            self.x_nuevo, self.y_nuevo = self.ball[0]["centro"]
+            self.x, self.y = self.x + self.x_nuevo -20 , self.y + self.y_nuevo -20
+            cv2.circle(img, (self.x, self.y) ,  1, (0,0,0),-1)
+            
+        #elif len(self.roi_hsv) == 0: print("NO HAY PELOTA")
 
 
 rojo = ((0, 100, 20), (8, 255, 255), (175, 100, 20), (179, 255, 255))    # Rango de color para el rojo
@@ -109,9 +120,8 @@ if __name__ == "__main__":
 
     while cap.read()[0] == True:
         ret, frame = cap.read()
+        img = np.copy(frame)
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-
-        print(first_frame)
 
         if first_frame:
             circulos_rojos      = detectar_circulos_color(hsv, rojo, frame, "rojo") 
@@ -127,29 +137,32 @@ if __name__ == "__main__":
             Jugadores = detectar_centro(equipo,identificador)
 
             
-            player_1 = Objeto(Jugadores[0]['equipo'], Jugadores[0]['colorID'], Jugadores[0]['centro'], frame)
-            player_2 = Objeto(Jugadores[1]['equipo'], Jugadores[1]['colorID'], Jugadores[1]['centro'], frame)
-            player_3 = Objeto(Jugadores[2]['equipo'], Jugadores[2]['colorID'], Jugadores[2]['centro'], frame)
-            player_4 = Objeto(Jugadores[3]['equipo'], Jugadores[3]['colorID'], Jugadores[3]['centro'], frame)
+            player_1 = Objeto(Jugadores[0]['equipo'], Jugadores[0]['colorID'], Jugadores[0]['centro'], Jugadores[0]['centro2'], Jugadores[0]['centro3'])
+            player_2 = Objeto(Jugadores[1]['equipo'], Jugadores[1]['colorID'], Jugadores[1]['centro'], Jugadores[1]['centro2'], Jugadores[1]['centro3'])
+            player_3 = Objeto(Jugadores[2]['equipo'], Jugadores[2]['colorID'], Jugadores[2]['centro'], Jugadores[2]['centro2'], Jugadores[2]['centro3'])
+            player_4 = Objeto(Jugadores[3]['equipo'], Jugadores[3]['colorID'], Jugadores[3]['centro'], Jugadores[3]['centro2'], Jugadores[3]['centro3'])
 
-            ball = Objeto(circulos_naranjo[0]['color'], None, circulos_naranjo[0]['centro'], frame)
+            ball = Objeto(circulos_naranjo[0]['color'], None, circulos_naranjo[0]['centro'],None,None)
             first_frame = False
         else:
-            ball.seguimiento_ball(hsv, frame)
-            player_1.seguimiento_players(hsv, frame)
-            player_2.seguimiento_players(hsv, frame)
-            player_3.seguimiento_players(hsv, frame)
-            player_4.seguimiento_players(hsv, frame)
-            
-
-
+            ball.seguimiento_ball()
+            cv2.imshow("pelota" , ball.roi_img)
+            player_1.seguimiento_players()
+            cv2.imshow("jugador 1", player_1.roi_img)
+            player_2.seguimiento_players()
+            cv2.imshow("jugador 2", player_2.roi_img)
+            player_3.seguimiento_players()
+            cv2.imshow("jugador 3", player_3.roi_img)
+            player_4.seguimiento_players()
+            cv2.imshow("jugador 4", player_4.roi_img)
 
         if ret == False:
             break
 
 
         # Mostrar la imagen con los círculos detectados
-        cv2.imshow("original", frame)
+        cv2.imshow("original", img)
+        cv2.waitKey(0)
         #time.sleep(2)
         k = cv2.waitKey(5) & 0xFF
         if k == 27:
