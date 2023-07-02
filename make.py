@@ -54,7 +54,7 @@ duración = 2  # Duración en segundos
 
 # Crear el video
 fourcc = cv.VideoWriter_fourcc(*"XVID")
-video_salida = cv.VideoWriter("video_futbol.avi", fourcc, fps, (ancho, alto))
+video_salida = cv.VideoWriter("../videos/video_futbol.avi", fourcc, fps, (ancho, alto))
 
 # Generar el fondo de la cancha de fútbol
 fondo = np.zeros((alto, ancho, 3), dtype=np.uint8)
@@ -105,7 +105,7 @@ for i in range(frames):
 video_salida.release()
 
 # Leer el video generado
-video = cv.VideoCapture("video_futbol.avi")
+video = cv.VideoCapture("../videos/video_futbol.avi")
 
 # Reproducir el video fotograma por fotograma
 while True:
