@@ -162,7 +162,7 @@ if __name__ == "__main__":
 
         # Mostrar la imagen con los círculos detectados
         cv2.imshow("original", img)
-        cv2.waitKey(0)
+        # cv2.waitKey(0)
         #time.sleep(2)
         k = cv2.waitKey(5) & 0xFF
         if k == 27:
