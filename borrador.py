@@ -156,15 +156,13 @@ def detectar_ball(imagen_hsv, radio_min, radio_max, umbral_votacion, colores, im
 		# bordes = cv2.Canny(imagen_suavizada, 10, 200)
 
 		# Aplicar la transformada de Hough para detectar círculos
-	circulos = cv2.HoughCircles(imagen_suavizada, cv2.HOUGH_GRADIENT, 1, minDist=20,
+	ball = cv2.HoughCircles(imagen_suavizada, cv2.HOUGH_GRADIENT, 1, minDist=20,
 									param1=15, param2=15,
 									minRadius=radio_min, maxRadius=radio_max)
 
 		# Si se detectaron círculos, agregarlos a la lista de circulos_detectados
-	if circulos is not None:
-		circulos = np.round(circulos[0, :]).astype(int)
-		for (x, y, r) in circulos:
-			ball.append({"color": "naranjo", "centro": (x, y), "radio": r})
+	if ball is not None:
+		ball = np.round(ball[0, :]).astype(int)
 	return ball
 
 def dibujar(circulos_detectados, imagen):
@@ -216,11 +214,15 @@ if __name__ == "__main__":
 
 		else:
 			# Aplicar la detección de círculos por color
+
 			for circulo in circulos_detectados:
+				x, y = circulo["centro"]
 				if circulo["color"] == "naranjo":
-					x, y = circulo["centro"]
+					
 					roi = hsv[y-30:y+30, x-30:x+30]
-					detectar_ball(hsv, radio_min, radio_max, umbral_votacion, colores, frame)
+					ball = detectar_ball(hsv, radio_min, radio_max, umbral_votacion, colores, frame)
+					x , y = ball[0][0], ball[0][1]
+					print(x,y)
 					cv2.imshow("asda", roi)
 					cv2.waitKey(0)
 

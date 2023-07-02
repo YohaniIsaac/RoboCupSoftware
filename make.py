@@ -52,12 +52,6 @@ alto = 650
 fps = 40
 duración = 2  # Duración en segundos
 
-# Leer imagen
-img = cv.imread(os.path.dirname(__file__) + '\circulo_sin_fondo.png')
-# Escalar
-#img = cv.resize(img, (10, 10))
-alto_img, ancho_img, _ = img.shape
-
 # Crear el video
 fourcc = cv.VideoWriter_fourcc(*"XVID")
 video_salida = cv.VideoWriter("video_futbol.avi", fourcc, fps, (ancho, alto))
@@ -82,7 +76,7 @@ player_3 = Jugador(int(ancho/2),    250,            azul, cian,     180,    -1, 
 player_4 = Jugador(int(ancho/2),    int(alto-250),  azul, magenta,  270,    1,  -1,  -1.29)
 
 # Pelota
-pelota   = Jugador(int(ancho/2),    int(alto/2),  azul, None,  270,    1,  -1,  -1.29)
+pelota   = Jugador(int(ancho/2),    int(alto/2),  azul, None,  270,    4,  -4,  -1.29)
 
 # Bucle principal para generar el video
 frames = duración * fps
