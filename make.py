@@ -76,7 +76,7 @@ player_3 = Jugador(int(ancho/2),    250,            azul, cian,     180,    -1, 
 player_4 = Jugador(int(ancho/2),    int(alto-250),  azul, magenta,  270,    1,  -1,  -1.29)
 
 # Pelota
-pelota   = Jugador(int(ancho/2),    int(alto/2),  azul, None,  270,    4,  -4,  -1.29)
+pelota   = Jugador(int(ancho/2),    int(alto/2),  azul, None,  270,    1,  -1,  -1.29)
 
 # Bucle principal para generar el video
 frames = duración * fps

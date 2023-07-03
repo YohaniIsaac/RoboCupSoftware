@@ -24,6 +24,7 @@ class Objeto:
         self.roi_hsv = hsv[self.y-50:self.y+50 , self.x-50:self.x+50]
         self.roi_img = frame[self.y-50:self.y+50 , self.x-50:self.x+50]
         if len(self.roi_hsv) > 0: 
+            print(self.x,self.y)
             self.team = detectar_circulos_color(self.roi_hsv, self.equipo, self.roi_img, None)
             self.tags = detectar_circulos_color(self.roi_hsv, self.colorID, self.roi_img, None)
             self.centros = detectar_centro(self.team, self.tags)
@@ -124,41 +125,21 @@ if __name__ == "__main__":
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
         if first_frame:
-            circulos_rojos      = detectar_circulos_color(hsv, rojo, frame, "rojo") 
-            circulos_azul       = detectar_circulos_color(hsv, azul, frame, "azul") 
-            circulos_cian       = detectar_circulos_color(hsv, cian, frame, "cian") 
-            circulos_magenta    = detectar_circulos_color(hsv, magenta, frame, "magenta") 
-
-            equipo = circulos_rojos + circulos_azul
-            identificador = circulos_magenta + circulos_cian
-
-            Jugadores = detectar_centro(equipo,identificador)
-
-            
-            player_1 = Objeto(Jugadores[0]['equipo'], Jugadores[0]['colorID'], Jugadores[0]['centro'], Jugadores[0]['centro2'], Jugadores[0]['centro3'])
-            player_2 = Objeto(Jugadores[1]['equipo'], Jugadores[1]['colorID'], Jugadores[1]['centro'], Jugadores[1]['centro2'], Jugadores[1]['centro3'])
-            player_3 = Objeto(Jugadores[2]['equipo'], Jugadores[2]['colorID'], Jugadores[2]['centro'], Jugadores[2]['centro2'], Jugadores[2]['centro3'])
-            player_4 = Objeto(Jugadores[3]['equipo'], Jugadores[3]['colorID'], Jugadores[3]['centro'], Jugadores[3]['centro2'], Jugadores[3]['centro3'])
-
+            circulos_naranjo    = detectar_circulos_color(hsv, naranjo, frame, "naranjo")
+            ball = Objeto(circulos_naranjo[0]['color'], None, circulos_naranjo[0]['centro'],None,None)
             first_frame = False
         else:
             hora_actual = datetime.datetime.now().time()
-            print("jugadores", hora_actual)
-            player_1.seguimiento_players()
-            cv2.imshow("jugador 1", player_1.roi_img)
-            player_2.seguimiento_players()
-            cv2.imshow("jugador 2", player_2.roi_img)
-            player_3.seguimiento_players()
-            cv2.imshow("jugador 3", player_3.roi_img)
-            player_4.seguimiento_players()
-            cv2.imshow("jugador 4", player_4.roi_img)
+            print("ball", hora_actual)
+            ball.seguimiento_ball()
+            cv2.imshow("pelota" , ball.roi_img)
 
         if ret == False:
             break
 
 
         # Mostrar la imagen con los círculos detectados
-        # cv2.imshow("original", img)
+        cv2.imshow("original", img)
         # cv2.waitKey(0)
         #time.sleep(2)
         k = cv2.waitKey(5) & 0xFF
