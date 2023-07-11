@@ -34,7 +34,6 @@ class Objeto:
                 cv2.circle(img, (self.x, self.y) ,  1, (255,255,255),-1)
                 
 
-
     def seguimiento_ball(self):
         self.roi_hsv = hsv[self.y-20:self.y+20 , self.x-20:self.x+20]
         self.roi_img = frame[self.y-20:self.y+20 , self.x-20:self.x+20]

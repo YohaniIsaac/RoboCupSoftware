@@ -3,6 +3,8 @@ import numpy as np
 import random
 import os
 
+desaceleracion_roce = 0.01
+
 class Jugador:
     def __init__(self, x, y, equipo, etiqueta, angulo,dx,dy,theta, radio):
         self.x          = x
@@ -45,6 +47,40 @@ class Jugador:
         elif (self.y + self.radio) > alto:
             self.dy = self.dy*-1 
 
+    def desaceleracion(self):
+        if abs(self.dx) > 0 or abs(self.dy) > 0:
+            if self.dx > 0:
+                self.dx -= desaceleracion_roce
+                self.dx = max(self.dx,0)
+            elif self.dx < 0:
+                self.dx += desaceleracion_roce
+                self.dx = min(self.dx, 0)
+
+            if self.dy > 0:
+                self.dy -= desaceleracion_roce
+                self.dy = max(self.dy,0)
+            elif self.dy < 0:
+                self.dy += desaceleracion_roce
+                self.dy = min(self.dy, 0)
+
+    def teclas(self):
+
+        #self.dx, self.dy, self.theta = 0, 0, 0
+        if cv.waitKey(1) == ord("w"):
+            self.dy -= 0.5
+            self.dy = min(self.dy, -2)
+        if cv.waitKey(1) == ord("s"):
+            self.dy += 0.5
+            self.dy = max(self.dy, 2)
+        if cv.waitKey(1) == ord("a"):
+            self.dx -= 0.5
+            self.dx = min(self.dx, -2)
+        if cv.waitKey(1) == ord("d"):
+            self.dx += 0.5
+            self.dx = max(self.dx,2)
+        if cv.waitKey(1) == ord("p"):
+            self.dx = 0
+            self.dy = 0
 
 
 
@@ -100,7 +136,7 @@ cv.circle(fondo,(int(ancho/2), int(alto/2)), int(73 * ratio_x), (255, 255, 255),
 cv.line(fondo,(int(320 * ratio_x), int(5 * ratio_y)),(int(320 * ratio_x), int(470 * ratio_y)),(255, 255, 255), 2)
 
 # Crear instancias de la clase Jugador
-player_1 = Jugador(200,             int(alto/2),    rojo, cian,     0,      1.3,  -1.4,  1.5, 30)
+player_1 = Jugador(200,             int(alto/2),    rojo, cian,     0,      0,  0,  0, 30)
 player_2 = Jugador(int(ancho-200),  int(alto/2),    rojo, magenta,  45,     -1,  -1,  -1.1, 30)
 player_3 = Jugador(int(ancho/2),    250,            azul, cian,     180,    -1,  1,  1.26, 30)
 player_4 = Jugador(int(ancho/2),    int(alto-250),  azul, magenta,  270,    1,  -1,  -1.29, 30)
@@ -110,43 +146,56 @@ pelota   = Jugador(int(ancho/2),    int(alto/2),  azul, None,  270,    -2,  -2, 
 
 # Bucle principal para generar el video
 frames = duración * fps
-for i in range(frames):
+while True:
+
+    if cv.waitKey(1) == 27: # 27 ASCII para ecs
+        break
 
     # Dibujar los jugadores en el fotograma actual
     fotograma = fondo.copy()
 
     circulo(fotograma, int(player_1.x), int(player_1.y) , player_1.equipo , player_1.etiqueta, player_1.angulo)
-    circulo(fotograma, int(player_2.x), int(player_2.y) , player_2.equipo , player_2.etiqueta, player_2.angulo)
-    circulo(fotograma, int(player_3.x), int(player_3.y) , player_3.equipo , player_3.etiqueta, player_3.angulo)
-    circulo(fotograma, int(player_4.x), int(player_4.y) , player_4.equipo , player_4.etiqueta, player_4.angulo)
+    #circulo(fotograma, int(player_2.x), int(player_2.y) , player_2.equipo , player_2.etiqueta, player_2.angulo)
+    #circulo(fotograma, int(player_3.x), int(player_3.y) , player_3.equipo , player_3.etiqueta, player_3.angulo)
+    #circulo(fotograma, int(player_4.x), int(player_4.y) , player_4.equipo , player_4.etiqueta, player_4.angulo)
 
     cv.circle(fotograma, (int(pelota.x), int(pelota.y)), 10, (6,100,255), -1 )
 
     # Actualizar la posición de los jugadores
-    player_1.mover()
-    player_2.mover()
-    player_3.mover()
-    player_4.mover()
+    
+    #player_2.mover()
+    #player_3.mover()
+    #player_4.mover()
 
+    # Mover el jugador según las teclas presionadas
+    player_1.teclas()
+    player_1.mover()
+    player_1.desaceleracion()
+
+    pelota.desaceleracion()
     pelota.mover()
+
 
     # cambiar el sentido en caso de colisión con el borde del campo
     pelota.colision_borde()
 
     player_1.colision_borde()
-    player_2.colision_borde()
-    player_3.colision_borde()
-    player_4.colision_borde()
+    #player_2.colision_borde()
+    #player_3.colision_borde()
+    #player_4.colision_borde()
 
     # Cambiar dirección en caso de colisión con algún otro objeto 
     player_1.colision(pelota)
-    player_2.colision(pelota)
-    player_3.colision(pelota)
-    player_4.colision(pelota)
+    #player_2.colision(pelota)
+    #player_3.colision(pelota)
+    #player_4.colision(pelota)
 
 
     # Agregar el fotograma al video de salida
     video_salida.write(fotograma)
+    cv.imshow("video de futbolito", fotograma)
+    
+
 
 # Cerrar el video de salida
 video_salida.release()
@@ -155,16 +204,16 @@ video_salida.release()
 video = cv.VideoCapture("../videos/video_futbol.avi")
 
 # Reproducir el video fotograma por fotograma
-while True:
-    ret, fotograma = video.read()
-    if not ret:
-        break
+# while True:
+#     ret, fotograma = video.read()
+#     if not ret:
+#         break
 
-    cv.imshow("Video de fútbol", fotograma)
+#     cv.imshow("Video de fútbol", fotograma)
 
-    if cv.waitKey(25) & 0xFF == ord("q"):
-        break
+#     if cv.waitKey(25) & 0xFF == ord("q"):
+#         break
 
-# Liberar recursos y cerrar la ventana de visualización
+# # Liberar recursos y cerrar la ventana de visualización
 video.release()
 cv.destroyAllWindows()
