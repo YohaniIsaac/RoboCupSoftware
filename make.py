@@ -8,7 +8,7 @@ desaceleracion_roce = 0.05
 class Jugador:
     def __init__(self, x, y, equipo, etiqueta, angulo, dx, dy, theta, radio):
         """
-        __init__    Valores inciales para el objeto.
+        Valores inciales para la clase.
 
         Args:
         x           -- (int)    Posición en x del objeto.
@@ -60,7 +60,7 @@ class Jugador:
             elif pos_y > 0:
                 obj.dy = obj.dy * -1
 
-    def colision_borde(self):
+    def colision_borde(self, ancho, alto):
         """
         colision_borde  Cambia la dirección si el objeto 
                         choca con el borde del juego.
@@ -157,126 +157,123 @@ class Jugador:
                 # Actualizar la velocidad de la pelota según la dirección del golpe
                 obj.dx, obj.dy = [direccion[0] * 3, direccion[1] * 3]
             
+    def circulo(self, img):
+        """
+        circulo     Genera los circulos.
+                    Círculo negro rque representa el robot.
+                    Círculo de color que representa el equipo.
+                    2 círculos de color que son los indentificadores del jugador.
+                    Además simula el giro de los jugadores.
+
+        Args:
+        img     -- (matriz) Imagen sobre la cuál se dibujan los jugadores.
+        """
+        negro = (0,0,0)
+        pygame.draw.circle(img, negro, (self.x, self.y), 30)
+        M = cv.getRotationMatrix2D((self.x, self.y), self.angulo, 1)
+        tf1 = np.dot(M, np.array([[self.x], [self.y+15], [1]]))
+        tf2 = np.dot(M, np.array([[self.x+15], [self.y-10], [1]]))
+        tf3 = np.dot(M, np.array([[self.x-15], [self.y-10], [1]]))
+        pygame.draw.circle(img, self.equipo,  (int(tf1[0]), int(tf1[1])), 10)
+        pygame.draw.circle(img, self.etiqueta, (int(tf2[0]), int(tf2[1])), 10)
+        pygame.draw.circle(img, self.etiqueta, (int(tf3[0]), int(tf3[1])), 10)
+
+def main():
+    # Configuración del video
+    ancho = 1280
+    alto = 650
+    fps = 60
+    duracion = 10  # Duración en segundos
+
+    # Colores
+    rojo    = (0,0,255)
+    azul    = (255,0,0)
+    cian    = (0,255,255)
+    magenta = (255,0,255)
+    blanco = (255,255,255)
+    cesped = (40, 128, 40)
+    naranjo = (244,98,0)
+
+    # Crear la ventana de pygame
+    pygame.init()
+    ventana = pygame.display.set_mode((ancho, alto))
+    pygame.display.set_caption("Video de fútbol")
+    reloj = pygame.time.Clock()
+
+    # Fondo incial
+    fondo_inicial = pygame.Surface(ventana.get_size())
+    fondo_inicial.fill(cesped)
+
+    # Dibujar las líneas de la cancha
+    pygame.draw.rect(fondo_inicial, blanco, (20, 20, ancho-40, alto-40), 2)
+    pygame.draw.circle(fondo_inicial, blanco, (int(ancho/2), int(alto/2)), int(146), 2)
+    pygame.draw.line(fondo_inicial, blanco, (ancho/2, 20), (ancho/2, alto-21), 2)
+    pygame.draw.rect(fondo_inicial, blanco, (0, (alto/2)-100, 22,200), 2)
+    pygame.draw.rect(fondo_inicial, blanco, (ancho-22, (alto/2)-100, 22,200), 2)
+
+    # Crear instancias de la clase Jugador y pelota
+    player_1 = Jugador(200,             int(alto/2),    rojo, cian,     0,      0,  0,  0, 30)
+    player_2 = Jugador(int(ancho-200),  int(alto/2),    rojo, magenta,  45,     -1,  -1,  -1.1, 30)
+    player_3 = Jugador(int(ancho/2),    250,            azul, cian,     180,    -1,  1,  1.26, 30)
+    player_4 = Jugador(int(ancho/2),    int(alto-250),  azul, magenta,  270,    1,  -1,  -1.29, 30)
+
+    pelota = Jugador(int(ancho/2), int(alto/2), (0, 0, 255), None, 270, -2, -2, -1.29, 10)
+
+    # Bucle principal para generar el video
+    while True:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                quit()
+        fondo = fondo_inicial.copy()
 
 
 
-def circulo(img, x, y, equipo, tag, angle):
-    """
-    circulo     Genera los circulos.
-                Círculo negro rque representa el robot.
-                Círculo de color que representa el equipo.
-                2 círculos de color que son los indentificadores del jugador.
-                Además simula el giro de los jugadores.
+        # Dibujar los jugadores en la ventana
+        player_1.circulo(fondo)
+        # player_2.circulo(fondo)
+        # player_3.circulo(fondo)
+        # player_4.circulo(fondo)
+     
+        pygame.draw.circle(fondo, naranjo, (int(pelota.x), int(pelota.y)), pelota.radio)
 
-    Args:
-    img     -- (matriz) Imagen sobre la cuál se dibujan los jugadores.
-    x       -- (int) Valor en x para cada jugador.
-    y       -- (int) Valor en y para cada jugador.
-    equipo  -- (array) Vector con los valores del color del equipo correspondiente.
-    tag     -- (array) Vector con los valores del color de identificación del jugador.
-    angle   -- (int) Valor de ángulo para modificar la dirección del jugador.
-    """
-    pygame.draw.circle(img, negro, (x,y), 30)
-    M = cv.getRotationMatrix2D((x, y), angle, 1)
-    tf1 = np.dot(M, np.array([[x], [y+15], [1]]))
-    tf2 = np.dot(M, np.array([[x+15], [y-10], [1]]))
-    tf3 = np.dot(M, np.array([[x-15], [y-10], [1]]))
-    pygame.draw.circle(img,equipo,  (int(tf1[0]), int(tf1[1])), 10)
-    pygame.draw.circle(img, tag, (int(tf2[0]), int(tf2[1])), 10)
-    pygame.draw.circle(img, tag, (int(tf3[0]), int(tf3[1])), 10)
+        # Actualizar la posición de los jugadores
+        player_1.teclas()
+        player_1.mover()
+        player_1.desaceleracion()
+        player_1.choque(pelota)
 
-# Configuración del video
-ancho = 1280
-alto = 650
-fps = 60
-duracion = 10  # Duración en segundos
+        pelota.mover()
+        pelota.desaceleracion()
 
-# Colores
-rojo    = (0,0,255)
-azul    = (255,0,0)
-cian    = (0,255,255)
-magenta = (255,0,255)
-blanco = (255,255,255)
-cesped = (40, 128, 40)
-negro = (0,0,0)
-naranjo = (244,98,0)
+        # player_2.mover()
+        # player_3.mover()
+        # player_4.mover()
 
-# Crear la ventana de pygame
-pygame.init()
-ventana = pygame.display.set_mode((ancho, alto))
-pygame.display.set_caption("Video de fútbol")
-reloj = pygame.time.Clock()
+        # Cambiar el sentido en caso de colisión con el borde del campo
+        pelota.colision_borde(ancho, alto)
+        player_1.colision_borde(ancho, alto)
+        player_2.colision_borde(ancho, alto)
+        player_3.colision_borde(ancho, alto)
+        player_4.colision_borde(ancho, alto)
 
-# Fondo incial
-fondo_inicial = pygame.Surface(ventana.get_size())
-fondo_inicial.fill(cesped)
+        # Cambiar dirección en caso de colisión con algún otro objeto
+        player_1.colision(pelota)
+        player_2.colision(pelota)
+        player_3.colision(pelota)
+        player_4.colision(pelota)
 
-# Dibujar las líneas de la cancha
-pygame.draw.rect(fondo_inicial, blanco, (20, 20, ancho-40, alto-40), 2)
-pygame.draw.circle(fondo_inicial, blanco, (int(ancho/2), int(alto/2)), int(146), 2)
-pygame.draw.line(fondo_inicial, blanco, (ancho/2, 20), (ancho/2, alto-21), 2)
-pygame.draw.rect(fondo_inicial, blanco, (0, (alto/2)-100, 22,200), 2)
-pygame.draw.rect(fondo_inicial, blanco, (ancho-22, (alto/2)-100, 22,200), 2)
+        # Actualizar la pantalla con la copia del fondo y los elementos dibujados
+        ventana.blit(fondo, (0, 0))
+        pygame.display.update()
+        reloj.tick(fps)
 
-# Crear instancias de la clase Jugador y pelota
-player_1 = Jugador(200,             int(alto/2),    rojo, cian,     0,      0,  0,  0, 30)
-player_2 = Jugador(int(ancho-200),  int(alto/2),    rojo, magenta,  45,     -1,  -1,  -1.1, 30)
-player_3 = Jugador(int(ancho/2),    250,            azul, cian,     180,    -1,  1,  1.26, 30)
-player_4 = Jugador(int(ancho/2),    int(alto-250),  azul, magenta,  270,    1,  -1,  -1.29, 30)
-
-pelota = Jugador(int(ancho/2), int(alto/2), (0, 0, 255), None, 270, -2, -2, -1.29, 10)
-
-# Bucle principal para generar el video
-while True:
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT:
-            pygame.quit()
-            quit()
-    fondo = fondo_inicial.copy()
+        # Obtener el frame actual de la ventana de Pygame
+        # frame = pygame.surfarray.array3d(ventana)
+        # frame = cv.transpose(frame)
+        # frame = cv.cvtColor(frame, cv.COLOR_RGB2BGR)
+        # cv.imshow("asd", frame)
 
 
-
-    # Dibujar los jugadores en la ventana
-    circulo(fondo, int(player_1.x), int(player_1.y) , player_1.equipo , player_1.etiqueta, player_1.angulo)
-    # circulo(ventana, int(player_2.x), int(player_2.y) , player_2.equipo , player_2.etiqueta, player_2.angulo)
-    # circulo(ventana, int(player_3.x), int(player_3.y) , player_3.equipo , player_3.etiqueta, player_3.angulo)
-    # circulo(ventana, int(player_4.x), int(player_4.y) , player_4.equipo , player_4.etiqueta, player_4.angulo)
- 
-    pygame.draw.circle(fondo, naranjo, (int(pelota.x), int(pelota.y)), pelota.radio)
-
-    # Actualizar la posición de los jugadores
-    player_1.teclas()
-    player_1.mover()
-    player_1.desaceleracion()
-    player_1.choque(pelota)
-
-    pelota.mover()
-    pelota.desaceleracion()
-
-    # player_2.mover()
-    # player_3.mover()
-    # player_4.mover()
-
-    # Cambiar el sentido en caso de colisión con el borde del campo
-    pelota.colision_borde()
-    player_1.colision_borde()
-    player_2.colision_borde()
-    player_3.colision_borde()
-    player_4.colision_borde()
-
-    # Cambiar dirección en caso de colisión con algún otro objeto
-    player_1.colision(pelota)
-    player_2.colision(pelota)
-    player_3.colision(pelota)
-    player_4.colision(pelota)
-
-    # Actualizar la pantalla con la copia del fondo y los elementos dibujados
-    ventana.blit(fondo, (0, 0))
-    pygame.display.update()
-    reloj.tick(fps)
-
-    # Obtener el frame actual de la ventana de Pygame
-    frame = pygame.surfarray.array3d(ventana)
-    frame = cv.transpose(frame)
-    frame = cv.cvtColor(frame, cv.COLOR_RGB2BGR)
-    cv.imshow("asd", frame)
+if __name__ == "__main__":
+    main()
