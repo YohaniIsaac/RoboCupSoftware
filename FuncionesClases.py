@@ -36,7 +36,73 @@ class Objeto:
         self.masa = masa
         self.tomar_pelota = False
         self.ball_sujetada = 0
-        self.velocidad = 2
+        self.max_vel = 4
+        self.f_aceleracion = 0.3
+
+    def intrucciones(self, lista):
+        print("dentro de la funcion")
+        # Obtiene y elimina la primera intruccion de la lista
+        instruccion_actual = lista
+        print(instruccion_actual)
+        x_destino , y_destino = instruccion_actual
+        print("destino", x_destino , y_destino)
+        print("aqui estoy", self.x , self.y)
+
+        # Evita movimientos cuando el punto se encuentra muy cercano al actual
+        if abs(x_destino - self.x) <= 2:
+            self.x = x_destino
+            self.dx = 0
+
+        elif x_destino > self.x:
+            # Movimiento rápido si esta lejos el punto
+            if abs(x_destino - self.x) > 10:
+                self.dx += 0.1
+                self.dx = min(self.dx, self.max_vel)
+
+            # movmiento lento si esta cerca el punto
+            else: 
+                self.dx += 0.1
+                self.dx = min(self.dx, 0.5)
+
+        elif x_destino < self.x: 
+            # Movimiento rápido si esta lejso el punto
+            if abs(x_destino - self.x) > 10:
+                self.dx -= 0.1
+                self.dx = max(self.dx, -self.max_vel)
+
+            # Moivimiento mas lento si esta cerca el punto
+            else:
+                self.dx -= 0.1
+                self.dx = max(self.dx, -0.5)
+
+        else:
+            self.dx = 0
+
+        # Igual a lo anterior, pero ahora para el eje y
+        if abs(y_destino - self.y) <= 2:
+            self.y = y_destino
+            self.dy = 0
+
+        elif y_destino > self.y: 
+            if abs(y_destino - self.y) > 10:
+                self.dy += 0.1
+                self.dy = min(self.dy, self.max_vel) 
+            else:
+                self.dy += 0.1
+                self.dy = min(self.dy, 0.5) 
+        elif y_destino < self.y: 
+            if abs(y_destino - self.y) > 10:
+                self.dy -= 0.1
+                self.dy = max(self.dy, -self.max_vel)
+            else:
+                self.dy -= 0.1
+                self.dy = max(self.dy, -0.5)
+
+        else:
+            self.dy = 0
+
+        # if x_destino == self.x and y_destino == self.y: 
+ 
 
     def mover(self):
         """
@@ -126,11 +192,11 @@ class Objeto:
 
         # Movimiento vertical
         if keys[pygame.K_w]:
-            self.dy -= 0.1
-            self.dy = min(self.dy, -self.velocidad)
+            self.dy -= self.f_aceleracion
+            self.dy = max(self.dy, -self.max_vel)
         elif keys[pygame.K_s]:
-            self.dy += 0.1
-            self.dy = max(self.dy, self.velocidad)
+            self.dy += self.f_aceleracion
+            self.dy = min(self.dy, self.max_vel)
         else:
             self.dy = 0
         if keys[pygame.K_s] and keys[pygame.K_w]:
@@ -138,11 +204,11 @@ class Objeto:
 
         # Movimiento horizontal
         if keys[pygame.K_a]:
-            self.dx -= 0.1
-            self.dx = min(self.dx, -self.velocidad)
+            self.dx -= self.f_aceleracion
+            self.dx = max(self.dx, -self.max_vel)
         elif keys[pygame.K_d]:
-            self.dx += 0.1
-            self.dx = max(self.dx, self.velocidad)
+            self.dx += self.f_aceleracion
+            self.dx = min(self.dx, self.max_vel)
         else:
             self.dx = 0
         if keys[pygame.K_a] and keys[pygame.K_d]:
@@ -169,7 +235,7 @@ class Objeto:
 
                 self.tomando_pelota = True # para el disparo
                 self.ball_sujetada = 1
-                print("si") 
+
 
         if not keys[pygame.K_k]:
             self.tomando_pelota = False
@@ -412,7 +478,7 @@ class Jugador:
 
                 # Dibuja un circulo en el centro del jugador
                 cv.circle(frame, (self.x, self.y), 4, (255, 0, 255), -1)
-        return
+        return self.x, self.y
 
     @classmethod
     def detectar_circulos_color(cls, imagen_hsv, colores, imagen_original):
