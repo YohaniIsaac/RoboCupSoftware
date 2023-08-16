@@ -4,6 +4,7 @@ import pygame
 import numpy as np
 import cv2 as cv
 import math 
+import keyboard
 # import logging
 
 import FuncionesClases as FyC
@@ -50,7 +51,8 @@ def make(conn1, conn3, lista):
     player_4 = FyC.Objeto(1,int(ancho/2),    int(alto-250),  azul, magenta,  270,    1,  -1,  -1.29, 30)
 
     pelota = FyC.Objeto(0.9,int(ancho/2), int(alto/2), (0, 0, 255), None, 270, -2, -2, -1.29, 10)
-    hecho = True
+    inicio = 0 
+    en_curso = False
     # Bucle principal para generar el video
     try:
         while True:
@@ -73,22 +75,17 @@ def make(conn1, conn3, lista):
          
             #pygame.draw.circle(fondo, naranjo, (int(pelota.x), int(pelota.y)), pelota.radio)
 
+                        # Enviar instrucciones
+
+            # Para que no comience antes de un frame especifico
+
+
             # Actualizar la posición de los jugadores
-            # player_1.teclas()
+            # player_1.teclaps()
             player_1.mover()
 
 
-            
-            if len(lista) > 0:
-                print("en make", lista)
-                hecho = False
-                lista2 = lista.pop(0)
-            #     print("hay algo en lista")
-            if not hecho:
-                print("viene la funcion")
-                player_1.intrucciones(lista2)
 
-            
 
             pelota.mover()
             pelota.desaceleracion()
@@ -113,6 +110,21 @@ def make(conn1, conn3, lista):
             # player_3.colision(pelota)
             # player_4.colision(pelota)
 
+
+            if inicio > 5:            
+                # # si hay alguna instruccion y no se encuentra ninguna en curso
+                if len(lista) > 0 and not en_curso:
+                    print("leyendo una intruccion")
+                    una_inst = lista.pop(0)
+                    en_curso = True
+                if en_curso:
+                    print("ejecutando instruccion.....")
+                    en_curso = player_1.intrucciones(una_inst)  
+
+
+
+
+
             # Actualizar la pantalla con la copia del fondo y los elementos dibujados
             ventana.blit(fondo, (0, 0))
             pygame.display.update()
@@ -124,6 +136,7 @@ def make(conn1, conn3, lista):
             frame = cv.cvtColor(frame, cv.COLOR_RGB2BGR)
             conn1.send(frame)
             conn3.send(frame)
+            inicio += 1 
     except:
         print("error en make")
 
@@ -148,6 +161,7 @@ def busqueda_ball(conn2):
             else:
                 pelota.seguimiento(hsv, img, frame)
                 cv.imshow("jugador 1", pelota.roi_img)
+            cv.imshow("frame pelota", frame)
             k = cv.waitKey(5) & 0xFF
             if k == 27:
                 break
@@ -209,7 +223,7 @@ def busqueda_player(conn4, queue):
                     cv.imshow("jugador 1", player.roi_img)
                     enviar = (x,y)
                 queue.put(enviar)
-            cv.imshow("frame", frame)
+            cv.imshow("frame jugador ", frame)
             k = cv.waitKey(5) & 0xFF
             if k == 27:
                 break
@@ -223,16 +237,29 @@ def comandos(queue, lista):
 
 
     try:
-        recibido = queue.get()
-        x , y = recibido
-        print("en comandos", x, y)
-        lista.append((x+300,y))
-
+        empuje = [(580, 282), (600, 282), (750, 285), (800, 290), (800, 321), (900, 321), (1050, 330), (1100, 325),
+        (1200, 315), (1200, 290), (1220,285)] 
+        tecla_press = False
+        a = 0
+        while True:
+            recibido = queue.get()
+            x , y = recibido
+            if keyboard.is_pressed('space'):
+                if not tecla_press:
+                    a +=1
+                    tecla_press = True
+                    for i in empuje:
+                            lista.append(i)
+                        # empuje.append(recibido)p 
+                else:
+                    print(a)
+                    tecla_press = False
+            if keyboard.is_pressed('enter'):
+                print("es :", empuje)
 
 
     except:
         print("error en comandos")
-        print("error")
 
 
 

@@ -40,14 +40,10 @@ class Objeto:
         self.f_aceleracion = 0.3
 
     def intrucciones(self, lista):
-        print("dentro de la funcion")
-        # Obtiene y elimina la primera intruccion de la lista
-        instruccion_actual = lista
-        print(instruccion_actual)
-        x_destino , y_destino = instruccion_actual
-        print("destino", x_destino , y_destino)
-        print("aqui estoy", self.x , self.y)
+        # Obtención de los parámetros de la instruccion
+        x_destino , y_destino = lista
 
+        en_curso = True
         # Evita movimientos cuando el punto se encuentra muy cercano al actual
         if abs(x_destino - self.x) <= 2:
             self.x = x_destino
@@ -56,23 +52,23 @@ class Objeto:
         elif x_destino > self.x:
             # Movimiento rápido si esta lejos el punto
             if abs(x_destino - self.x) > 10:
-                self.dx += 0.1
+                self.dx += self.f_aceleracion
                 self.dx = min(self.dx, self.max_vel)
 
             # movmiento lento si esta cerca el punto
             else: 
-                self.dx += 0.1
+                self.dx += self.f_aceleracion
                 self.dx = min(self.dx, 0.5)
 
         elif x_destino < self.x: 
             # Movimiento rápido si esta lejso el punto
             if abs(x_destino - self.x) > 10:
-                self.dx -= 0.1
+                self.dx -= self.f_aceleracion
                 self.dx = max(self.dx, -self.max_vel)
 
             # Moivimiento mas lento si esta cerca el punto
             else:
-                self.dx -= 0.1
+                self.dx -= self.f_aceleracion
                 self.dx = max(self.dx, -0.5)
 
         else:
@@ -85,23 +81,28 @@ class Objeto:
 
         elif y_destino > self.y: 
             if abs(y_destino - self.y) > 10:
-                self.dy += 0.1
+                self.dy += self.f_aceleracion
                 self.dy = min(self.dy, self.max_vel) 
             else:
-                self.dy += 0.1
+                self.dy += self.f_aceleracion
                 self.dy = min(self.dy, 0.5) 
         elif y_destino < self.y: 
             if abs(y_destino - self.y) > 10:
-                self.dy -= 0.1
+                self.dy -= self.f_aceleracion
                 self.dy = max(self.dy, -self.max_vel)
             else:
-                self.dy -= 0.1
+                self.dy -= self.f_aceleracion
                 self.dy = max(self.dy, -0.5)
 
         else:
             self.dy = 0
 
-        # if x_destino == self.x and y_destino == self.y: 
+        # Para poder pasar a la siguiente instruccion
+        if x_destino == self.x and y_destino == self.y:
+            en_curso = False
+
+
+        return en_curso 
  
 
     def mover(self):
@@ -358,6 +359,10 @@ class Ball:
         self.x, self.y = centro
         self.vecindad = 20
 
+        self.goles_rojo = 0
+        self.goles_azul = 0
+        self.pelota_fuera = True
+
     def seguimiento(self, hsv, img, frame):
         """
         Recorta la imagen original y hsv, para poder tener sólo la vecindad
@@ -377,7 +382,34 @@ class Ball:
             self.x, self.y = self.x + self.x_nuevo - self.vecindad , self.y + self.y_nuevo - self.vecindad
             # Dibuja un circulo en el centro de la pelota
             cv.circle(frame, (self.x, self.y), 1, (255, 255, 255), -1)
-        return
+            self.goles(frame)
+
+
+    def goles(self, frame):
+        r = 10
+        # distancia_derecha = ((self.x - x__der_arco)**2 + (self.y - y_der_arco)**2)**0.5
+        # Contador de goles para el equipo azul
+        if self.x + 5 >= 1260 and self.y > 225 and self.y < 325 and self.pelota_fuera:
+            self.goles_azul += 1
+            self.pelota_fuera = False
+        
+        # Contador de goles para el equipo rojo
+        elif self.x - 5 <= 22  and self.y > 225 and self.y < 325 and self.pelota_fuera:
+            self.goles_rojo += 1
+            self.pelota_fuera = False
+
+
+        font = cv.FONT_HERSHEY_SIMPLEX
+        posicion_texto_rojo = (50, 50)
+        posicion_texto_azul = (frame.shape[1] - 200, 50)
+        color_rojo = (0, 0, 255)  # Rojo en formato BGR
+        color_azul = (255, 0, 0)  # Azul en formato BGR
+        goles_texto_rojo = f"Goles Rojos: {self.goles_rojo}"
+        goles_texto_azul = f"Goles Azules: {self.goles_azul}"
+
+        cv.putText(frame, goles_texto_rojo, posicion_texto_rojo, font, 0.7, color_rojo, 2, cv.LINE_AA)
+        cv.putText(frame, goles_texto_azul, posicion_texto_azul, font, 0.7, color_azul, 2, cv.LINE_AA)
+
 
 
     @classmethod 
