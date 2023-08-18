@@ -383,6 +383,8 @@ class Ball:
             # Dibuja un circulo en el centro de la pelota
             cv.circle(frame, (self.x, self.y), 1, (255, 255, 255), -1)
             self.goles(frame)
+            
+        return self.x, self.y
 
 
     def goles(self, frame):

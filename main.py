@@ -140,7 +140,7 @@ def make(conn1, conn3, lista):
     except:
         print("error en make")
 
-def busqueda_ball(conn2):
+def busqueda_ball(conn2, queue):
     # Color          
     naranjo= ((10, 100, 20), (30, 255, 255))  # Rango de color para el naranjo
 
@@ -159,8 +159,11 @@ def busqueda_ball(conn2):
                 first_frame = False
                 
             else:
-                pelota.seguimiento(hsv, img, frame)
+                x_pelota , y_pelota = pelota.seguimiento(hsv, img, frame)
                 cv.imshow("jugador 1", pelota.roi_img)
+
+                enviar = x_pelota, y_pelota
+                queue.put(("pelota", enviar))
             cv.imshow("frame pelota", frame)
             k = cv.waitKey(5) & 0xFF
             if k == 27:
@@ -222,7 +225,7 @@ def busqueda_player(conn4, queue):
 
                     cv.imshow("jugador 1", player.roi_img)
                     enviar = (x,y)
-                queue.put(enviar)
+                queue.put(("juagador", enviar))
             cv.imshow("frame jugador ", frame)
             k = cv.waitKey(5) & 0xFF
             if k == 27:
@@ -237,25 +240,36 @@ def comandos(queue, lista):
 
 
     try:
-        empuje = [(580, 282), (600, 282), (750, 285), (800, 290), (800, 321), (900, 321), (1050, 330), (1100, 325),
-        (1200, 315), (1200, 290), (1220,285)] 
-        tecla_press = False
-        a = 0
+        # empuje =    [(580, 282), (600, 282), (750, 285), (800, 290), (800, 321), (900, 321), 
+                    # (1050, 330), (1100, 325), (1200, 315), (1200, 290), (1220,285)] 
         while True:
-            recibido = queue.get()
-            x , y = recibido
-            if keyboard.is_pressed('space'):
-                if not tecla_press:
-                    a +=1
-                    tecla_press = True
-                    for i in empuje:
-                            lista.append(i)
-                        # empuje.append(recibido)p 
-                else:
-                    print(a)
-                    tecla_press = False
-            if keyboard.is_pressed('enter'):
-                print("es :", empuje)
+
+            tecla_press = False
+
+            while True:
+                recibido = queue.get()
+                etiqueta, dato = recibido
+
+                if etiqueta == "pelota":
+                    x_pelota, y_pelota = dato
+
+
+                elif etiqueta == "juagador":
+                    x_jugador, y_jugador = dato
+
+                if keyboard.is_pressed('space'):
+                
+                    if not tecla_press:
+                        a +=1
+                        tecla_press = True
+                        for i in empuje:
+                                lista.append(i)
+                            # empuje.append(recibido)p 
+                    else:
+                        print(a)
+                        tecla_press = False
+                if keyboard.is_pressed('enter'):
+                    print("es :", empuje)
 
 
     except:
@@ -284,7 +298,7 @@ if __name__ == '__main__':
 
     # Crear los procesos
     p1 = multiprocessing.Process(target=make,           args=(conn1, conn3, instrucciones))
-    p2 = multiprocessing.Process(target=busqueda_ball,  args=(conn2,))
+    p2 = multiprocessing.Process(target=busqueda_ball,  args=(conn2, queue))
     p3 = multiprocessing.Process(target=busqueda_player,args=(conn4, queue))
     p4 = multiprocessing.Process(target=comandos,       args=(queue, instrucciones))
 
