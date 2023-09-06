@@ -100,7 +100,7 @@ class Objeto:
         # Para poder pasar a la siguiente instruccion
         if x_destino == self.x and y_destino == self.y:
             en_curso = False
-
+            print(self.x, self.y)
 
         return en_curso 
  
@@ -606,3 +606,209 @@ class Jugador:
 
         return Jugadores
 
+
+######################
+#  CONTROLADORES PI  #
+######################
+class Control:
+    def __init__(self, kp, ki):
+        self.kp = kp
+        self.ki = ki
+        self.error_sum = [0, 0]
+        self.cerca_ball = False
+        self.radio_pelota = 20
+        self.radio_jugador = 40
+
+
+    def control_jugador_pelota(self, posicion_jugador, posicion_pelota):
+
+        # Calcula el error en las coordenadas x e y
+        error = [posicion_pelota[0] - posicion_jugador[0], posicion_pelota[1] - posicion_jugador[1]]
+        print("error", error)
+
+        # Actualiza la acumulación de errores para la componente integral
+        self.error_sum[0] += error[0]
+        self.error_sum[1] += error[1]
+        
+        # Calcula la acción de control proporcional e integral
+        control = [
+            self.kp * error[0] + self.ki * self.error_sum[0],
+            self.kp * error[1] + self.ki * self.error_sum[1]
+        ]
+        
+        # Calcula la siguiente posición del jugador teniendo en cuenta el control
+        siguiente_posicion_jugador = [
+            posicion_jugador[0] + control[0],
+            posicion_jugador[1] + control[1]
+        ]
+
+        if -50 < error[0] and error[0] < 50 and -18 < error[1] and error[1] < 18:
+            self.cerca_ball = True
+        else:
+            self.cerca_ball = False
+        
+        return siguiente_posicion_jugador
+
+    def control_pelota(self, posicion_jugador, posicion_pelota, punto_objetivo):
+
+        # Calcula el error en las coordenadas x e y
+        error = [punto_objetivo[0] - posicion_pelota[0], punto_objetivo[1] - posicion_pelota[1]]
+        print("error", error)
+
+        # Actualiza la acumulación de errores para la componente integral
+        self.error_sum[0] += error[0]
+        self.error_sum[1] += error[1]
+        
+        # Calcula la acción de control proporcional e integral
+        control = [
+            self.kp * error[0] + self.ki * self.error_sum[0],
+            self.kp * error[1] + self.ki * self.error_sum[1]
+        ]
+        
+        # Calcula la siguiente posición del jugador teniendo en cuenta el control
+        siguiente_posicion_jugador = [
+            posicion_jugador[0] + control[0],
+            posicion_jugador[1] + control[1]
+        ]
+
+        if error == 0:
+            print("pelota en punto objetivo")
+
+        
+        return siguiente_posicion_jugador
+
+
+    def calculate_next_player_position(self, current_player_pos, current_ball_pos, target_pos):
+        # Calcula el error en las coordenadas x e y
+        error = [target_pos[0] - current_ball_pos[0], target_pos[1] - current_ball_pos[1]]
+
+        # Calcula la distancia entre el jugador y la pelota
+        distance_to_ball = ((current_player_pos[0] - current_ball_pos[0])**2 + (current_player_pos[1] - current_ball_pos[1])**2)**0.5
+
+        # Calcula la acción de control proporcional
+        control_action = [
+            self.kp * error[0],
+            self.kp * error[1]
+        ]
+
+        # Si el jugador está lo suficientemente cerca de la pelota, retroalimenta con el error de la pelota
+        if distance_to_ball < 40:  # Umbral de proximidad
+            control_action[0] += current_ball_pos[0] - current_player_pos[0]
+            control_action[1] += current_ball_pos[1] - current_player_pos[1]
+
+        # Calcula la siguiente posición del jugador teniendo en cuenta el control_action
+        next_player_pos = [
+            current_player_pos[0] + control_action[0],
+            current_player_pos[1] + control_action[1]
+        ]
+
+        return next_player_pos
+
+    def calculo_puntos(ball_pos, num_points, radius, clockwise=True):
+        neighboring_points = []
+        angle_increment = 2 * math.pi / num_points
+        
+        if not clockwise:
+            angle_increment *= -1
+
+        for i in range(num_points):
+            angle = i * angle_increment
+            x = ball_pos[0] + radius * math.cos(angle)
+            y = ball_pos[1] + radius * math.sin(angle)
+            neighboring_points.append((x, y))
+
+        return neighboring_points
+
+    def arco(self, ball_pos, start_point, end_point, num_points, clockwise=True):
+        neighboring_points = []
+        
+        # Calcula el radio desde la pelota a los puntos inicial y final
+        start_radius = math.sqrt((start_point[0] - ball_pos[0])**2 + (start_point[1] - ball_pos[1])**2)
+        end_radius = math.sqrt((end_point[0] - ball_pos[0])**2 + (end_point[1] - ball_pos[1])**2)
+        
+        # Calcula el ángulo inicial y final
+        start_angle = math.atan2(start_point[1] - ball_pos[1], start_point[0] - ball_pos[0])
+        end_angle = math.atan2(end_point[1] - ball_pos[1], end_point[0] - ball_pos[0])
+
+        angle_increment = (end_angle - start_angle) / (num_points - 1)
+        
+        if not clockwise:
+            angle_increment *= -1
+
+        for i in range(num_points):
+            angle = start_angle + i * angle_increment
+            x = ball_pos[0] + start_radius * math.cos(angle)
+            y = ball_pos[1] + start_radius * math.sin(angle)
+            neighboring_points.append((int(x), int(y)))
+
+        return neighboring_points
+
+    def normalizar(self, vector):
+        longitud = math.sqrt(vector[0] ** 2 + vector[1] ** 2)
+        if longitud != 0:
+            vector_normalizado = [vector[0] / longitud, vector[1] / longitud]
+            return vector_normalizado
+        else:
+            return [0, 0]
+
+    def controlcito(self, posicion_jugador, posicion_pelota, posicion_objetivo):
+
+        velocidad_jugador = 10
+
+        # Calcula la dirección desde la pelota hacia la posición objetivo
+        direccion_pelota_a_objetivo = self.normalizar([posicion_objetivo[0] - posicion_pelota[0], posicion_objetivo[1] - posicion_pelota[1]])
+        print("direccion_pelota_a_objetivo",direccion_pelota_a_objetivo)
+
+        # Calcula la dirección en la que el jugador debe moverse para chocar con la pelota
+        direccion_jugador_a_pelota = self.normalizar([posicion_pelota[0] - posicion_jugador[0], posicion_pelota[1] - posicion_jugador[1]])
+        print("direccion_jugador a pelotaaaa", direccion_jugador_a_pelota)
+
+        # Calcula la direccion en la que el jugador debe moverse hacia la posicion objetivo
+        direccion_jugador_a_objetivo = self.normalizar([posicion_jugador[0] - posicion_pelota[0], posicion_jugador[1] - posicion_pelota[1]])
+        print("direccion jugador a objetivo", direccion_jugador_a_objetivo)
+
+        direccion_pelota_a_objetivo
+        direccion_jugador_a_objetivo
+        if direccion_pelota_a_objetivo != direccion_jugador_a_objetivo:
+
+            error_direcciones = [direccion_pelota_a_objetivo[0] - direccion_jugador_a_objetivo[0], direccion_pelota_a_objetivo[1] - direccion_jugador_a_objetivo[1]]
+            control_action = [self.kp * error_direcciones[0], self.kp * error_direcciones[1]]
+            nueva_direccion_jugador = [direccion_jugador_a_pelota[0] + control_action[0], direccion_jugador_a_pelota[1] + control_action[1]]
+            nueva_posicion_jugador = [posicion_jugador[0] + velocidad_jugador * nueva_direccion_jugador[0], posicion_jugador[1] + velocidad_jugador * nueva_direccion_jugador[1]]
+
+            # direccion_deseada = direccion_pelota_a_objetivo
+            # # Rodear la pelota en sentido horario o antihorario
+            # direccion_rotacion = [direccion_deseada[0], direccion_deseada[1]]
+
+            # nueva_posicion_jugador = [
+            #     posicion_pelota[0] + (self.radio_pelota + self.radio_jugador) * direccion_rotacion[0],
+            #     posicion_pelota[1] + (self.radio_pelota + self.radio_jugador) * direccion_rotacion[1]
+            # ]
+            return nueva_posicion_jugador
+
+        # # Calcula el error entre las direcciones de pelota y jugador
+        # error_direcciones = [direccion_pelota_a_objetivo[0] - direccion_jugador_a_pelota[0], direccion_pelota_a_objetivo[1] - direccion_jugador_a_pelota[1]]
+        # print("error obtenido de las direcciones", error_direcciones)
+        # # Calcula la acción de control proporcional
+        # control_action = [self.kp * error_direcciones[0], self.kp * error_direcciones[1]]
+        # print("control action", control_action)
+        # # Calcula la nueva dirección del jugador
+        # nueva_direccion_jugador = [direccion_jugador_a_pelota[0] + control_action[0], direccion_jugador_a_pelota[1] + control_action[1]]
+
+        # nueva_posicion_jugador = [posicion_jugador[0] + velocidad_jugador * nueva_direccion_jugador[0], posicion_jugador[1] + velocidad_jugador * nueva_direccion_jugador[1]]
+
+        return nueva_posicion_jugador
+
+
+############################
+#  ALGORITMO DE 90 GRADOS  #
+############################
+class RutaGrados:
+    def __init__(self, inicio, final, ob1, ob2, ob3, ball):
+        (x,y) = inicio
+        self.x , self.y = incio
+        self.x_final, self.y_final = final
+        self.completado = False
+
+    def 
+        
