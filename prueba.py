@@ -21,7 +21,6 @@ def campo_atraccion(inicio, meta, scale=1.0):
 def campo_repulsion(inicio, obstaculos, radio_repulsion, scale=1.0):
     distancia = np.linalg.norm(inicio - obstaculos)
     if distancia < radio_repulsion:
-        print("si")
         return scale * (inicio - obstaculos) / distancia
 
     else:
