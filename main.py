@@ -6,11 +6,10 @@ import numpy as np
 import cv2 as cv
 import math 
 import keyboard
+
 # import logging
 
 import FuncionesClases as FyC
-ancho = 1280
-alto = 650
 
 def make(conn1, conn3, lista, evento, evento2):
     # Configuración del video
@@ -359,16 +358,16 @@ if __name__ == '__main__':
     p1 = multiprocessing.Process(target=make,           args=(conn1, conn3, instrucciones, evento, evento2))
     p2 = multiprocessing.Process(target=busqueda_ball,  args=(conn2, queue))
     p3 = multiprocessing.Process(target=busqueda_player,args=(conn4, queue))
-    p4 = multiprocessing.Process(target=comandos,       args=(queue, instrucciones, evento, evento2))
+    # p4 = multiprocessing.Process(target=comandos,       args=(queue, instrucciones, evento, evento2))
 
     # Iniciar los procesos
     p1.start()
     p2.start()
     p3.start()
-    p4.start()
+    # p4.start()
 
     # Esperar a que los procesos terminen
     p1.join()
     p2.join()
     p3.join()
-    p4.join()
+    # p4.join()

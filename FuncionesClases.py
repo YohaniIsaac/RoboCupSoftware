@@ -479,6 +479,7 @@ class Jugador:
         Dibuja una línea entre los tag del jugador, con variables
         dentro de la misma clase.
         """
+
         # Reajusta los centros de los para poder dibujarlos en el 
         # frame principal
         self.x_tag1, self.y_tag1 = self.tags[0][1]
@@ -492,17 +493,21 @@ class Jugador:
         Recorta la imagen original y hsv, para poder tener sólo la self.vecindad
         donde es posible que se mueva el jugador
         """
-        # Recorta la imagen HSV y RGB
+
+        # Recorta la imagen HSV y RGB segun la vecindad donde e sposible que se mueva el jugador
         self.roi_hsv = hsv[ self.y - self.vecindad : self.y + self.vecindad,
                             self.x - self.vecindad : self.x + self.vecindad]
 
         self.roi_img = img[ self.y - self.vecindad : self.y + self.vecindad,
                             self.x - self.vecindad : self.x + self.vecindad]
+
         if len(self.roi_img) > 0:
+
             # Detecta los circulos dentro del recorte y su centro 
             self.team = self.detectar_circulos_color(self.roi_hsv, self.equipo, self.roi_img)
             self.tags = self.detectar_circulos_color(self.roi_hsv, self.colorID, self.roi_img)
             self.centros = self.detectar_centro(self.team, self.tags)
+
             if len(self.centros) > 0:
                 self.dibujar(frame)
                 # Reescribe el centro y actualiza este en el objeto
@@ -569,7 +574,7 @@ class Jugador:
         jugador encontrado, con su
 
         Args:
-        all_equipos         -- (array)  Un array de vectores, donde cada hay un vector 
+        all_equipos         -- (array)  Un array de vectores, donde hay un vector 
                                         por cada circulo detectado de los colores de su
                                         equipo, este contiene:
                                         rango de colores, centro, radio
@@ -809,6 +814,4 @@ class RutaGrados:
         self.x , self.y = incio
         self.x_final, self.y_final = final
         self.completado = False
-
-    def 
         
