@@ -1,46 +1,94 @@
 import random
 from deap import base, creator, tools, algorithms
 
-# Define el problema de planificación de rutas
-creator.create("FitnessMin", base.Fitness, weights=(-1.0,))
-creator.create("Individual", list, fitness=creator.FitnessMin)
+# Define el tipo de problema (maximización o minimización)
+creator.create("FitnessMax", base.Fitness, weights=(1.0,))
 
-# Función para generar una ruta aleatoria
-def generate_individual():
-    return [random.randint(0, 100) for _ in range(10)]  # 10 puntos en la ruta
-
-# Función para evaluar la aptitud de una ruta (aquí, simplemente la suma de distancias)
-def evaluate(individual):
-    return sum(individual),
+# Define la estructura del individuo (en este caso, una cadena de bits)
+creator.create("Individual", list, fitness=creator.FitnessMax)
 
 # Configura la toolbox DEAP
 toolbox = base.Toolbox()
-toolbox.register("individual", tools.initIterate, creator.Individual, generate_individual)
+# Attribute generator 
+toolbox.register("attr_bool", random.randint, 0, 1)
+# Structure initializers
+toolbox.register("individual", tools.initRepeat, creator.Individual, toolbox.attr_bool, 100)
+
 toolbox.register("population", tools.initRepeat, list, toolbox.individual)
-toolbox.register("evaluate", evaluate)
+
+
+def evalOneMax(individual):
+    return sum(individual),
+
+
+toolbox.register("evaluate", evalOneMax)
 toolbox.register("mate", tools.cxTwoPoint)
-toolbox.register("mutate", tools.mutShuffleIndexes, indpb=0.1)
+toolbox.register("mutate", tools.mutFlipBit, indpb=0.05)  # Probabilidad de mutación de un bit
 toolbox.register("select", tools.selTournament, tournsize=3)
+
 
 if __name__ == "__main__":
     # Configura la población inicial
-    population = toolbox.population(n=50)
+    population = toolbox.population(n=300)  # Población inicial de 50 individuos
 
-    # Define estadísticas para realizar un seguimiento del progreso
-    stats = tools.Statistics(lambda ind: ind.fitness.values)
-    stats.register("min", min)
-    stats.register("avg", lambda x: sum(x) / len(x))
+    #Evaluar a toda la poblacion
+    fitnesses = list(map(toolbox.evaluate, population))
 
-    # Define un objeto de registro para guardar los resultados
-    logbook = tools.Logbook()
-    logbook.header = ["gen", "evals"] + stats.fields
+    for ind, fit in zip(population, fitnesses):
+        ind.fitness.values = fit
 
-    # Configura los parámetros del algoritmo genético
-    cxpb, mutpb, ngen = 0.7, 0.2, 100
+    # CXPB es la probabilidad de cruzar a dos individuos
+    # MUTPB es la probabilidad de mutar a un individuo
+    CXPB, MUTPB = 0.5, 0.2
 
-    # Ejecuta el algoritmo genético
-    algorithms.eaSimple(population, toolbox, cxpb, mutpb, ngen, stats=stats, halloffame=None)
+    # Extraer el fitness de nuestros individuos
+    fits = [ind.fitness.values[0] for ind in population]
 
-    # Imprime las estadísticas finales
-    print("Mejor ruta encontrada:", population[0])
-    print("Distancia mínima:", population[0].fitness.values[0])
+    #Variable para guardar la geneeracion 
+
+    g = 0
+
+    # Comenzar evlocion 
+    while max(fits) < 100 and g < 1000:
+        # Crea un nueva generacion
+        g = g + 1
+        print("----- generation %i  ---------" % g)
+
+        # Seleccionar individuos para la nueva generacion
+        offspring = toolbox.select(population, len(population))
+
+        # Clonar individuos para la nueva generacion
+        offspring = list(map(toolbox.clone , offspring))
+
+        # Aplicar crossover y mutar a la nueva generacion
+        for child1, child2 in zip(offspring[::2], offspring[1::2]):
+            if random.random() < CXPB:
+                toolbox.mate(child1, child2)
+                del child1.fitness.values
+                del child2.fitness.values
+
+        for mutant in offspring:
+            if random.random() < MUTPB:
+                toolbox.mutate(mutant)
+                del mutant.fitness.values
+
+        # Evaluar alos individuos con un fitness invalido
+        invalid_ind = [ind for ind in offspring if not ind.fitness.valid]
+        fitnesses = map(toolbox.evaluate, invalid_ind)
+        for ind, fit in zip(invalid_ind, fitnesses):
+            ind.fitness.values = fit
+        population[:] = offspring
+
+        # Crear lista para imprimir
+        fits = [ind.fitness.values[0] for ind in population]
+
+        length = len(population)
+        mean = sum(fits) / length
+        sum2 = sum(x*x for x in fits)
+        std = abs(sum2 / length - mean**2)**0.5
+
+        print("  Min  %s" % min(fits))
+        print("  Max  %s" % max(fits))
+        print("  Avg  %s" % mean)
+        print("  Std  %s" % std)
+        print("  Indv  %s" % population[:1])
