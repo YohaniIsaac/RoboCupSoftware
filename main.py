@@ -247,9 +247,6 @@ def comandos(queue, lista, evento, evento2):
 
 
     try:
-        # empuje =    [(580, 282), (600, 282), (750, 285), (800, 290), (800, 321), (900, 321), 
-                    # (1050, 330), (1100, 325), (1200, 315), (1200, 290), (1220,285)] 
-
         x_obj = 800
         y_obj = 500
 
@@ -309,40 +306,38 @@ def comandos(queue, lista, evento, evento2):
                 #     evento.clear()
                 #     print("despues de clear")
 
-
-
-                    
-            
-
-
-            
-
-
     except:
         print("error en comandos")
 
 
-
+def trayectoria(queue, lista, evento):
+    try:
+        x_obj = 800
+        y_obs = 500
+        
+    except:
+        print("error en trayectoria")
 
 
 
 
 if __name__ == '__main__':
-    # Configura´r el logger principal, para ver los todos los mensajes 
+    # Configurar el logger principal, para ver los todos los mensajes 
     # en el proceso principal
     # logging.basicConfig(level=logging.INFO)
 
     # 8 multiprocesos maximospy p
 
     # Crear una tubería para la comunicación entre procesos
-    conn1, conn2 = multiprocessing.Pipe()
-    conn3, conn4 = multiprocessing.Pipe()
+    conn1, conn2 = multiprocessing.Pipe() # envia el frame
+    conn3, conn4 = multiprocessing.Pipe() # envia el frame
     # conn5, conn6 = multiprocessing.Pipe()
+
     # Crear la cola compartida
-    queue = multiprocessing.Queue()
+    queue = multiprocessing.Queue() # Envia las coordenadas de la pelota y jugadores
 
     # Crea un evento
-    evento = Event()
+    evento = Event() # Para una sincronización de los datos enviados y recibidos
 
     #iniciales
     evento.set()
@@ -352,7 +347,7 @@ if __name__ == '__main__':
     # Crea una lista compartida
     # manager = multiprocessing.Manager()
 
-    instrucciones = multiprocessing.Queue()
+    instrucciones = multiprocessing.Queue() # Lista para lograr enviar los puntos a los que se debe mover el jugador
 
     # Crear los procesos
     p1 = multiprocessing.Process(target=make,           args=(conn1, conn3, instrucciones, evento, evento2))
