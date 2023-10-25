@@ -811,6 +811,7 @@ class Control:
         return nueva_posicion_jugador
 
 
+
 ############################
 #  ALGORITMO DE 90 GRADOS  #
 ############################
@@ -834,7 +835,8 @@ class RutaGrados:
 
         self.completado = False
 
-        self.trayectorias = []
+        self.vectores = []
+        self.trayuectorias = []
 
     def d_eucli(self, punto1, punto2):
         """
@@ -863,7 +865,6 @@ class RutaGrados:
 
         return punto_en_trayectoria
 
-
     def distancia_segura(self, obs, trayectoria):
         """
         Determina si la distancia entre la trayectoria y el obstáculo es seguro
@@ -880,7 +881,7 @@ class RutaGrados:
 
     def nuevos_puntos(self, obs, nodo_inter):
         """
-        Genera dos nuevos puntos en base a al punto del obstáculo.
+        Genera dos nuevos puntos en base al punto del obstáculo.
         punto_incio y punto_final son los puntos para generar la trayectoria
         """
 
@@ -900,14 +901,10 @@ class RutaGrados:
 
         return nuevo_punto_1, nuevo_punto_2
 
-
     def trayecto_inicial(self):
         """ 
         Detemrina si la tratyacetoria unica desde el punto de incio hasta el final es viable
         """
-
-
-
 
     def distancia_a_trayectoria(self, trayectoria):
         """ 
@@ -919,13 +916,15 @@ class RutaGrados:
             dist_safe, nodo_inter = distancia_segura(obs, trayectoria)
             if not dist_safe:
 
-
     def generador_trayectorias(self):
         """
         Genera cada una de las trayectorias y verifica la viabilidad de cada una de ellas
         """
 
-
-
+    def main(self,):
+        puntos_inicio = [self.inicio]
+        for inicio in puntos_inicio:
+            for obs, radio in self.obstaculos:
+                punto_perpendicular()
 
 
