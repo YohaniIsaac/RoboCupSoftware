@@ -153,8 +153,6 @@ class Ruta:
         print(distancia_total)
         return distancia_total
 
-
-
     def update(self, frame):
         '''
         Modifca los valores de los obtáculos, permitiendo que éstos
@@ -261,8 +259,6 @@ class Ruta:
 
         plt.title(f'Frame {frame}')
 
-
-
     def ordenar(self, x,y, lista):
         '''
         ordena los valores de la lista desde el que se encuentra mas cercano a x,y 
@@ -284,8 +280,6 @@ class Ruta:
             new_list.append((i[0],i[1], distancia))
 
         return sorted(new_list, key=lambda x: x[2])
-
-
 
     def trayectoria(self, inicio, goal, obstaculos, dist_safe= 3):
         '''
@@ -347,8 +341,6 @@ class Ruta:
             return nuevo_punto_1, nuevo_punto_2
         else:
             return None, None
-
-
 
     def verificar(self, obstaculos, puntos, dist_safe = 1 , mapa = (30,30)):
         '''

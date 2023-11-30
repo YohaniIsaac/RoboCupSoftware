@@ -167,11 +167,11 @@ def busqueda_ball(conn2, queue):
                 
             else:
                 x_pelota , y_pelota = pelota.seguimiento(hsv, img, frame)
-                # cv.imshow("jugador 1", pelota.roi_img)
+                cv.imshow("pelota ", pelota.roi_hsv)
 
                 enviar = x_pelota, y_pelota
                 queue.put(("pelota", enviar))
-            # cv.imshow("frame pelota", frame)
+            cv.imshow("frame pelota", frame)
             k = cv.waitKey(5) & 0xFF
             if k == 27:
                 break
@@ -230,7 +230,7 @@ def busqueda_player(conn4, queue):
                     x, y = player.seguimiento_players(hsv,img,frame)
                     # Enviar el centro del jugador
 
-                    # cv.imshow("jugador 1", player.roi_img)
+                    cv.imshow("jugador 1", player.roi_hsv)
                     enviar = (x,y)
                 queue.put(("juagador", enviar))
             # cv.imshow("frame jugador ", frame)
@@ -309,7 +309,6 @@ def comandos(queue, lista, evento, evento2):
     except:
         print("error en comandos")
 
-
 def trayectoria(queue, lista, evento):
     try:
         x_obj = 800
@@ -317,9 +316,6 @@ def trayectoria(queue, lista, evento):
         
     except:
         print("error en trayectoria")
-
-
-
 
 if __name__ == '__main__':
     # Configurar el logger principal, para ver los todos los mensajes 
