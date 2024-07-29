@@ -101,7 +101,7 @@ class Objeto:
         # Para poder pasar a la siguiente instruccion
         if x_destino == self.x and y_destino == self.y:
             en_curso = False
-            print(self.x, self.y)
+            # print(self.x, self.y)
 
         return en_curso 
  

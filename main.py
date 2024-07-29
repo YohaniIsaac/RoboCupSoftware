@@ -11,12 +11,16 @@ import keyboard
 
 import FuncionesClases as FyC
 
-def make(conn1, conn3, lista, evento, evento2):
+def make(conn1, conn3, env_ruta):
+    """
+    
+    env_ruta -- (list) nodos de la planificación de rutas para enviar
+    """
     # Configuración del video
     ancho = 1280
-    alto = 650
+    alto = 750
     fps = 40
-    duracion = 10  # Duración en segundos
+    duracion = 10  # Duración en segundos 
 
     # Colores
     rojo    = (0,0,255)
@@ -53,6 +57,14 @@ def make(conn1, conn3, lista, evento, evento2):
     pelota = FyC.Objeto(0.85,400, 500, (0, 0, 255), None, 270, -2, -2, -1.29, 10)
     inicio = 0 
     en_curso = False
+
+
+    last_time = time.time()
+    delay = 4
+    # nodo = (800,500)
+
+    executed = False
+    en_curso = False
     # Bucle principal para generar el video
     try:
         while True:
@@ -82,7 +94,9 @@ def make(conn1, conn3, lista, evento, evento2):
 
             # Actualizar la posición de los jugadores
             # player_1.teclaps()
+            # 
             player_1.mover()
+            # print("a")
 
 
 
@@ -110,24 +124,48 @@ def make(conn1, conn3, lista, evento, evento2):
             # player_3.colision(pelota)
             # player_4.colision(pelota)
 
+            # auxiliar = player_1.intrucciones((100, 100))
 
-            if inicio > 5:
+            current_time = time.time()
+            if current_time - last_time >= delay:
+                # print("holaaa")
+                # player_1.intrucciones((300,300))
+                # player_1.intrucciones((300,300))
+                if not en_curso: 
+                    nodo = env_ruta.get()
+                    en_curso = player_1.intrucciones(nodo)
+                else:
+                    en_curso = player_1.intrucciones(nodo)
+            # print(f"si entra al if {nodo}")
+                
 
-                if not lista.empty():
-                    recibido = lista.get()
-                    en_curso = True
-                    print("leyendo instruccion")
 
-                if en_curso:
-                    print("ejecutando instruccion.....")
-                    en_curso = player_1.intrucciones(recibido)
 
-                    if not en_curso:
-                        print("se realizó con exito la instruccion, a la espera de la siguiente")
-                        evento.set()
+
+
+            ##############################################
+            ########## PARTE VIEJA ######################
+            #############################################
+
+            # if inicio > 5:
+
+            #     if not lista.empty():
+            #         recibido = lista.get()
+            #         en_curso = True
+            #         print("leyendo instruccion")
+
+            #     if en_curso:
+            #         print("ejecutando instruccion.....")
+            #         en_curso = player_1.intrucciones(recibido)
+
+            #         if not en_curso:
+            #             print("se realizó con exito la instruccion, a la espera de la siguiente")
+            #             evento.set()
                         
 
-
+            #################################################
+            #########################################
+            ############################################
 
 
 
@@ -243,72 +281,28 @@ def busqueda_player(conn4, queue):
     except:
         print("error en busqueda de jugadores")
 
-def comandos(queue, lista, evento, evento2):
+def comandos(env_ruta):
+    """
+    env_ruta -- (list) nodos de la planificación de rutas para enviar
+    """
 
 
     try:
-        x_obj = 800
-        y_obj = 500
+        time.sleep(2)
+        ruta = [(1200,600),(300,300),(600,600)]
 
-        player_radius = 15
-        ball_radius = 5
-        
-        posicion_objetivo = (1200, 300)    # Posición objetivo de la pelota (x, y)
+        # cerca_ball = False
+        # 
+        while ruta:
+            nodo = ruta.pop(0)
+            print(f"Nodo enviado: {nodo}")
+            env_ruta.put(nodo)
+        # env_ruta.put(None)
 
-        aux = 0
-
-        cerca_ball = False
-
-        jugador = FyC.Control(0.3, 0.01) # Kp = 0.3 y Ki
-
-        while True:
-            aux += 1
-
-            recibido = queue.get()
-            etiqueta, dato = recibido
-
-            if etiqueta == "pelota":
-                x_pelota, y_pelota = dato
-                posicion_pelota = dato
-
-
-            elif etiqueta == "juagador":
-                x_jugador, y_jugador = dato
-                posicion_jugador = dato
-
-
-            # CONTROL QUE EL JUGADOR SE AMNTENGA CERCA DE LA PELOTA
-            # if keyboard.is_pressed('space'):
-            if aux > 10:
-                if evento.is_set() and not jugador.cerca_ball:
-                    # Calcular la siguiente posición del jugador usando el controlador (hace que se aceque lo más posible a la pelota)
-                    print("jugador", x_jugador, y_jugador)
-
-                    siguiente_posicion_jugador = jugador.control_jugador_pelota(
-                        posicion_jugador, posicion_pelota)
-
-                    lista.put(siguiente_posicion_jugador)
-                    print("espera de confirmacion", siguiente_posicion_jugador)
-                    print("confirmacion aceptada, proceso realizado")
-                    evento.clear()
-                    print("despues de clear")
-
-
-                # if evento.is_set() and jugador.cerca_ball: 
-                #     print("ya esta el jugador cerca de la pelota")
-
-                #     siguiente_posicion_jugador = jugador.calculate_next_player_position(
-                #         posicion_jugador, posicion_pelota, pos_ball_obj)
-
-                #     lista.put(siguiente_posicion_jugador)
-                #     print("espera de confirmacion", siguiente_posicion_jugador)
-                #     print("confirmacion aceptada, proceso realizado")
-                #     evento.clear()
-                #     print("despues de clear")
 
     except:
         print("error en comandos")
-
+ 
 def trayectoria(queue, lista, evento):
     try:
         x_obj = 800
@@ -333,32 +327,34 @@ if __name__ == '__main__':
     queue = multiprocessing.Queue() # Envia las coordenadas de la pelota y jugadores
 
     # Crea un evento
-    evento = Event() # Para una sincronización de los datos enviados y recibidos
+    # evento = Event() # Para una sincronización de los datos enviados y recibidos
 
     #iniciales
-    evento.set()
+    # evento.set()
     # cerca_ball = False
-    evento2 = Event()
+    # evento2 = Event()
     
     # Crea una lista compartida
     # manager = multiprocessing.Manager()
 
-    instrucciones = multiprocessing.Queue() # Lista para lograr enviar los puntos a los que se debe mover el jugador
+
+    # lista para enviar la ruta planificada
+    env_ruta = multiprocessing.Queue() 
 
     # Crear los procesos
-    p1 = multiprocessing.Process(target=make,           args=(conn1, conn3, instrucciones, evento, evento2))
-    p2 = multiprocessing.Process(target=busqueda_ball,  args=(conn2, queue))
-    p3 = multiprocessing.Process(target=busqueda_player,args=(conn4, queue))
-    # p4 = multiprocessing.Process(target=comandos,       args=(queue, instrucciones, evento, evento2))
+    p1 = multiprocessing.Process(target=make,           args=(conn1, conn3, env_ruta) )
+    p2 = multiprocessing.Process(target=busqueda_ball,  args=(conn2, queue) )
+    p3 = multiprocessing.Process(target=busqueda_player,args=(conn4, queue) )
+    p4 = multiprocessing.Process(target=comandos,       args=(env_ruta,) )
 
     # Iniciar los procesos
     p1.start()
     p2.start()
     p3.start()
-    # p4.start()
+    p4.start()
 
     # Esperar a que los procesos terminen
     p1.join()
     p2.join()
     p3.join()
-    # p4.join()
+    p4.join()
