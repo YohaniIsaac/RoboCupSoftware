@@ -8,7 +8,7 @@ import math
 # CREACION DEL JUEGO #
 ######################
 class Objeto:
-    def __init__(self, masa,x, y, equipo, etiqueta, angulo, dx, dy, theta, radio):
+    def __init__(self, masa,x, y, equipo, etiqueta, angulo, dx, dy, theta, radio, identificador):
         """
         Valores inciales para la clase.
 
@@ -23,22 +23,41 @@ class Objeto:
         theta       -- (int)    Variación del ángulo del objeto.
         radio       -- (int)    Radio del objeto.
         """
-
+        # Posicion y velocidad del objeto
         self.x = x
         self.y = y
-        self.equipo = equipo
-        self.etiqueta = etiqueta
-        self.angulo = angulo
         self.dx = dx
         self.dy = dy
-        self.theta = theta
+        self.angulo = angulo
+        self.theta = theta              # velocidad angular
+
+        self.equipo = equipo
+        self.etiqueta = etiqueta
         self.radio = radio
-        self.desaceleracion_roce = 0.05
-        self.masa = masa
-        self.tomar_pelota = False
-        self.ball_sujetada = 0
-        self.max_vel = 4
-        self.f_aceleracion = 0.3
+        
+        self.desaceleracion_roce = 0.5
+        self.masa = masa                # no se esta utilizando la funcion actualmente
+
+        self.max_vel = 4                # Velocidad maxima a la que puede llegar el objeto
+        self.f_aceleracion = 0.3        # Factor de aceleracion
+
+
+        self.identificador = identificador    # Valor de identificacion del objeto (0 para la pelota)
+        
+        if self.identificador != 0:
+            path = "Tag_" + str(self.identificador) + ".png"
+            arucoTag_img = pygame.image.load("arucoMarkers/" + path)
+            self.arucoTag_img = pygame.transform.scale(arucoTag_img, (35,35))
+
+
+        # Para realizar la toma de pelota y posterior disparo de la misma
+        self.tomando_pelota = False
+
+        # Dimensiones del campo de futbol
+        self.ancho_campo = 1280
+        self.alto_campo = 750
+
+
 
     def intrucciones(self, punto):
         # Obtención de los parámetros de la instruccion
@@ -106,13 +125,40 @@ class Objeto:
         return en_curso 
  
 
-    def mover(self):
+    def motion_player(self, pelota):
         """
         Genera el movimiento del objeto, con los valores del objeto.
         """
-        self.x += self.dx
-        self.y += self.dy
-        self.angulo += self.theta
+        self.x = int(self.x + self.dx)
+        self.y = int(self.y + self.dy)
+
+        self.x = max(self.radio, min(self.x, self.ancho_campo - self.radio))
+        self.y = max(self.radio, min(self.y, self.alto_campo - self.radio))
+
+        self.angulo = int(self.angulo - self.theta)
+        self.angulo = self.angulo % 360
+
+        # Interacción del jugador con la pelota
+        self.choque(pelota)
+        self.disparo(pelota)
+        # self.colision(pelota)
+
+    def motion_ball(self):
+        """
+        Genera el movimiento de la pelota, con los valores del objeto.
+        """
+        self.x = int(self.x + self.dx)
+        self.y = int(self.y + self.dy)
+
+        # self.x = max(self.radio, min(self.x, self.ancho_campo - self.radio))
+        # self.y = max(self.radio, min(self.y, self.alto_campo - self.radio))
+
+        self.angulo = int(self.angulo - self.theta)
+        self.angulo = self.angulo % 360
+
+        self.desaceleracion()
+        self.colision_borde()
+
 
     def colision(self, obj):
         """
@@ -146,44 +192,41 @@ class Objeto:
                 obj.dy = self.dy + diff_vel_y * factor_rebote
 
 
-    def colision_borde(self, ancho, alto):
+    def colision_borde(self):
         """
         Cambia la dirección si el objeto 
         choca con el borde del juego.
         """
         if (self.x - self.radio) < 0:
-            self.dx = self.dx * -1
-        elif (self.x + self.radio) > ancho:
-            self.dx = self.dx * -1
+            self.dx = -self.dx
+        elif (self.x + self.radio) > self.ancho_campo:
+            self.dx = -self.dx 
         if (self.y - self.radio) < 0:
-            self.dy = self.dy * -1
-        elif (self.y + self.radio) > alto:
-            self.dy = self.dy * -1
+            self.dy = -self.dy 
+        elif (self.y + self.radio) > self.alto_campo:
+            self.dy = -self.dy 
 
     def desaceleracion(self):
         """
-        Frena el objeto por el roce que tiene con el campo.
+        Reduce la velocida del objeto debido al roce que posee
         """
-        if abs(self.dx) > 0 or abs(self.dy) > 0:
-            if self.dx > 0:
-                self.dx -= self.desaceleracion_roce
-                self.dx = max(self.dx, 0)
-            elif self.dx < 0:
-                self.dx += self.desaceleracion_roce
-                self.dx = min(self.dx, 0)
+        def frenado(velocidad, f_desaceleracion):
+            """
+            Incrementa o decrementa la velocidad hasta llegar a cero
+            """
+            if velocidad > 0:
+                velocidad -= f_desaceleracion
+                return max(velocidad, 0)
 
-            if self.dy > 0:
-                self.dy -= self.desaceleracion_roce
-                self.dy = max(self.dy, 0)
-            elif self.dy < 0:
-                self.dy += self.desaceleracion_roce
-                self.dy = min(self.dy, 0)
-        if self.theta > 0:
-            self.theta -= self.desaceleracion_roce
-            self.theta = min(self.theta, 0)
-        if self.theta < 0: 
-            self.theta += self.desaceleracion_roce
-            self.theta = max(self.theta, 0)
+            elif velocidad < 0:
+                velocidad += f_desaceleracion
+                return min(velocidad, 0)
+
+            return velocidad
+
+        self.dx = frenado(self.dx, self.desaceleracion_roce)
+        self.dy = frenado(self.dy, self.desaceleracion_roce)
+        self.theta = frenado(self.theta, self.desaceleracion_roce)
 
     def teclas(self):
         """
@@ -233,37 +276,27 @@ class Objeto:
         Args:
         obj     -- (objeto) Objeto 
         """
-        self.distancia_ball = math.sqrt((obj.x - self.centro_tomar[0]) ** 2 + (obj.y - self.centro_tomar[1]) ** 2)
+        self.distanciaConPelota = math.dist((obj.x, obj.y), (self.coordsHoldBall_x, self.coordsHoldBall_y))
 
         keys = pygame.key.get_pressed()
+
+        # Tomar posesion de la pelota con la letra k
         if keys[pygame.K_k]:
-            if self.distancia_ball < 15:
-                obj.x = self.posicion_pelota_agarre[0]
-                obj.y = self.posicion_pelota_agarre[1]
+            if self.distanciaConPelota < 15:
+                obj.x = self.coordsHoldBall_x
+                obj.y = self.coordsHoldBall_y
 
                 self.tomando_pelota = True # para el disparo
-                self.ball_sujetada = 1
-
-
-        if not keys[pygame.K_k]:
-            self.tomando_pelota = False
-            if self.ball_sujetada == 1:
-                factor = 5
-                direccion = (obj.x - self.x, obj.y - self.y)
-                direccion = (direccion[0] / self.rad, direccion[1] / self.rad)
-                # Actualizar la velocidad de la pelota según la dirección del golpe y el factor de rebote
-                obj.dx = direccion[0] * factor
-                obj.dy = direccion[1] * factor
-
-                self.ball_sujetada = 0
-
-
-        if self.tomando_pelota:
-            obj.x = self.posicion_pelota_agarre[0]
-            obj.y = self.posicion_pelota_agarre[1]
-            obj.dx = self.dx
-            obj.dy = self.dy
-
+            else:
+                pass
+        else:
+            if self.tomando_pelota:
+                vel_disparo = 10
+                angle = math.radians(self.angulo)
+                obj.dx = vel_disparo * math.cos(angle)
+                obj.dy = vel_disparo * math.sin(angle)
+                print(obj.dx)
+                self.tomando_pelota = False
 
 
     def choque(self, obj):
@@ -274,18 +307,20 @@ class Objeto:
         obj     -- (objeto) Objeto que es impactado (pelota).
         """
         keys = pygame.key.get_pressed()
-        self.distancia = math.sqrt((self.x - obj.x) ** 2 + (self.y - obj.y) ** 2)
-        self.rad = self.radio + obj.radio
 
-        self.distancia_ball = math.sqrt((obj.x - self.centro_tomar[0]) ** 2 + (obj.y - self.centro_tomar[1]) ** 2)
+
+        self.distancia = math.dist((self.x, self.y), (obj.x, obj.y))
+        self.distanciaColision = self.radio + obj.radio
+
+        self.distanciaConPelota = math.dist((obj.x, obj.y), (self.coordsHoldBall_x, self.coordsHoldBall_y))
 
         # Evitar posibles divisiones por cero
         if self.distancia == 0:
             self.distancia = 1
 
-        if self.distancia < self.rad:
+        if self.distancia < self.distanciaColision:
 
-            if (self.distancia_ball > 15 or not keys[pygame.K_k]) and self.ball_sujetada == 0:
+            if (self.distanciaConPelota > 15 or not keys[pygame.K_k]):
                 # Calcular la dirección del golpe 
                 direccion = (obj.x - self.x, obj.y - self.y)
                     
@@ -301,11 +336,9 @@ class Objeto:
                 obj.dy = direccion[1] * factor_rebote
 
                 # Evitar superposición de objetos después de la colisión
-                overlap = self.rad - self.distancia
+                overlap = self.distanciaColision - self.distancia
                 obj.x += direccion[0] * overlap
                 obj.y += direccion[1] * overlap
-
-                self.ball_sujetada = 0
 
 
 
@@ -333,19 +366,62 @@ class Objeto:
         pygame.draw.circle(img, naranjo, (pelota_x , pelota_y), pelota_radio)
 
 
+
         self.centro_team = int(tf1[0]), int(tf1[1])
         self.centro_tag1 = int(tf2[0]), int(tf2[1])
         self.centro_tag2 = int(tf3[0]), int(tf3[1])
 
         tf4 = np.dot(M, np.array([[self.x], [self.y-40], [1]]))
-        self.posicion_pelota_agarre = (int(tf4[0]) , int(tf4[1]))
+        self.coordsHoldBall_x = int(tf4[0]) 
+        self.coordsHoldBall_x = int(tf4[1])
 
 
-        tf5 = np.dot(M, np.array([[self.x], [self.y-30], [1]]))
-        self.centro_tomar = (int(tf5[0]) , int(tf5[1]))
+        pygame.draw.circle(img, (255,255,255),  (self.coordsHoldBall_x, self.coordsHoldBall_x), 1)
+
+    def generationRobot(self, fondo):
+        """
+        Genera un robot ciruclar con un arugotag en la parte superior de éste
+        
+        Args:
+        fondo   -- (matriz) Fonde del campo de futbol
+
+        """ 
+        negro = (0,0,0)
+        blanco = (255,255,255)
+
+        # Dibuja el círculo
+        pygame.draw.circle(fondo, negro, (self.x, self.y), 30)
+
+        # Rota la imagen
+        rotated_image = pygame.transform.rotate(self.arucoTag_img, -self.angulo)
+        rotated_rect = rotated_image.get_rect(center=(self.x, self.y))
+        fondo.blit(rotated_image, rotated_rect)
+
+        # Calcula la posición del punto que indica el frente
+        front_angle = math.radians(self.angulo)  # Convierte el ángulo a radianes
+        self.coordsHoldBall_x = int(self.x + 40 * math.cos(front_angle))  # 30 es el radio del círculo
+        self.coordsHoldBall_y = int(self.y + 40 * math.sin(front_angle))
+
+        
+        # Dibuja el punto indicando el frente
+        pygame.draw.circle(fondo, blanco, (self.coordsHoldBall_x, self.coordsHoldBall_y), 5)
+
+    def generationBall(self, fondo):
+        """
+        Genera una pelota ciruclar 
+        
+        Args:
+        fondo   -- (matriz) Fonde del campo de futbol
+        
+        """ 
+
+        naranjo = (244,98,0)
+        pygame.draw.circle(fondo, naranjo, (self.x , self.y), self.radio)       
 
 
-        pygame.draw.circle(img, (255,255,255),  (self.posicion_pelota_agarre[0], self.posicion_pelota_agarre[1]), 1)
+
+
+
 
 
 #########################
@@ -619,3 +695,99 @@ class Jugador:
 
         return Jugadores
 
+
+
+
+# class Player:
+
+#     def __init__(self, equipo, identificador, centro):
+#         """
+#         Valores inciales para  la clase.
+
+#         Args:
+#         equipo      -- (array) Rangos de colores del equipo.
+#         colorId     -- (array) Rangos de colores del tag (un color por jugador).
+#         centro      -- (array) Coordenadas del centro del jugador.
+#         """
+#         self.equipo = equipo
+#         self.x, self.y = centro
+#         self.identificador = identificador
+#         self.vecindad = 70
+
+#         self.ARUCO_DICT = {
+#             "DICT_6X6_50": cv2.aruco.DICT_6X6_50,
+#             "DICT_6X6_100": cv2.aruco.DICT_6X6_100,
+#             "DICT_6X6_250": cv2.aruco.DICT_6X6_250,
+#             "DICT_6X6_1000": cv2.aruco.DICT_6X6_1000,
+#             "DICT_7X7_50": cv2.aruco.DICT_7X7_50,
+#             "DICT_7X7_100": cv2.aruco.DICT_7X7_100,
+#             "DICT_7X7_250": cv2.aruco.DICT_7X7_250,
+#             "DICT_7X7_1000": cv2.aruco.DICT_7X7_1000,
+#         }
+
+
+#         aruco_type = "DICT_7X7_1000"
+
+#         arucoDict = cv2.aruco.getPredefinedDictionary(ARUCO_DICT[aruco_type])
+
+#         arucoParams = cv2.aruco.DetectorParameters()
+
+
+#         self.intrinsic_camera = np.array(((933.15867, 0, 657.59),(0,933.1586, 400.36993),(0,0,1)))
+#         self.distortion = np.array((-0.43948,0.18514,0,0))
+
+#     def deteccionJugadoresArucoTag(frame):
+#         output = pose_estimation(img, self.ARUCO_DICT[aruco_type], self.intrinsic_camera, self.distortion)
+#         cv2.imshow('Estimated Pose', output)
+
+
+
+
+
+
+
+
+# def DetectarJugadoresCirculosDeColores(frame):
+
+#     # Copia el frame para manejarlo y lo transoforma a escala HSV
+#     img = np.copy(frame)
+#     hsv = cv.cvtColor(frame, cv.COLOR_BGR2HSV)
+
+#     if first_frame:
+#         circulos_rojos      = FyC.Jugador.detectar_circulos_color(hsv, rojo, img) 
+#         circulos_azul       = FyC.Jugador.detectar_circulos_color(hsv, azul, img) 
+#         circulos_cian       = FyC.Jugador.detectar_circulos_color(hsv, cian, img) 
+#         circulos_magenta    = FyC.Jugador.detectar_circulos_color(hsv, magenta, img) 
+
+#         all_equipos = circulos_rojos + circulos_azul
+#         all_identificadores = circulos_magenta + circulos_cian
+
+#         Jugadores = FyC.Jugador.detectar_centro(all_equipos,all_identificadores)
+        
+
+#         equipo = Jugadores[0][0]
+#         colorID = Jugadores[0][1]
+#         centro = Jugadores[0][5]
+        
+#         players = []
+#         for jugador in Jugadores:
+#             equipo = jugador[0]
+#             colorID = jugador[1]
+#             centro2 = jugador[3]
+#             centro3 = jugador[4]
+#             centro = jugador[5]
+
+#             player = FyC.Jugador(equipo, colorID, centro)
+#             players.append(player)
+
+#         first_frame = False
+        
+#     else:
+#         for player in players:
+#             x, y = player.seguimiento_players(hsv,img,frame)
+#             # Enviar el centro del jugador
+
+#             cv.imshow("jugador 1", player.roi_hsv)
+#             enviar = (x,y)
+#         queue.put(("juagador", enviar))
+    # cv.imshow("frame jugador ", frame)

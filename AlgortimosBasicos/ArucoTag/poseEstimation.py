@@ -99,7 +99,12 @@ arucoDict = cv2.aruco.getPredefinedDictionary(ARUCO_DICT[aruco_type])
 arucoParams = cv2.aruco.DetectorParameters()
 
 
-intrinsic_camera = np.array(((933.15867, 0, 657.59),(0,933.1586, 400.36993),(0,0,1)))
+intrinsic_camera = np.array((
+	(933.15867, 0, 657.59), 
+	(0,933.1586, 400.36993),
+	(0,0,1)
+	))
+
 distortion = np.array((-0.43948,0.18514,0,0))
 
 

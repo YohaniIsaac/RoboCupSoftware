@@ -49,12 +49,12 @@ def make(conn1, conn3, env_ruta):
     pygame.draw.rect(fondo_inicial, blanco, (ancho-22, (alto/2)-100, 22,200), 2)
 
     # Crear instancias de la clase Objeto y pelota
-    player_1 = FyC.Objeto(1,1000,             300,    rojo, cian,     0,      0,  0,  0, 30)
-    player_2 = FyC.Objeto(1,int(ancho-200),  int(alto/2),    rojo, magenta,  45,     -1,  -1,  -1.1, 30)
-    player_3 = FyC.Objeto(1,int(ancho/2),    250,            azul, cian,     180,    -1,  1,  1.26, 30)
-    player_4 = FyC.Objeto(1,int(ancho/2),    int(alto-250),  azul, magenta,  270,    1,  -1,  -1.29, 30)
+    player_1 = FyC.Objeto(200,1000,             300,    rojo, cian,     0,      0,  0,  0, 30,1)
+    player_2 = FyC.Objeto(1,int(ancho-200),  int(alto/2),    rojo, magenta,  45,     -1,  -1,  -1.1, 30,2)
+    player_3 = FyC.Objeto(1,int(ancho/2),    250,            azul, cian,     180,    -1,  1,  1.26, 30,3)
+    player_4 = FyC.Objeto(1,int(ancho/2),    int(alto-250),  azul, magenta,  270,    1,  -1,  -1.29, 30,4)
 
-    pelota = FyC.Objeto(0.85,400, 500, (0, 0, 255), None, 270, -2, -2, -1.29, 10)
+    pelota = FyC.Objeto(2,400, 500, (0, 0, 255), None, 270, -2, -2, -1.29, 10, 0)
     inicio = 0 
     en_curso = False
 
@@ -65,6 +65,9 @@ def make(conn1, conn3, env_ruta):
 
     executed = False
     en_curso = False
+
+    
+
     # Bucle principal para generar el video
     try:
         while True:
@@ -79,68 +82,33 @@ def make(conn1, conn3, env_ruta):
 
 
             # Dibujar los jugadores en la ventana
-            player_1.circulo(fondo, int(pelota.x), int(pelota.y), pelota.radio, naranjo)
+            player_1.generationRobot(fondo)
+            # player_2.generationRobot(fondo)
+            # player_3.generationRobot(fondo)
+            # player_4.generationRobot(fondo)
 
-            # player_2.circulo(fondo)
-            # player_3.circulo(fondo)
-            # player_4.circulo(fondo)
-         
-            #pygame.draw.circle(fondo, naranjo, (int(pelota.x), int(pelota.y)), pelota.radio)
+            # Dibuja la pelota en la ventana
+            pelota.generationBall(fondo)
 
-                        # Enviar instrucciones
-
-            # Para que no comience antes de un frame especifico
-
+            # Permite mover a un jugador con las teclas
+            player_1.teclas()
 
             # Actualizar la posición de los jugadores
-            # player_1.teclaps()
-            # 
-            player_1.mover()
-            # print("a")
+            player_1.motion_player(pelota)
+            pelota.motion_ball()
 
 
-
-
-            pelota.mover()
-            pelota.desaceleracion()
-
-            player_1.choque(pelota)
-            player_1.disparo(pelota)
-
-            # player_2.mover()
-            # player_3.mover()
-            # player_4.mover()
-
-            # Cambiar el sentido en caso de colisión con el borde del campo
-            pelota.colision_borde(ancho, alto)
-            player_1.colision_borde(ancho, alto)
-            # player_2.colision_borde(ancho, alto)
-            # player_3.colision_borde(ancho, alto)
-            # player_4.colision_borde(ancho, alto)
-
-            # Cambiar dirección en caso de colisión con algún otro objeto
-            player_1.colision(pelota)
-            # player_2.colision(pelota)
-            # player_3.colision(pelota)
-            # player_4.colision(pelota)
 
             # auxiliar = player_1.intrucciones((100, 100))
 
-            current_time = time.time()
-            if current_time - last_time >= delay:
-                # print("holaaa")
-                # player_1.intrucciones((300,300))
-                # player_1.intrucciones((300,300))
-                if not en_curso: 
-                    nodo = env_ruta.get()
-                    en_curso = player_1.intrucciones(nodo)
-                else:
-                    en_curso = player_1.intrucciones(nodo)
-            # print(f"si entra al if {nodo}")
-                
-
-
-
+            # current_time = time.time()
+            # if current_time - last_time >= delay:
+            #     if not en_curso: 
+            #         nodo = env_ruta.get()
+            #         en_curso = player_1.intrucciones(nodo)
+            #     else:
+            #         en_curso = player_1.intrucciones(nodo)
+            
 
 
             ##############################################
@@ -177,10 +145,11 @@ def make(conn1, conn3, env_ruta):
 
             # Obtener el frame actual de la ventana de Pygame
             frame = pygame.surfarray.array3d(ventana)
-            frame = cv.transpose(frame)
+            frame = cv.transpose(frame, (1,0,2))
             frame = cv.cvtColor(frame, cv.COLOR_RGB2BGR)
+            
             conn1.send(frame)
-            conn3.send(frame)
+            # conn3.send(frame)
             inicio += 1 
     except:
         print("error en make")
@@ -193,7 +162,6 @@ def busqueda_ball(conn2, queue):
     try:
         while True:
             frame = conn2.recv()  # Recibir datos como bytes a través de la tubería
-
             img = np.copy(frame)
             hsv = cv.cvtColor(frame, cv.COLOR_BGR2HSV)
 
@@ -209,8 +177,7 @@ def busqueda_ball(conn2, queue):
 
                 enviar = x_pelota, y_pelota
                 queue.put(("pelota", enviar))
-            cv.imshow("frame pelota", frame)
-            k = cv.waitKey(5) & 0xFF
+            k = cv.waitKey(1) & 0xFF
             if k == 27:
                 break
 
@@ -229,87 +196,49 @@ def busqueda_player(conn4, queue):
 
     try:
         while True:
-            frame = conn4.recv()  # Recibir datos como bytes a través de la tubería
-
-            img = np.copy(frame)
-            hsv = cv.cvtColor(frame, cv.COLOR_BGR2HSV)
-
-            if first_frame:
-                circulos_rojos      = FyC.Jugador.detectar_circulos_color(hsv, rojo, img) 
-                circulos_azul       = FyC.Jugador.detectar_circulos_color(hsv, azul, img) 
-                circulos_cian       = FyC.Jugador.detectar_circulos_color(hsv, cian, img) 
-                circulos_magenta    = FyC.Jugador.detectar_circulos_color(hsv, magenta, img) 
-
-                all_equipos = circulos_rojos + circulos_azul
-                all_identificadores = circulos_magenta + circulos_cian
-
-                Jugadores = FyC.Jugador.detectar_centro(all_equipos,all_identificadores)
-                
-
-                equipo = Jugadores[0][0]
-                colorID = Jugadores[0][1]
-                centro = Jugadores[0][5]
-                
-                players = []
-                for jugador in Jugadores:
-                    equipo = jugador[0]
-                    colorID = jugador[1]
-                    centro2 = jugador[3]
-                    centro3 = jugador[4]
-                    centro = jugador[5]
-
-                    player = FyC.Jugador(equipo, colorID, centro)
-                    players.append(player)
-
-                first_frame = False
-                
-            else:
-                for player in players:
-                    x, y = player.seguimiento_players(hsv,img,frame)
-                    # Enviar el centro del jugador
-
-                    cv.imshow("jugador 1", player.roi_hsv)
-                    enviar = (x,y)
-                queue.put(("juagador", enviar))
-            # cv.imshow("frame jugador ", frame)
-            k = cv.waitKey(5) & 0xFF
-            if k == 27:
+            # Recibir datos como bytes a través de la tubería
+            frame = conn4.recv()  
+            # FyC.deteccionJugadoresArucoTag(frame)
+            # FyC.DetectarJugadoresCirculosDeColores(frame)
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord('q'):
                 break
 
-        cv.destroyAllWindows()
+        cv2.destroyAllWindows()
+
 
     except:
         print("error en busqueda de jugadores")
 
-def comandos(env_ruta):
-    """
-    env_ruta -- (list) nodos de la planificación de rutas para enviar
-    """
+# def comandos(env_ruta):
+#     """
+#     env_ruta -- (list) nodos de la planificación de rutas para enviar
+#     """
 
 
-    try:
-        time.sleep(2)
-        ruta = [(1200,600),(300,300),(600,600)]
+#     try:
+#         time.sleep(2)
+#         ruta = [(1200,600),(300,300),(600,600)]
 
-        # cerca_ball = False
-        # 
-        while ruta:
-            nodo = ruta.pop(0)
-            print(f"Nodo enviado: {nodo}")
-            env_ruta.put(nodo)
-        # env_ruta.put(None)
+#         # cerca_ball = False
+#         # 
+#         while ruta:
+#             nodo = ruta.pop(0)
+#             print(f"Nodo enviado: {nodo}")
+#             env_ruta.put(nodo)
+#         # env_ruta.put(None)
 
 
-    except:
-        print("error en comandos")
+#     except:
+#         print("error en comandos")
  
-def trayectoria(queue, lista, evento):
-    try:
-        x_obj = 800
-        y_obs = 500
+# def trayectoria(queue, lista, evento):
+#     try:
+#         x_obj = 800
+#         y_obs = 500
         
-    except:
-        print("error en trayectoria")
+#     except:
+#         print("error en trayectoria")
 
 if __name__ == '__main__':
     # Configurar el logger principal, para ver los todos los mensajes 
@@ -345,16 +274,18 @@ if __name__ == '__main__':
     p1 = multiprocessing.Process(target=make,           args=(conn1, conn3, env_ruta) )
     p2 = multiprocessing.Process(target=busqueda_ball,  args=(conn2, queue) )
     p3 = multiprocessing.Process(target=busqueda_player,args=(conn4, queue) )
-    p4 = multiprocessing.Process(target=comandos,       args=(env_ruta,) )
+    # p4 = multiprocessing.Process(target=comandos,       args=(env_ruta,) )
 
     # Iniciar los procesos
     p1.start()
     p2.start()
     p3.start()
-    p4.start()
+    # p4.start()
 
     # Esperar a que los procesos terminen
     p1.join()
     p2.join()
     p3.join()
-    p4.join()
+    # p4.join()
+
+
