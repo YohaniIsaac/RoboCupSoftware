@@ -295,7 +295,6 @@ class Objeto:
                 angle = math.radians(self.angulo)
                 obj.dx = vel_disparo * math.cos(angle)
                 obj.dy = vel_disparo * math.sin(angle)
-                print(obj.dx)
                 self.tomando_pelota = False
 
 
@@ -544,163 +543,9 @@ class Ball:
 ###########################
 #  BUSQUEEDA DE JUGADORES #
 ###########################
-class Jugador:
+# class Jugador:
 
-    def __init__(self, equipo, colorID, centro):
-        """
-        Valores inciales para  la clase.
-
-        Args:
-        equipo      -- (array) Rangos de colores del equipo.
-        colorId     -- (array) Rangos de colores del tag (un color por jugador).
-        centro      -- (array) Coordenadas del centro del jugador.
-        """
-        self.equipo = equipo
-        self.x, self.y = centro
-        self.colorID = colorID
-        self.vecindad = 70
-        
-    def dibujar(self, frame):   
-        """
-        Dibuja una línea entre los tag del jugador, con variables dentro de la misma clase.
-        """
-
-        # Reajusta los centros de los para poder dibujarlos en el 
-        # frame principal
-        self.x_tag1, self.y_tag1 = self.tags[0][1]
-        self.x_tag1, self.y_tag1 = self.x + self.x_tag1 - self.vecindad , self.y + self.y_tag1 - self.vecindad
-        self.x_tag2, self.y_tag2 = self.tags[1][1]
-        self.x_tag2, self.y_tag2 = self.x + self.x_tag2 - self.vecindad , self.y + self.y_tag2 - self.vecindad
-        cv.line(frame, (self.x_tag1, self.y_tag1), (self.x_tag2, self.y_tag2), (255,255,255),2)
-
-    def seguimiento_players(self, hsv, img, frame):
-        """
-        Recorta la imagen original y hsv, para poder tener sólo la vecindad donde es posible que se mueva el jugador
-        """
-
-        # Recorta la imagen HSV y RGB segun la vecindad donde e sposible que se mueva el jugador
-        self.roi_hsv = hsv[ self.y - self.vecindad : self.y + self.vecindad,
-                            self.x - self.vecindad : self.x + self.vecindad]
-
-        self.roi_img = img[ self.y - self.vecindad : self.y + self.vecindad,
-                            self.x - self.vecindad : self.x + self.vecindad]
-
-        if len(self.roi_img) > 0:
-
-            # Detecta los circulos dentro del recorte y su centro 
-            self.team = self.detectar_circulos_color(self.roi_hsv, self.equipo, self.roi_img)
-            self.tags = self.detectar_circulos_color(self.roi_hsv, self.colorID, self.roi_img)
-            self.centros = self.detectar_centro(self.team, self.tags)
-
-            if len(self.centros) > 0:
-                self.dibujar(frame)
-                # Reescribe el centro y actualiza este en el objeto
-                self.x_nuevo, self.y_nuevo = self.centros[0][5]
-                self.x = self.x + self.x_nuevo - self.vecindad
-                self.y = self.y + self.y_nuevo - self.vecindad
-
-                # Dibuja un circulo en el centro del jugador
-                cv.circle(frame, (self.x, self.y), 4, (255, 0, 255), -1)
-        return self.x, self.y
-
-    @classmethod
-    def detectar_circulos_color(cls, imagen_hsv, colores, imagen_original):
-        """
-        Detecta los circulos de colores
-
-        Args:
-        imagen_hsv  -- (matriz) Matriz de la imagen en HSV 
-        colores     -- (array) Rangos de los colores.
-        imagen      -- (matriz) Matriz de la imagen en RGB
-
-        Return:
-        circulos_detetados  -- (array)  Contiene un vector por cada color detectado
-                                        este contiene: el rago de colores, centro, radio
-        """
-        circulos_detectados = []
-
-        color_bajo, color_alto, color_bajo2, color_alto2 = colores
-
-        # Crear una máscara utilizando los rangos de color especificados
-        mascara = cv.inRange(imagen_hsv, color_bajo, color_alto)
-        if color_alto2 and color_bajo2 is not None:
-            mascara1 = mascara
-            mascara2 = cv.inRange(imagen_hsv, color_bajo2, color_alto2)
-            mascara = cv.add(mascara1, mascara2)
-
-        # Aplicar la máscara a la imagen original
-        imagen_filtrada = cv.bitwise_and(imagen_original, imagen_original, mask=mascara)
-
-        # Convertir la imagen filtrada a escala de grises
-        imagen_gris = cv.cvtColor(imagen_filtrada, cv.COLOR_BGR2GRAY)
-
-        # Aplicar un filtro de suavizado para reducir el ruido
-        imagen_suavizada = cv.GaussianBlur(imagen_gris, (5,5),0)
-
-        # Aplicar la transformada de Hough para detectar círculos
-        circulos = cv.HoughCircles(imagen_suavizada, cv.HOUGH_GRADIENT, 1, minDist=20,
-                                    param1=15, param2=15,
-                                    minRadius= 5, maxRadius= 50)
-
-        # Si se detectaron círculos, agregarlos a la lista de circulos_detectados
-        if circulos is not None:
-            circulos = np.round(circulos[0, :]).astype(int)
-            for (x, y, r) in circulos:
-                #           (rango de colores , centro, radio)
-                circulos_detectados.append([colores, (x,y), r])
-        return circulos_detectados
-
-    @classmethod
-    def detectar_centro(cls, all_equipos, all_identificadores):
-        """
-        Detecta el centro del jugador en base al circulo de color del equipo, busca los 
-        identificadores cercanos e identifica de que color son, creando un vector por cada
-        jugador encontrado, con su
-
-        Args:
-        all_equipos         -- (array)  Un array de vectores, donde hay un vector 
-                                        por cada circulo detectado de los colores de su
-                                        equipo, este contiene:
-                                        rango de colores, centro, radio
-        all_identificadores -- (array)  Array de vectores, por cada identificador detectado
-                                        por cada circulo del identificador contiene:
-                                        rando de colores, centro, radio 
-
-        Return:
-        Jugadores   -- (array)  Contiene un vector por cada jugador encontrado
-                                Cada vector contiene:
-                                rango de color del equipo, rango de color del identificador,
-                                centro del circulo por quipo, centro del ciruclo del primer 
-                                identificador, centro del circulo del segundo identificador,
-                                centro del jugador.
-        """
-        Jugadores = []
-
-        for team in all_equipos:
-            x_aux, y_aux = None,None
-            for tag in all_identificadores:
-                x_val , y_val = tag[1]
-                x_cen , y_cen =team[1]
-
-                d = math.sqrt((x_val - x_cen)**2 + (y_val - y_cen)**2) 
-                if d <= 40:
-                    if x_aux is None and y_aux is None:
-                        x_aux, y_aux = x_val , y_val
-                    else:
-                        x_centro = (x_cen + x_aux + x_val) / 3
-                        y_centro = (y_cen + y_aux + y_val) / 3
-                        centro = (int(x_centro), int(y_centro))
-                        # color equipo, color identificador, centro circulo team, centro ID1, centro ID2, centro del jugador 
-                        Jugadores.append([team[0], tag[0], (x_cen , y_cen),(x_aux, y_aux), (x_val , y_val), centro])
-
-        return Jugadores
-
-
-
-
-# class Player:
-
-#     def __init__(self, equipo, identificador, centro):
+#     def __init__(self, equipo, colorID, centro):
 #         """
 #         Valores inciales para  la clase.
 
@@ -711,36 +556,199 @@ class Jugador:
 #         """
 #         self.equipo = equipo
 #         self.x, self.y = centro
-#         self.identificador = identificador
+#         self.colorID = colorID
 #         self.vecindad = 70
+        
+#     def dibujar(self, frame):   
+#         """
+#         Dibuja una línea entre los tag del jugador, con variables dentro de la misma clase.
+#         """
 
-#         self.ARUCO_DICT = {
-#             "DICT_6X6_50": cv2.aruco.DICT_6X6_50,
-#             "DICT_6X6_100": cv2.aruco.DICT_6X6_100,
-#             "DICT_6X6_250": cv2.aruco.DICT_6X6_250,
-#             "DICT_6X6_1000": cv2.aruco.DICT_6X6_1000,
-#             "DICT_7X7_50": cv2.aruco.DICT_7X7_50,
-#             "DICT_7X7_100": cv2.aruco.DICT_7X7_100,
-#             "DICT_7X7_250": cv2.aruco.DICT_7X7_250,
-#             "DICT_7X7_1000": cv2.aruco.DICT_7X7_1000,
-#         }
+#         # Reajusta los centros de los para poder dibujarlos en el 
+#         # frame principal
+#         self.x_tag1, self.y_tag1 = self.tags[0][1]
+#         self.x_tag1, self.y_tag1 = self.x + self.x_tag1 - self.vecindad , self.y + self.y_tag1 - self.vecindad
+#         self.x_tag2, self.y_tag2 = self.tags[1][1]
+#         self.x_tag2, self.y_tag2 = self.x + self.x_tag2 - self.vecindad , self.y + self.y_tag2 - self.vecindad
+#         cv.line(frame, (self.x_tag1, self.y_tag1), (self.x_tag2, self.y_tag2), (255,255,255),2)
+
+#     def seguimiento_players(self, hsv, img, frame):
+#         """
+#         Recorta la imagen original y hsv, para poder tener sólo la vecindad donde es posible que se mueva el jugador
+#         """
+
+#         # Recorta la imagen HSV y RGB segun la vecindad donde e sposible que se mueva el jugador
+#         self.roi_hsv = hsv[ self.y - self.vecindad : self.y + self.vecindad,
+#                             self.x - self.vecindad : self.x + self.vecindad]
+
+#         self.roi_img = img[ self.y - self.vecindad : self.y + self.vecindad,
+#                             self.x - self.vecindad : self.x + self.vecindad]
+
+#         if len(self.roi_img) > 0:
+
+#             # Detecta los circulos dentro del recorte y su centro 
+#             self.team = self.detectar_circulos_color(self.roi_hsv, self.equipo, self.roi_img)
+#             self.tags = self.detectar_circulos_color(self.roi_hsv, self.colorID, self.roi_img)
+#             self.centros = self.detectar_centro(self.team, self.tags)
+
+#             if len(self.centros) > 0:
+#                 self.dibujar(frame)
+#                 # Reescribe el centro y actualiza este en el objeto
+#                 self.x_nuevo, self.y_nuevo = self.centros[0][5]
+#                 self.x = self.x + self.x_nuevo - self.vecindad
+#                 self.y = self.y + self.y_nuevo - self.vecindad
+
+#                 # Dibuja un circulo en el centro del jugador
+#                 cv.circle(frame, (self.x, self.y), 4, (255, 0, 255), -1)
+#         return self.x, self.y
+
+#     @classmethod
+#     def detectar_circulos_color(cls, imagen_hsv, colores, imagen_original):
+#         """
+#         Detecta los circulos de colores
+
+#         Args:
+#         imagen_hsv  -- (matriz) Matriz de la imagen en HSV 
+#         colores     -- (array) Rangos de los colores.
+#         imagen      -- (matriz) Matriz de la imagen en RGB
+
+#         Return:
+#         circulos_detetados  -- (array)  Contiene un vector por cada color detectado
+#                                         este contiene: el rago de colores, centro, radio
+#         """
+#         circulos_detectados = []
+
+#         color_bajo, color_alto, color_bajo2, color_alto2 = colores
+
+#         # Crear una máscara utilizando los rangos de color especificados
+#         mascara = cv.inRange(imagen_hsv, color_bajo, color_alto)
+#         if color_alto2 and color_bajo2 is not None:
+#             mascara1 = mascara
+#             mascara2 = cv.inRange(imagen_hsv, color_bajo2, color_alto2)
+#             mascara = cv.add(mascara1, mascara2)
+
+#         # Aplicar la máscara a la imagen original
+#         imagen_filtrada = cv.bitwise_and(imagen_original, imagen_original, mask=mascara)
+
+#         # Convertir la imagen filtrada a escala de grises
+#         imagen_gris = cv.cvtColor(imagen_filtrada, cv.COLOR_BGR2GRAY)
+
+#         # Aplicar un filtro de suavizado para reducir el ruido
+#         imagen_suavizada = cv.GaussianBlur(imagen_gris, (5,5),0)
+
+#         # Aplicar la transformada de Hough para detectar círculos
+#         circulos = cv.HoughCircles(imagen_suavizada, cv.HOUGH_GRADIENT, 1, minDist=20,
+#                                     param1=15, param2=15,
+#                                     minRadius= 5, maxRadius= 50)
+
+#         # Si se detectaron círculos, agregarlos a la lista de circulos_detectados
+#         if circulos is not None:
+#             circulos = np.round(circulos[0, :]).astype(int)
+#             for (x, y, r) in circulos:
+#                 #           (rango de colores , centro, radio)
+#                 circulos_detectados.append([colores, (x,y), r])
+#         return circulos_detectados
+
+#     @classmethod
+#     def detectar_centro(cls, all_equipos, all_identificadores):
+#         """
+#         Detecta el centro del jugador en base al circulo de color del equipo, busca los 
+#         identificadores cercanos e identifica de que color son, creando un vector por cada
+#         jugador encontrado, con su
+
+#         Args:
+#         all_equipos         -- (array)  Un array de vectores, donde hay un vector 
+#                                         por cada circulo detectado de los colores de su
+#                                         equipo, este contiene:
+#                                         rango de colores, centro, radio
+#         all_identificadores -- (array)  Array de vectores, por cada identificador detectado
+#                                         por cada circulo del identificador contiene:
+#                                         rando de colores, centro, radio 
+
+#         Return:
+#         Jugadores   -- (array)  Contiene un vector por cada jugador encontrado
+#                                 Cada vector contiene:
+#                                 rango de color del equipo, rango de color del identificador,
+#                                 centro del circulo por quipo, centro del ciruclo del primer 
+#                                 identificador, centro del circulo del segundo identificador,
+#                                 centro del jugador.
+#         """
+#         Jugadores = []
+
+#         for team in all_equipos:
+#             x_aux, y_aux = None,None
+#             for tag in all_identificadores:
+#                 x_val , y_val = tag[1]
+#                 x_cen , y_cen =team[1]
+
+#                 d = math.sqrt((x_val - x_cen)**2 + (y_val - y_cen)**2) 
+#                 if d <= 40:
+#                     if x_aux is None and y_aux is None:
+#                         x_aux, y_aux = x_val , y_val
+#                     else:
+#                         x_centro = (x_cen + x_aux + x_val) / 3
+#                         y_centro = (y_cen + y_aux + y_val) / 3
+#                         centro = (int(x_centro), int(y_centro))
+#                         # color equipo, color identificador, centro circulo team, centro ID1, centro ID2, centro del jugador 
+#                         Jugadores.append([team[0], tag[0], (x_cen , y_cen),(x_aux, y_aux), (x_val , y_val), centro])
+
+#         return Jugadores
 
 
-#         aruco_type = "DICT_7X7_1000"
-
-#         arucoDict = cv2.aruco.getPredefinedDictionary(ARUCO_DICT[aruco_type])
-
-#         arucoParams = cv2.aruco.DetectorParameters()
-
-
-#         self.intrinsic_camera = np.array(((933.15867, 0, 657.59),(0,933.1586, 400.36993),(0,0,1)))
-#         self.distortion = np.array((-0.43948,0.18514,0,0))
-
-#     def deteccionJugadoresArucoTag(frame):
-#         output = pose_estimation(img, self.ARUCO_DICT[aruco_type], self.intrinsic_camera, self.distortion)
-#         cv2.imshow('Estimated Pose', output)
+ARUCO_DICT = {
+    "DICT_6X6_50": cv.aruco.DICT_6X6_50,
+    "DICT_6X6_100": cv.aruco.DICT_6X6_100,
+    "DICT_6X6_250": cv.aruco.DICT_6X6_250,
+    "DICT_6X6_1000": cv.aruco.DICT_6X6_1000,
+    "DICT_7X7_50": cv.aruco.DICT_7X7_50,
+    "DICT_7X7_100": cv.aruco.DICT_7X7_100,
+    "DICT_7X7_250": cv.aruco.DICT_7X7_250,
+    "DICT_7X7_1000": cv.aruco.DICT_7X7_1000,
+}
 
 
+aruco_type = "DICT_7X7_1000"
+
+arucoDict = cv.aruco.getPredefinedDictionary(ARUCO_DICT[aruco_type])
+
+
+def deteccionJugadoresArucoTag(frame):
+
+    gray = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
+    cv.aruco_dict = cv.aruco.getPredefinedDictionary(ARUCO_DICT[aruco_type])
+
+    parameters = cv.aruco.DetectorParameters()
+    detector = cv.aruco.ArucoDetector(cv.aruco_dict, parameters)
+
+
+    corners, ids, rejected_img_points = detector.detectMarkers(gray)
+
+
+    for i in range(len(corners)):
+        # corners[i] tiene la forma [4, 1, 2], con 4 esquinas, 1 array por esquina y 2 coordenadas (x, y)
+        corner_points = corners[i].reshape(4, 2)  # Aplanar la matriz para obtener las esquinas
+        
+        # Calcular el centro (promedio de las coordenadas de las esquinas)
+        center_x = np.mean(corner_points[:, 0])
+        center_y = np.mean(corner_points[:, 1])
+                
+        # Calcular el ángulo de rotación
+        # Usaremos las primeras dos esquinas para calcular el ángulo
+        # Se asume que las esquinas están ordenadas de manera consistente
+        vector_1 = corner_points[1] - corner_points[0]
+        angle = np.arctan2(vector_1[1], vector_1[0])
+        angle_deg = np.degrees(angle)
+
+        print(f"Marcador {ids[i]} - Centro: ({center_x}, {center_y}), Ángulo: {angle_deg} grados")
+
+        # Dibujar el centro y la orientación en la imagen
+        cv.circle(frame, (int(center_x), int(center_y)), 5, (0, 255, 0), -1)
+        end_point = (int(center_x + 50 * np.cos(angle)), int(center_y + 50 * np.sin(angle)))
+        cv.line(frame, (int(center_x), int(center_y)), end_point, (0, 255, 0), 2)
+        
+
+
+    return frame
 
 
 

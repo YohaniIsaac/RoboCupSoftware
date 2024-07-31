@@ -83,9 +83,9 @@ def make(conn1, conn3, env_ruta):
 
             # Dibujar los jugadores en la ventana
             player_1.generationRobot(fondo)
-            # player_2.generationRobot(fondo)
-            # player_3.generationRobot(fondo)
-            # player_4.generationRobot(fondo)
+            player_2.generationRobot(fondo)
+            player_3.generationRobot(fondo)
+            player_4.generationRobot(fondo)
 
             # Dibuja la pelota en la ventana
             pelota.generationBall(fondo)
@@ -149,7 +149,7 @@ def make(conn1, conn3, env_ruta):
             frame = cv.cvtColor(frame, cv.COLOR_RGB2BGR)
             
             conn1.send(frame)
-            # conn3.send(frame)
+            conn3.send(frame)
             inicio += 1 
     except:
         print("error en make")
@@ -194,17 +194,26 @@ def busqueda_player(conn4, queue):
     
     first_frame = True
 
+
     try:
         while True:
             # Recibir datos como bytes a través de la tubería
-            frame = conn4.recv()  
-            # FyC.deteccionJugadoresArucoTag(frame)
-            # FyC.DetectarJugadoresCirculosDeColores(frame)
-            key = cv2.waitKey(1) & 0xFF
-            if key == ord('q'):
-                break
+            frame = conn4.recv()
+            img = np.copy(frame)
 
-        cv2.destroyAllWindows()
+            cv.imshow("deteccion", img)
+
+
+            salida = FyC.deteccionJugadoresArucoTag(img)
+            # FyC.DetectarJugadoresCirculosDeColores(frame)
+
+
+            cv.imshow("deteccion", salida)
+
+            k = cv.waitKey(1) & 0xFF
+            if k == 27:
+                break
+        cv.destroyAllWindows()
 
 
     except:
