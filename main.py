@@ -94,7 +94,11 @@ def make(conn1, conn3, env_ruta):
             player_1.teclas()
 
             # Actualizar la posición de los jugadores
-            player_1.motion_player(pelota)
+            player_1.motion_player(pelota, player_2, player_3, player_4)
+            player_2.motion_player(pelota, player_1, player_3, player_4)
+            player_3.motion_player(pelota, player_1, player_2, player_4)
+            player_4.motion_player(pelota, player_1, player_2, player_3)
+
             pelota.motion_ball()
 
 

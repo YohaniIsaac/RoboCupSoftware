@@ -38,8 +38,8 @@ class Objeto:
         self.desaceleracion_roce = 0.5
         self.masa = masa                # no se esta utilizando la funcion actualmente
 
-        self.max_vel = 4                # Velocidad maxima a la que puede llegar el objeto
-        self.f_aceleracion = 0.3        # Factor de aceleracion
+        self.max_vel = 10                # Velocidad maxima a la que puede llegar el objeto #4
+        self.f_aceleracion = 1        # Factor de aceleracion
 
 
         self.identificador = identificador    # Valor de identificacion del objeto (0 para la pelota)
@@ -125,7 +125,7 @@ class Objeto:
         return en_curso 
  
 
-    def motion_player(self, pelota):
+    def motion_player(self, pelota, jugador_1 = None, jugador_2 = None, jugador_3 = None):
         """
         Genera el movimiento del objeto, con los valores del objeto.
         """
@@ -140,7 +140,12 @@ class Objeto:
 
         # Interacción del jugador con la pelota
         self.choque(pelota)
+        if jugador_1: self.choque(jugador_1)
+        if jugador_2: self.choque(jugador_2)
+        if jugador_3: self.choque(jugador_3)
+
         self.disparo(pelota)
+        self.desaceleracion()
         # self.colision(pelota)
 
     def motion_ball(self):
