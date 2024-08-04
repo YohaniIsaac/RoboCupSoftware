@@ -43,10 +43,10 @@ void setup() {
   
 
   // Inicialización del módulo NRF24L01
-  // radio.begin();
-  // radio.openReadingPipe(1, address);
-  // radio.startListening();
-  Serial.begin(9600);
+  radio.begin();
+  radio.openReadingPipe(1, address);
+  radio.startListening();
+
   buzzer.playFromProgramSpace(PSTR("!L16 V10 cdegreg4"));
   delay(1500);
 
@@ -64,15 +64,12 @@ void loop() {
     digitalWrite(encendidoPin, LOW); // Apagar el circuito
   }
   // Verificar si se recibe un comando.
-  // if (radio.available()) {
-  //   char comando;
-  //   radio.read(&comando, sizeof(comando));
-  //   ejecutarComando(comando);
-  // }
-  if(Serial.available() > 0 ){
-    char comando = Serial.read();
+  if (radio.available()) {
+    char comando;
+    radio.read(&comando, sizeof(comando));
     ejecutarComando(comando);
   }
+
   // Verificar si se ha alcanzado la duración deseada
   if (millis() - tiempoInicio >= duracionAccion) {
     
@@ -99,7 +96,7 @@ void ejecutarComando(char comando) {
       tiempoInicio = millis(); // Iniciar el temporizador
       break;
     case 'P': // Patear
-      activarSolenoide();
+      ();
       break;
     case 'D': // Activar el motor DC (rodillo)
       activarMotorDC();

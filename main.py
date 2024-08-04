@@ -158,7 +158,7 @@ def make(conn1, conn3, env_ruta):
     except:
         print("error en make")
 
-def busqueda_ball(conn2, queue):
+def busqueda_ball(conn2, ballSend):
     # Color          
     naranjo= ((10, 100, 20), (30, 255, 255))  # Rango de color para el naranjo
 
@@ -180,7 +180,8 @@ def busqueda_ball(conn2, queue):
                 cv.imshow("pelota ", pelota.roi_hsv)
 
                 enviar = x_pelota, y_pelota
-                queue.put(("pelota", enviar))
+                ballSend.send(enviar)
+
             k = cv.waitKey(1) & 0xFF
             if k == 27:
                 break
@@ -189,7 +190,7 @@ def busqueda_ball(conn2, queue):
     except:
         print("error en la busqueda de pelota")
 
-def busqueda_player(conn4, queue):
+def busqueda_player(conn4, playerSend):
     # Colores
     rojo = ((0, 100, 20), (8, 255, 255), (175, 100, 20), (179, 255, 255))    # Rango de color para el rojo
     azul = ((110, 150, 150), (130, 255, 255), None, None)  # Rango de color para el azul
@@ -198,7 +199,7 @@ def busqueda_player(conn4, queue):
     
     first_frame = True
 
-
+    dentro = True
     try:
         while True:
             # Recibir datos como bytes a través de la tubería
@@ -208,7 +209,15 @@ def busqueda_player(conn4, queue):
             cv.imshow("deteccion", img)
 
 
-            salida = FyC.deteccionJugadoresArucoTag(img)
+            salida, datos = FyC.deteccionJugadoresArucoTag(img)
+            # print(datos)
+            playerSend.send(datos)
+
+            # if dentro:
+            #     # print(datos)
+            #     dentro = False
+
+
             # FyC.DetectarJugadoresCirculosDeColores(frame)
 
 
@@ -245,13 +254,30 @@ def busqueda_player(conn4, queue):
 #     except:
 #         print("error en comandos")
  
-# def trayectoria(queue, lista, evento):
-#     try:
-#         x_obj = 800
-#         y_obs = 500
-        
-#     except:
-#         print("error en trayectoria")
+def trayectoria(ballReceived, playerReceived):
+    try:
+        print("---------COORDENADAS DE PELOTA------------")
+        print("---------COORDENADAS DE JUGADORES------------")
+        while True:
+
+            coords_ball = ballReceived.recv()
+            coords_players = playerReceived.recv()
+            # coopds_player_1 =  coords_players[0].get('x','y','angulo')
+            # coopds_player_2 =   coords_players[1].get('x','y','angulo')
+            # coopds_player_3 =   coords_players[2].get('x','y','angulo')
+            # coopds_player_4 =   coords_players[3].get('x','y','angulo')
+            # print(coords_players[0])
+            for player in coords_players:
+                if player.get('id') == 1:
+                    x = player.get('x')
+                    y = player.get('y')
+                    angle = player.get('angulo')
+                    print(f"coordenadas x: {x}   y: {y},   angulo: {angle}")
+        # print(coords_ball)
+            # print(coords_players[1])
+
+    except:
+        print("error en trayectoria")
 
 if __name__ == '__main__':
     # Configurar el logger principal, para ver los todos los mensajes 
@@ -263,10 +289,13 @@ if __name__ == '__main__':
     # Crear una tubería para la comunicación entre procesos
     conn1, conn2 = multiprocessing.Pipe() # envia el frame
     conn3, conn4 = multiprocessing.Pipe() # envia el frame
+
+    ballSend, ballReceived = multiprocessing.Pipe()     # Enviar las coordenadas de la pelota
+    playerSend, playerReceived = multiprocessing.Pipe() # Enviar las coordenadas de los jugadores
     # conn5, conn6 = multiprocessing.Pipe()
 
     # Crear la cola compartida
-    queue = multiprocessing.Queue() # Envia las coordenadas de la pelota y jugadores
+    # queue = multiprocessing.Queue() # Envia las coordenadas de la pelota y jugadores
 
     # Crea un evento
     # evento = Event() # Para una sincronización de los datos enviados y recibidos
@@ -285,20 +314,23 @@ if __name__ == '__main__':
 
     # Crear los procesos
     p1 = multiprocessing.Process(target=make,           args=(conn1, conn3, env_ruta) )
-    p2 = multiprocessing.Process(target=busqueda_ball,  args=(conn2, queue) )
-    p3 = multiprocessing.Process(target=busqueda_player,args=(conn4, queue) )
-    # p4 = multiprocessing.Process(target=comandos,       args=(env_ruta,) )
+    p2 = multiprocessing.Process(target=busqueda_ball,  args=(conn2, ballSend) )
+    p3 = multiprocessing.Process(target=busqueda_player,args=(conn4, playerSend) )
+    
+    p4 = multiprocessing.Process(target=trayectoria,    args=(ballReceived, playerReceived))
+    # p5 = multiprocessing.Process(target=comandos,       args=(env_ruta,) )
+
 
     # Iniciar los procesos
     p1.start()
     p2.start()
     p3.start()
-    # p4.start()
+    p4.start()
 
     # Esperar a que los procesos terminen
     p1.join()
     p2.join()
     p3.join()
-    # p4.join()
+    p4.join()
 
 

@@ -3,7 +3,7 @@ import keyboard
 import time
 
 # Configura el puerto serie
-ser = serial.Serial('COM7', 9600) 
+ser = serial.Serial('COM14', 9600) 
 
 # Diccionario de asignación de teclas a comandos
 teclas_a_comandos = {
@@ -33,6 +33,7 @@ while True:
                 ser.write(comando.encode())
                 enviar_comando[tecla] = True
                 tiempo_inicio_comando = time.time()
+                print()
 
         # Verificar si ha pasado suficiente tiempo para desactivar la bandera
         if enviar_comando[tecla] and time.time() - tiempo_inicio_comando >= duracion_comando:
