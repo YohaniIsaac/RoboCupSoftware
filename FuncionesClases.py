@@ -8,13 +8,13 @@ import math
 # CREACION DEL JUEGO #
 ######################
 class Objeto:
-    def __init__(self, masa,x, y, equipo, etiqueta, angulo, dx, dy, theta, radio, identificador):
+    def __init__(self, masa, x, y, equipo, etiqueta, angulo, dx, dy, theta, radio, identificador):
         """
-        Valores inciales para la clase.
+        Valores inciales para construir el objeto
 
         Args:
-        x           -- (int)    Posición en x del objeto.
-        y           -- (int)    Posición en y del objeto.
+        x           -- (int)    Posicion en x del objeto.
+        y           -- (int)    Posicion en y del objeto.
         equipo      -- (array)  Color identificador del jugador, equipo.
         etiqueta    -- (array)  Color de identificación del jugador, tag.
         angulo      -- (int)    Posición del angulo incial del objeto.
@@ -41,14 +41,12 @@ class Objeto:
         self.max_vel = 10                # Velocidad maxima a la que puede llegar el objeto #4
         self.f_aceleracion = 1        # Factor de aceleracion
 
-
         self.identificador = identificador    # Valor de identificacion del objeto (0 para la pelota)
         
         if self.identificador != 0:
             path = "Tag_" + str(self.identificador) + ".png"
-            arucoTag_img = pygame.image.load("arucoMarkers/" + path)
-            self.arucoTag_img = pygame.transform.scale(arucoTag_img, (35,35))
-
+            aruco_tag_img = pygame.image.load("arucoMarkers/" + path)
+            self.aruco_tag_img = pygame.transform.scale(aruco_tag_img, (35, 35))
 
         # Para realizar la toma de pelota y posterior disparo de la misma
         self.tomando_pelota = False
@@ -57,11 +55,36 @@ class Objeto:
         self.ancho_campo = 1280
         self.alto_campo = 750
 
+        if self.identificador != 0:
+            # Cargar la imagen
+            path = "robot_" + str(self.identificador) + ".png"
+            img_robot = pygame.image.load("arucoMarkers/" + path)
+
+            # Obtener las dimensiones de la imagen
+            original_width, original_height = img_robot.get_size()
+
+            # Definir el nuevo ancho y alto
+            new_width = 50
+
+            # Caclcular el nuevo alto para mantener la relacion de aspecto
+            aspect_ratio = original_width / original_height
+            new_height = int(new_width / aspect_ratio)
+
+            self.img_robot = pygame.transform.scale(img_robot, (new_width, new_height))
+        if self.identificador  == 0:
+            # Crear una superficie con fondo transparente
+            naranjo = (244, 98, 0)
+            diameter = 21.5
+            surface = pygame.Surface((diameter, diameter), pygame.SRCALPHA)
+            # Dibujar un círculo en la superficie
+            pygame.draw.circle(surface, (244, 98, 0, 255), (diameter // 2, diameter // 2), 22 // 2)
+
+            self.img_robot = surface
 
 
     def intrucciones(self, punto):
         # Obtención de los parámetros de la instruccion
-        x_destino , y_destino = punto
+        x_destino, y_destino = punto
 
         en_curso = True
         # Evita movimientos cuando el punto se encuentra muy cercano al actual
@@ -122,8 +145,7 @@ class Objeto:
             en_curso = False
             # print(self.x, self.y)
 
-        return en_curso 
- 
+        return en_curso
 
     def motion_player(self, pelota, jugador_1 = None, jugador_2 = None, jugador_3 = None):
         """
@@ -139,13 +161,19 @@ class Objeto:
         self.angulo = self.angulo % 360
 
         # Interacción del jugador con la pelota
-        self.choque(pelota)
-        if jugador_1: self.choque(jugador_1)
-        if jugador_2: self.choque(jugador_2)
-        if jugador_3: self.choque(jugador_3)
+        # self.choque(pelota)
+        if jugador_1:
+            self.check_collision(jugador_1)
+        if jugador_2:
+            self.check_collision(jugador_2)
+        # if jugador_3: self.check_collision(jugador_3)
 
-        self.disparo(pelota)
+
         self.desaceleracion()
+        self.disparo(pelota)
+        if not self.tomando_pelota:
+            self.check_collision(pelota)
+
         # self.colision(pelota)
 
     def motion_ball(self):
@@ -163,7 +191,6 @@ class Objeto:
 
         self.desaceleracion()
         self.colision_borde()
-
 
     def colision(self, obj):
         """
@@ -195,7 +222,6 @@ class Objeto:
                 # Ajustar la velocidad de la pelota después de la colisión
                 obj.dx = self.dx + diff_vel_x * factor_rebote
                 obj.dy = self.dy + diff_vel_y * factor_rebote
-
 
     def colision_borde(self):
         """
@@ -287,21 +313,23 @@ class Objeto:
 
         # Tomar posesion de la pelota con la letra k
         if keys[pygame.K_k]:
-            if self.distanciaConPelota < 15:
+            if self.distanciaConPelota < 5:
                 obj.x = self.coordsHoldBall_x
                 obj.y = self.coordsHoldBall_y
+                obj.dx = self.dx
+                obj.dy = self.dy
 
                 self.tomando_pelota = True # para el disparo
             else:
                 pass
         else:
+
             if self.tomando_pelota:
                 vel_disparo = 10
-                angle = math.radians(self.angulo)
+                angle = math.radians(self.angulo) - math.pi/2
                 obj.dx = vel_disparo * math.cos(angle)
                 obj.dy = vel_disparo * math.sin(angle)
                 self.tomando_pelota = False
-
 
     def choque(self, obj):
         """
@@ -311,7 +339,6 @@ class Objeto:
         obj     -- (objeto) Objeto que es impactado (pelota).
         """
         keys = pygame.key.get_pressed()
-
 
         self.distancia = math.dist((self.x, self.y), (obj.x, obj.y))
         self.distanciaColision = self.radio + obj.radio
@@ -344,9 +371,6 @@ class Objeto:
                 obj.x += direccion[0] * overlap
                 obj.y += direccion[1] * overlap
 
-
-
-            
     def circulo(self, img, pelota_x , pelota_y, pelota_radio, naranjo):
         """
         Genera los circulos.
@@ -382,6 +406,80 @@ class Objeto:
 
         pygame.draw.circle(img, (255,255,255),  (self.coordsHoldBall_x, self.coordsHoldBall_x), 1)
 
+    def generationRobotV2(self, fondo):
+        # Rotar la imagen
+        self.img_robot_rotated = pygame.transform.rotate(self.img_robot, -self.angulo)
+
+        # Obtiene el rectangul de la iamgen
+        self.rotated_rect = self.img_robot_rotated.get_rect(center=(self.x, self.y))
+        
+        # Dibujar la imagen  rotada 
+        fondo.blit(self.img_robot_rotated, self.rotated_rect.topleft)
+
+
+        front_angle = math.radians(self.angulo) - math.pi/2 # Convierte el ángulo a radianes
+
+        self.coordsHoldBall_x = int(self.x + 40 * math.cos(front_angle))  # 30 es el radio del círculo
+        self.coordsHoldBall_y = int(self.y + 40 * math.sin(front_angle))
+
+        # Dibuja el punto indicando el frente
+        pygame.draw.circle(fondo, (255,255,255), (self.coordsHoldBall_x, self.coordsHoldBall_y), 5)
+    def generationBallV2(self, fondo):
+
+        # Rotar la imagen
+        self.img_robot_rotated = pygame.transform.rotate(self.img_robot, -self.angulo)
+
+        # Obtiene el rectangul de la iamgen
+        self.rotated_rect = self.img_robot_rotated.get_rect(center=(self.x, self.y))
+
+        # Dibujar la imagen  rotada
+        fondo.blit(self.img_robot_rotated, self.rotated_rect.topleft)
+    def check_collision(self, obj):
+
+        # Crea máscara para la primera imagen 
+        mask1 = pygame.mask.from_surface(self.img_robot_rotated)
+        mask2 = pygame.mask.from_surface(obj.img_robot_rotated)
+        # Obtener los offsets entre las dos imagenes
+        offset = (obj.rotated_rect.left - self.rotated_rect.left, obj.rotated_rect.top - self.rotated_rect.top)
+
+        # Comprobar la colision usando la mascara 
+        collision = mask1.overlap(mask2, offset)
+        if collision:
+            distancia = math.dist((self.x, self.y), (obj.x, obj.y))
+            # Calcular la dirección del golpe 
+            direccion = (obj.x - self.x, obj.y - self.y)
+            # Normalizar la dirección
+            direccion = (direccion[0] / distancia, direccion[1] / distancia)
+            # Calcular el factor de rebote según la masa de los objetos (jugador y pelota)
+            masa_total = self.masa + obj.masa
+            factor_rebote = (2 * obj.masa) / masa_total
+            # Actualizar la velocidad de la pelota según la dirección del golpe y el factor de rebote
+            obj.dx = direccion[0] * factor_rebote
+            obj.dy = direccion[1] * factor_rebote
+
+            # Calcular la superposición y ajustar las posiciones
+            separation_distance = (self.rotated_rect.width / 2 + obj.rotated_rect.width / 2) - distancia
+            # suavizado = 0.1 # Robots
+            suavizado = 1.3
+
+            if separation_distance > 0:
+                # Ajustar la posición de los objetos para evitar la superposición
+                separation_x = direccion[0] * separation_distance
+                separation_y = direccion[1] * separation_distance
+                # Aplicar el factor de suavizado
+                separation_x *= suavizado
+                separation_y *= suavizado
+                # Mover los objetos
+                self.x -= separation_x / 2
+                self.y -= separation_y / 2
+                obj.x += separation_x / 2
+                obj.y += separation_y / 2
+
+            # Actualizar los rectángulos rotados después de mover los objetos
+            self.rotated_rect = self.img_robot_rotated.get_rect(center=(self.x, self.y))
+            obj.rotated_rect = obj.img_robot_rotated.get_rect(center=(obj.x, obj.y))
+        else: pass
+
     def generationRobot(self, fondo):
         """
         Genera un robot ciruclar con un arugotag en la parte superior de éste
@@ -394,10 +492,12 @@ class Objeto:
         blanco = (255,255,255)
 
         # Dibuja el círculo
-        pygame.draw.circle(fondo, negro, (self.x, self.y), 30)
+        pygame.draw.circle(fondo, negro, (self.x-6, self.y-6), 30)
+        pygame.draw.circle(fondo, negro, (self.x+6, self.y+6), 30)
+        pygame.draw.rect(fondo, negro, (self.x-6, self.y-30,36,30))
 
         # Rota la imagen
-        rotated_image = pygame.transform.rotate(self.arucoTag_img, -self.angulo)
+        rotated_image = pygame.transform.rotate(self.aruco_tag_img, -self.angulo)
         rotated_rect = rotated_image.get_rect(center=(self.x, self.y))
         fondo.blit(rotated_image, rotated_rect)
 
@@ -417,16 +517,9 @@ class Objeto:
         Args:
         fondo   -- (matriz) Fonde del campo de futbol
         
-        """ 
-
+        """
         naranjo = (244,98,0)
         pygame.draw.circle(fondo, naranjo, (self.x , self.y), self.radio)       
-
-
-
-
-
-
 
 #########################
 # BUSQUEDA DE LA PELOTA #
@@ -473,7 +566,6 @@ class Ball:
             
         return self.x, self.y
 
-
     def goles(self, frame):
         """
         Detecta los goles de cada uno de los equipos ****
@@ -490,7 +582,6 @@ class Ball:
             self.goles_rojo += 1
             self.pelota_fuera = False
 
-
         font = cv.FONT_HERSHEY_SIMPLEX
         posicion_texto_rojo = (50, 50)
         posicion_texto_azul = (frame.shape[1] - 200, 50)
@@ -501,8 +592,6 @@ class Ball:
 
         cv.putText(frame, goles_texto_rojo, posicion_texto_rojo, font, 0.7, color_rojo, 2, cv.LINE_AA)
         cv.putText(frame, goles_texto_azul, posicion_texto_azul, font, 0.7, color_azul, 2, cv.LINE_AA)
-
-
 
     @classmethod 
     def detectar_circulos_color(cls, imagen_hsv, colores, imagen_original):
@@ -519,7 +608,6 @@ class Ball:
                                         este contiene: el rago de colores, centro, radio
         """
         circulos_detectados = []
-
         color_bajo, color_alto = colores
 
         # Crear una máscara utilizando los rangos de color especificados
@@ -544,161 +632,9 @@ class Ball:
             x , y , r = circulos[0][0][0], circulos[0][0][1], circulos[0][0][2]
         return int(x), int(y), int(r)
 
-
-###########################
-#  BUSQUEEDA DE JUGADORES #
-###########################
-# class Jugador:
-
-#     def __init__(self, equipo, colorID, centro):
-#         """
-#         Valores inciales para  la clase.
-
-#         Args:
-#         equipo      -- (array) Rangos de colores del equipo.
-#         colorId     -- (array) Rangos de colores del tag (un color por jugador).
-#         centro      -- (array) Coordenadas del centro del jugador.
-#         """
-#         self.equipo = equipo
-#         self.x, self.y = centro
-#         self.colorID = colorID
-#         self.vecindad = 70
-        
-#     def dibujar(self, frame):   
-#         """
-#         Dibuja una línea entre los tag del jugador, con variables dentro de la misma clase.
-#         """
-
-#         # Reajusta los centros de los para poder dibujarlos en el 
-#         # frame principal
-#         self.x_tag1, self.y_tag1 = self.tags[0][1]
-#         self.x_tag1, self.y_tag1 = self.x + self.x_tag1 - self.vecindad , self.y + self.y_tag1 - self.vecindad
-#         self.x_tag2, self.y_tag2 = self.tags[1][1]
-#         self.x_tag2, self.y_tag2 = self.x + self.x_tag2 - self.vecindad , self.y + self.y_tag2 - self.vecindad
-#         cv.line(frame, (self.x_tag1, self.y_tag1), (self.x_tag2, self.y_tag2), (255,255,255),2)
-
-#     def seguimiento_players(self, hsv, img, frame):
-#         """
-#         Recorta la imagen original y hsv, para poder tener sólo la vecindad donde es posible que se mueva el jugador
-#         """
-
-#         # Recorta la imagen HSV y RGB segun la vecindad donde e sposible que se mueva el jugador
-#         self.roi_hsv = hsv[ self.y - self.vecindad : self.y + self.vecindad,
-#                             self.x - self.vecindad : self.x + self.vecindad]
-
-#         self.roi_img = img[ self.y - self.vecindad : self.y + self.vecindad,
-#                             self.x - self.vecindad : self.x + self.vecindad]
-
-#         if len(self.roi_img) > 0:
-
-#             # Detecta los circulos dentro del recorte y su centro 
-#             self.team = self.detectar_circulos_color(self.roi_hsv, self.equipo, self.roi_img)
-#             self.tags = self.detectar_circulos_color(self.roi_hsv, self.colorID, self.roi_img)
-#             self.centros = self.detectar_centro(self.team, self.tags)
-
-#             if len(self.centros) > 0:
-#                 self.dibujar(frame)
-#                 # Reescribe el centro y actualiza este en el objeto
-#                 self.x_nuevo, self.y_nuevo = self.centros[0][5]
-#                 self.x = self.x + self.x_nuevo - self.vecindad
-#                 self.y = self.y + self.y_nuevo - self.vecindad
-
-#                 # Dibuja un circulo en el centro del jugador
-#                 cv.circle(frame, (self.x, self.y), 4, (255, 0, 255), -1)
-#         return self.x, self.y
-
-#     @classmethod
-#     def detectar_circulos_color(cls, imagen_hsv, colores, imagen_original):
-#         """
-#         Detecta los circulos de colores
-
-#         Args:
-#         imagen_hsv  -- (matriz) Matriz de la imagen en HSV 
-#         colores     -- (array) Rangos de los colores.
-#         imagen      -- (matriz) Matriz de la imagen en RGB
-
-#         Return:
-#         circulos_detetados  -- (array)  Contiene un vector por cada color detectado
-#                                         este contiene: el rago de colores, centro, radio
-#         """
-#         circulos_detectados = []
-
-#         color_bajo, color_alto, color_bajo2, color_alto2 = colores
-
-#         # Crear una máscara utilizando los rangos de color especificados
-#         mascara = cv.inRange(imagen_hsv, color_bajo, color_alto)
-#         if color_alto2 and color_bajo2 is not None:
-#             mascara1 = mascara
-#             mascara2 = cv.inRange(imagen_hsv, color_bajo2, color_alto2)
-#             mascara = cv.add(mascara1, mascara2)
-
-#         # Aplicar la máscara a la imagen original
-#         imagen_filtrada = cv.bitwise_and(imagen_original, imagen_original, mask=mascara)
-
-#         # Convertir la imagen filtrada a escala de grises
-#         imagen_gris = cv.cvtColor(imagen_filtrada, cv.COLOR_BGR2GRAY)
-
-#         # Aplicar un filtro de suavizado para reducir el ruido
-#         imagen_suavizada = cv.GaussianBlur(imagen_gris, (5,5),0)
-
-#         # Aplicar la transformada de Hough para detectar círculos
-#         circulos = cv.HoughCircles(imagen_suavizada, cv.HOUGH_GRADIENT, 1, minDist=20,
-#                                     param1=15, param2=15,
-#                                     minRadius= 5, maxRadius= 50)
-
-#         # Si se detectaron círculos, agregarlos a la lista de circulos_detectados
-#         if circulos is not None:
-#             circulos = np.round(circulos[0, :]).astype(int)
-#             for (x, y, r) in circulos:
-#                 #           (rango de colores , centro, radio)
-#                 circulos_detectados.append([colores, (x,y), r])
-#         return circulos_detectados
-
-#     @classmethod
-#     def detectar_centro(cls, all_equipos, all_identificadores):
-#         """
-#         Detecta el centro del jugador en base al circulo de color del equipo, busca los 
-#         identificadores cercanos e identifica de que color son, creando un vector por cada
-#         jugador encontrado, con su
-
-#         Args:
-#         all_equipos         -- (array)  Un array de vectores, donde hay un vector 
-#                                         por cada circulo detectado de los colores de su
-#                                         equipo, este contiene:
-#                                         rango de colores, centro, radio
-#         all_identificadores -- (array)  Array de vectores, por cada identificador detectado
-#                                         por cada circulo del identificador contiene:
-#                                         rando de colores, centro, radio 
-
-#         Return:
-#         Jugadores   -- (array)  Contiene un vector por cada jugador encontrado
-#                                 Cada vector contiene:
-#                                 rango de color del equipo, rango de color del identificador,
-#                                 centro del circulo por quipo, centro del ciruclo del primer 
-#                                 identificador, centro del circulo del segundo identificador,
-#                                 centro del jugador.
-#         """
-#         Jugadores = []
-
-#         for team in all_equipos:
-#             x_aux, y_aux = None,None
-#             for tag in all_identificadores:
-#                 x_val , y_val = tag[1]
-#                 x_cen , y_cen =team[1]
-
-#                 d = math.sqrt((x_val - x_cen)**2 + (y_val - y_cen)**2) 
-#                 if d <= 40:
-#                     if x_aux is None and y_aux is None:
-#                         x_aux, y_aux = x_val , y_val
-#                     else:
-#                         x_centro = (x_cen + x_aux + x_val) / 3
-#                         y_centro = (y_cen + y_aux + y_val) / 3
-#                         centro = (int(x_centro), int(y_centro))
-#                         # color equipo, color identificador, centro circulo team, centro ID1, centro ID2, centro del jugador 
-#                         Jugadores.append([team[0], tag[0], (x_cen , y_cen),(x_aux, y_aux), (x_val , y_val), centro])
-
-#         return Jugadores
-
+##############################
+# BUSQUEDA DE LLOS JUGADORES #
+##############################
 
 ARUCO_DICT = {
     "DICT_6X6_50": cv.aruco.DICT_6X6_50,
@@ -711,11 +647,8 @@ ARUCO_DICT = {
     "DICT_7X7_1000": cv.aruco.DICT_7X7_1000,
 }
 
-
 aruco_type = "DICT_7X7_1000"
-
 arucoDict = cv.aruco.getPredefinedDictionary(ARUCO_DICT[aruco_type])
-
 
 def deteccionJugadoresArucoTag(frame):
 
@@ -725,10 +658,7 @@ def deteccionJugadoresArucoTag(frame):
     parameters = cv.aruco.DetectorParameters()
     detector = cv.aruco.ArucoDetector(cv.aruco_dict, parameters)
 
-
     corners, ids, rejected_img_points = detector.detectMarkers(gray)
-    
-
     datos = []
     if ids is not None:
         for corner, aruco_id in zip(corners, ids):
@@ -738,7 +668,7 @@ def deteccionJugadoresArucoTag(frame):
             # Calcular el centro (promedio de las coordenadas de las esquinas)
             center_x = np.mean(corner_points[:, 0])
             center_y = np.mean(corner_points[:, 1])
-                    
+
             # Calcular el ángulo de rotación
             # Usaremos las primeras dos esquinas para calcular el ángulo
             # Se asume que las esquinas están ordenadas de manera consistente
@@ -755,57 +685,5 @@ def deteccionJugadoresArucoTag(frame):
             cv.circle(frame, (int(center_x), int(center_y)), 5, (0, 255, 0), -1)
             end_point = (int(center_x + 50 * np.cos(angle)), int(center_y + 50 * np.sin(angle)))
             cv.line(frame, (int(center_x), int(center_y)), end_point, (0, 255, 0), 2)
-        
-
 
     return frame, datos
-
-
-
-
-
-
-# def DetectarJugadoresCirculosDeColores(frame):
-
-#     # Copia el frame para manejarlo y lo transoforma a escala HSV
-#     img = np.copy(frame)
-#     hsv = cv.cvtColor(frame, cv.COLOR_BGR2HSV)
-
-#     if first_frame:
-#         circulos_rojos      = FyC.Jugador.detectar_circulos_color(hsv, rojo, img) 
-#         circulos_azul       = FyC.Jugador.detectar_circulos_color(hsv, azul, img) 
-#         circulos_cian       = FyC.Jugador.detectar_circulos_color(hsv, cian, img) 
-#         circulos_magenta    = FyC.Jugador.detectar_circulos_color(hsv, magenta, img) 
-
-#         all_equipos = circulos_rojos + circulos_azul
-#         all_identificadores = circulos_magenta + circulos_cian
-
-#         Jugadores = FyC.Jugador.detectar_centro(all_equipos,all_identificadores)
-        
-
-#         equipo = Jugadores[0][0]
-#         colorID = Jugadores[0][1]
-#         centro = Jugadores[0][5]
-        
-#         players = []
-#         for jugador in Jugadores:
-#             equipo = jugador[0]
-#             colorID = jugador[1]
-#             centro2 = jugador[3]
-#             centro3 = jugador[4]
-#             centro = jugador[5]
-
-#             player = FyC.Jugador(equipo, colorID, centro)
-#             players.append(player)
-
-#         first_frame = False
-        
-#     else:
-#         for player in players:
-#             x, y = player.seguimiento_players(hsv,img,frame)
-#             # Enviar el centro del jugador
-
-#             cv.imshow("jugador 1", player.roi_hsv)
-#             enviar = (x,y)
-#         queue.put(("juagador", enviar))
-    # cv.imshow("frame jugador ", frame)

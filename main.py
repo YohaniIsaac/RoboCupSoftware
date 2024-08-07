@@ -54,10 +54,9 @@ def make(conn1, conn3, env_ruta):
     player_3 = FyC.Objeto(1,int(ancho/2),    250,            azul, cian,     180,    -1,  1,  1.26, 30,3)
     player_4 = FyC.Objeto(1,int(ancho/2),    int(alto-250),  azul, magenta,  270,    1,  -1,  -1.29, 30,4)
 
-    pelota = FyC.Objeto(2,400, 500, (0, 0, 255), None, 270, -2, -2, -1.29, 10, 0)
+    pelota = FyC.Objeto(0.0000002,400, 500, (0, 0, 255), None, 270, -2, -2, -1.29, 10, 0)
     inicio = 0 
     en_curso = False
-
 
     last_time = time.time()
     delay = 4
@@ -79,25 +78,26 @@ def make(conn1, conn3, env_ruta):
             # if len(lista) > 0:
             #     print("lista en make" , lista)
 
-
+            
 
             # Dibujar los jugadores en la ventana
-            player_1.generationRobot(fondo)
-            player_2.generationRobot(fondo)
-            player_3.generationRobot(fondo)
-            player_4.generationRobot(fondo)
+            player_1.generationRobotV2(fondo)
+            player_2.generationRobotV2(fondo)
+            # player_3.generationRobot(fondo)
+            # player_4.generationRobot(fondo)
 
             # Dibuja la pelota en la ventana
-            pelota.generationBall(fondo)
+            # pelota.generatiosnBall(fondo)
+            pelota.generationBallV2(fondo)
 
             # Permite mover a un jugador con las teclas
             player_1.teclas()
 
             # Actualizar la posición de los jugadores
-            player_1.motion_player(pelota, player_2, player_3, player_4)
-            player_2.motion_player(pelota, player_1, player_3, player_4)
-            player_3.motion_player(pelota, player_1, player_2, player_4)
-            player_4.motion_player(pelota, player_1, player_2, player_3)
+            player_1.motion_player(pelota, player_2, None, None)
+            player_2.motion_player(pelota, player_1, None, None)
+            # player_3.motion_player(pelota, player_1, player_2, player_4)
+            # player_4.motion_player(pelota, player_1, player_2, player_3)
 
             pelota.motion_ball()
 
@@ -152,8 +152,8 @@ def make(conn1, conn3, env_ruta):
             frame = cv.transpose(frame, (1,0,2))
             frame = cv.cvtColor(frame, cv.COLOR_RGB2BGR)
             
-            conn1.send(frame)
-            conn3.send(frame)
+            # conn1.send(frame)
+            # conn3.send(frame)
             inicio += 1 
     except:
         print("error en make")
@@ -256,25 +256,20 @@ def busqueda_player(conn4, playerSend):
  
 def trayectoria(ballReceived, playerReceived):
     try:
-        print("---------COORDENADAS DE PELOTA------------")
-        print("---------COORDENADAS DE JUGADORES------------")
+        # print("---------COORDENADAS DE PELOTA------------")
+        # print("---------COORDENADAS DE JUGADORES------------")
         while True:
 
             coords_ball = ballReceived.recv()
             coords_players = playerReceived.recv()
-            # coopds_player_1 =  coords_players[0].get('x','y','angulo')
-            # coopds_player_2 =   coords_players[1].get('x','y','angulo')
-            # coopds_player_3 =   coords_players[2].get('x','y','angulo')
-            # coopds_player_4 =   coords_players[3].get('x','y','angulo')
-            # print(coords_players[0])
+
             for player in coords_players:
                 if player.get('id') == 1:
                     x = player.get('x')
                     y = player.get('y')
                     angle = player.get('angulo')
-                    print(f"coordenadas x: {x}   y: {y},   angulo: {angle}")
-        # print(coords_ball)
-            # print(coords_players[1])
+                    # print(f"coordenadas x: {x}   y: {y},   angulo: {angle}")
+
 
     except:
         print("error en trayectoria")
@@ -323,14 +318,14 @@ if __name__ == '__main__':
 
     # Iniciar los procesos
     p1.start()
-    p2.start()
-    p3.start()
-    p4.start()
+    # p2.start()
+    # p3.start()
+    # p4.start()
 
     # Esperar a que los procesos terminen
     p1.join()
-    p2.join()
-    p3.join()
-    p4.join()
+    # p2.join()
+    # p3.join()
+    # p4.join()
 
 
