@@ -1,8 +1,5 @@
 import pygame
-import numpy as np
-import cv2 as cv
 import math
-
 
 ######################
 # CREACION DEL JUEGO #
@@ -28,17 +25,17 @@ class Objeto:
         self.angulo = angulo
         self.dx = dx
         self.dy = dy
-        self.dw = dw              # velocidad angular
+        self.dw = dw  # velocidad angular
 
         self.radio = radio
 
         self.d_fr = 0.5  # Desaceleracion por roce
-        self.masa = masa                # no se esta utilizando la funcion actualmente
+        self.masa = masa  # no se esta utilizando la funcion actualmente
 
-        self.max_vel = 5             # Velocidad maxima a la que puede llegar el objeto #4
-        self.f_aceleracion = .2        # Factor de aceleracion
+        self.max_vel = 5  # Velocidad maxima a la que puede llegar el objeto #4
+        self.f_aceleracion = .2  # Factor de aceleracion
 
-        self.identificador = identificador    # Valor de identificacion del objeto (0 para la pelota)
+        self.identificador = identificador  # Valor de identificacion del objeto (0 para la pelota)
 
         self.v = 0
 
@@ -70,6 +67,7 @@ class Objeto:
             self.rotated_rect = self.img_robot_rotated.get_rect(center=(self.x, self.y))
 
         self.cooldown = 0  # Tiempo de cooldown inicial
+
     def intrucciones(self, punto):
         # Obtención de los parámetros de la instruccion
         x_destino, y_destino = punto
@@ -87,11 +85,11 @@ class Objeto:
                 self.dx = min(self.dx, self.max_vel)
 
             # movmiento lento si esta cerca el punto
-            else: 
+            else:
                 self.dx += self.f_aceleracion
                 self.dx = min(self.dx, 0.5)
 
-        elif x_destino < self.x: 
+        elif x_destino < self.x:
             # Movimiento rápido si esta lejso el punto
             if abs(x_destino - self.x) > 10:
                 self.dx -= self.f_aceleracion
@@ -110,14 +108,14 @@ class Objeto:
             self.y = y_destino
             self.dy = 0
 
-        elif y_destino > self.y: 
+        elif y_destino > self.y:
             if abs(y_destino - self.y) > 10:
                 self.dy += self.f_aceleracion
-                self.dy = min(self.dy, self.max_vel) 
+                self.dy = min(self.dy, self.max_vel)
             else:
                 self.dy += self.f_aceleracion
-                self.dy = min(self.dy, 0.5) 
-        elif y_destino < self.y: 
+                self.dy = min(self.dy, 0.5)
+        elif y_destino < self.y:
             if abs(y_destino - self.y) > 10:
                 self.dy -= self.f_aceleracion
                 self.dy = max(self.dy, -self.max_vel)
@@ -135,7 +133,7 @@ class Objeto:
 
         return en_curso
 
-    def motion_player(self, pelota, jugador_1 = None, jugador_2 = None, jugador_3 = None):
+    def motion_player(self, pelota, jugador_1=None, jugador_2=None, jugador_3=None):
         """
         Genera el movimiento del objeto, con los valores del objeto.
         """
@@ -210,6 +208,7 @@ class Objeto:
         """
         Reduce la velocida del objeto debido al roce que posee
         """
+
         def frenado(velocidad, f_desaceleracion):
             """
             Incrementa o decrementa la velocidad hasta llegar a cero
@@ -267,13 +266,14 @@ class Objeto:
         # Actualiza la posición en base a las componenetes de velocidad
         self.x += self.dx
         self.y += self.dy
+
     def disparo(self, obj):
         """
         Permite la sujeción de la pelota por medio de una tecla.
         Ademas al soltar la tecla hace que el robot dispare la pelota con cierta velocidad
 
         Args:
-        obj     -- (objeto) Objeto 
+        obj     -- (objeto) Objeto
         """
         self.distanciaConPelota = math.dist((obj.x, obj.y), (self.coordsHoldBall_x, self.coordsHoldBall_y))
 
@@ -286,7 +286,7 @@ class Objeto:
                 obj.y = self.coordsHoldBall_y
                 obj.dx = self.dx
                 obj.dy = self.dy
-                self.ball_hold = True # para el disparo
+                self.ball_hold = True  # para el disparo
             else:
                 pass
         # Mantener posesion de la pelota
@@ -298,11 +298,10 @@ class Objeto:
         # Disparar la pelota si se preisona la leta L
         if self.ball_hold and keys[pygame.K_l]:
             vel_disparo = 10
-            angle = math.radians(self.angulo) - math.pi/2
+            angle = math.radians(self.angulo) - math.pi / 2
             obj.dx = vel_disparo * math.cos(angle)
             obj.dy = vel_disparo * math.sin(angle)
             self.ball_hold = False
-
 
     def generationRobotV2(self, fondo):
         # Rotar la imagen
@@ -310,18 +309,18 @@ class Objeto:
 
         # Obtiene el rectangul de la iamgen
         self.rotated_rect = self.img_robot_rotated.get_rect(center=(self.x, self.y))
-        
-        # Dibujar la imagen  rotada 
+
+        # Dibujar la imagen  rotada
         fondo.blit(self.img_robot_rotated, self.rotated_rect.topleft)
 
-
-        front_angle = math.radians(self.angulo) - math.pi/2 # Convierte el ángulo a radianes
+        front_angle = math.radians(self.angulo) - math.pi / 2  # Convierte el ángulo a radianes
 
         self.coordsHoldBall_x = int(self.x + 70 * math.cos(front_angle))  # 30 es el radio del círculo
         self.coordsHoldBall_y = int(self.y + 70 * math.sin(front_angle))
 
         # Dibuja el punto indicando el frente
         # pygame.draw.circle(fondo, (255,255,255), (self.coordsHoldBall_x, self.coordsHoldBall_y), 5)
+
     def generationBallV2(self, fondo):
 
         # Rotar la imagen
@@ -332,159 +331,6 @@ class Objeto:
 
         # Dibujar la imagen  rotada
         fondo.blit(self.img_robot_rotated, self.rotated_rect.topleft)
-
-#########################
-# BUSQUEDA DE LA PELOTA #
-#########################
-class Ball:
-
-    def __init__(self, color, centro):
-        """
-        Valores inciales para  la clase.
-
-        Args:
-        color      -- (array) Rangos de colores.
-        centro      -- (array) Coordenadas del centro del jugador.
-        """
-        self.color = color
-        self.x, self.y = centro
-        self.vecindad = 20
-
-        self.goles_rojo = 0
-        self.goles_azul = 0
-        self.pelota_fuera = True
-
-    def seguimiento(self, hsv, img, frame):
-        """
-        Recorta la imagen original y hsv, para poder tener sólo la vecindad donde es posible que se mueva la pelota
-        """
-        # Recorta la imagen HSV y RGB
-        self.roi_hsv = hsv[ self.y - self.vecindad:self.y + self.vecindad ,
-                            self.x - self.vecindad:self.x + self.vecindad]
-                            
-        self.roi_img = img[ self.y - self.vecindad:self.y + self.vecindad , 
-                            self.x - self.vecindad:self.x + self.vecindad]
-
-        if len(self.roi_hsv) > 0: 
-            # Detecta los circulos dentro del recorte y su centro 
-            self.x_nuevo, self.y_nuevo, self.r_nuevo = self.detectar_circulos_color(self.roi_hsv, self.color, self.roi_img)
-            cv.circle(self.roi_hsv, (self.x_nuevo, self.y_nuevo), self.r_nuevo, (0, 0, 0), 1)
-            # Reescribe el centro y actualiza este en el objeto
-            self.x, self.y = self.x + self.x_nuevo - self.vecindad , self.y + self.y_nuevo - self.vecindad
-            # Dibuja un circulo en el centro de la pelota
-            cv.circle(frame, (self.x, self.y), 1, (0, 0, 0), -1)
-            cv.circle(self.roi_hsv, (self.x, self.y), self.r_nuevo, (0, 0, 0), 1)
-            self.goles(frame)
-            
-        return self.x, self.y
-
-    def goles(self, frame):
-        """
-        Detecta los goles de cada uno de los equipos ****
-        """
-        r = 10
-        # distancia_derecha = ((self.x - x__der_arco)**2 + (self.y - y_der_arco)**2)**0.5
-        # Contador de goles para el equipo azul
-        if self.x + 5 >= 1260 and self.y > 225 and self.y < 325 and self.pelota_fuera:
-            self.goles_azul += 1
-            self.pelota_fuera = False
-        
-        # Contador de goles para el equipo rojo
-        elif self.x - 5 <= 22  and self.y > 225 and self.y < 325 and self.pelota_fuera:
-            self.goles_rojo += 1
-            self.pelota_fuera = False
-
-        font = cv.FONT_HERSHEY_SIMPLEX
-        posicion_texto_rojo = (50, 50)
-        posicion_texto_azul = (frame.shape[1] - 200, 50)
-        color_rojo = (0, 0, 255)  # Rojo en formato BGR
-        color_azul = (255, 0, 0)  # Azul en formato BGR
-        goles_texto_rojo = f"Goles Rojos: {self.goles_rojo}"
-        goles_texto_azul = f"Goles Azules: {self.goles_azul}"
-
-        cv.putText(frame, goles_texto_rojo, posicion_texto_rojo, font, 0.7, color_rojo, 2, cv.LINE_AA)
-        cv.putText(frame, goles_texto_azul, posicion_texto_azul, font, 0.7, color_azul, 2, cv.LINE_AA)
-
-    @classmethod 
-    def detectar_circulos_color(cls, imagen_hsv, colores, imagen_original):
-        """
-        Detecta los circulos de colores
-
-        Args:
-        imagen_hsv  -- (matriz) Matriz de la imagen en HSV 
-        colores     -- (array) Rangos de los colores.
-        imagen      -- (matriz) Matriz de la imagen en RGB
-
-        Return:
-        circulos_detetados  -- (array)  Contiene un vector por cada color detectado
-                                        este contiene: el rago de colores, centro, radio
-        """
-        circulos_detectados = []
-        color_bajo, color_alto = colores
-
-        # Crear una máscara utilizando los rangos de color especificados
-        mascara = cv.inRange(imagen_hsv, color_bajo, color_alto)
-
-        # Aplicar la máscara a la imagen original
-        imagen_filtrada = cv.bitwise_and(imagen_original, imagen_original, mask=mascara)
-
-        # Convertir la imagen filtrada a escala de grises
-        imagen_gris = cv.cvtColor(imagen_filtrada, cv.COLOR_BGR2GRAY)
-
-        # Aplicar un filtro de suavizado para reducir el ruido
-        imagen_suavizada = cv.GaussianBlur(imagen_gris, (5,5),0)
-
-        # Aplicar la transformada de Hough para detectar círculos
-        circulos = cv.HoughCircles(imagen_suavizada, cv.HOUGH_GRADIENT, 1, minDist=20,
-                                    param1=15, param2=15,
-                                    minRadius= 5, maxRadius= 50)
-
-        # Si se detectaron círculos, agregarlos a la lista de circulos_detectados
-        x, y, r = None, None, None
-        if circulos is not None:
-            x , y , r = circulos[0][0][0], circulos[0][0][1], circulos[0][0][2]
-        return int(x), int(y), int(r)
-
-##############################
-# BUSQUEDA DE LLOS JUGADORES #
-##############################
-def deteccionJugadoresArucoTag(frame):
-
-    gray = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
-    aruco_dict = cv.aruco.getPredefinedDictionary(cv.aruco.DICT_7X7_1000)
-
-    parameters = cv.aruco.DetectorParameters()
-    detector = cv.aruco.ArucoDetector(aruco_dict, parameters)
-
-    corners, ids, rejected_img_points = detector.detectMarkers(gray)
-    datos = []
-
-    if ids is not None:
-        for corner, aruco_id in zip(corners, ids):
-            # corners[i] tiene la forma [4, 1, 2], con 4 esquinas, 1 array por esquina y 2 coordenadas (x, y)
-            corner_points = corner.reshape(4, 2)  # Aplanar la matriz para obtener las esquinas
-            
-            # Calcular el centro (promedio de las coordenadas de las esquinas)
-            center_x = int(np.mean(corner_points[:, 0]))
-            center_y = int(np.mean(corner_points[:, 1]))
-
-            # Calcular el ángulo de rotación
-            # Usaremos las primeras dos esquinas para calcular el ángulo
-            # Se asume que las esquinas están ordenadas de manera consistente
-            vector_1 = corner_points[1] - corner_points[0]
-            angle = np.arctan2(vector_1[1], vector_1[0])
-            angle_deg = np.degrees(angle)
-
-            identificador = aruco_id[0]
-
-            # print(f"Marcador {ids[i]} - Centro: ({center_x}, {center_y}), Ángulo: {angle_deg} grados")
-            datos.append({"id": identificador, "x": center_x, "y": center_y, "angulo": angle_deg})
-
-            # Dibujar el centro y la orientación en la imagen
-            cv.circle(frame, (int(center_x), int(center_y)), 5, (0, 255, 0), -1)
-            end_point = (int(center_x + 50 * np.cos(angle)), int(center_y + 50 * np.sin(angle)))
-            cv.line(frame, (int(center_x), int(center_y)), end_point, (0, 255, 0), 2)
-    return frame, datos
 
 
 ## COLISIONES
