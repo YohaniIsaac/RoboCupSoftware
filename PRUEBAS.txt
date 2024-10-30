@@ -1,0 +1,9 @@
+-inicio  			replanificaión	uno
+-final 				planificación	dos 	
+-lista_obs			replanificaión 	tres
+-inicio y final			planificación	cuatro
+-inicio y list_obs		replanificaión	cinco
+-final y list_obs		planificación 	seis 
+
+
+podrías hacer lo mismo pero esta vez para obstáculos rectangulares, donde la variable obs_add, puede ser una lista con los vértices del rectángulo 
