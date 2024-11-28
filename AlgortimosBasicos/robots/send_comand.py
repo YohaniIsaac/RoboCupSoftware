@@ -3,7 +3,7 @@ import keyboard
 import time
 
 # Configura el puerto serie
-ser = serial.Serial('COM14', 9600) 
+ser = serial.Serial('COM5', 9600)
 
 # Diccionario de asignación de teclas a comandos
 teclas_a_comandos = {

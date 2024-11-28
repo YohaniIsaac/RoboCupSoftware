@@ -3,6 +3,8 @@ import cv2 as cv
 #########################
 # BUSQUEDA DE LA PELOTA #
 #########################
+
+
 class Ball:
 
     def __init__(self, color, centro):
@@ -21,27 +23,27 @@ class Ball:
         self.goles_azul = 0
         self.pelota_fuera = True
 
+        self.roi_hsv = None
+        self.roi_img = None
+
     def seguimiento(self, hsv, img, frame):
         """
         Recorta la imagen original y hsv, para poder tener sólo la vecindad donde es posible que se mueva la pelota
         """
         # Recorta la imagen HSV y RGB
-        self.roi_hsv = hsv[self.y - self.vecindad:self.y + self.vecindad,
-                       self.x - self.vecindad:self.x + self.vecindad]
+        self.roi_hsv = hsv[self.y - self.vecindad:self.y + self.vecindad, self.x - self.vecindad:self.x + self.vecindad]
 
-        self.roi_img = img[self.y - self.vecindad:self.y + self.vecindad,
-                       self.x - self.vecindad:self.x + self.vecindad]
+        self.roi_img = img[self.y - self.vecindad:self.y + self.vecindad, self.x - self.vecindad:self.x + self.vecindad]
 
         if len(self.roi_hsv) > 0:
             # Detecta los circulos dentro del recorte y su centro
-            self.x_nuevo, self.y_nuevo, self.r_nuevo = self.detectar_circulos_color(self.roi_hsv, self.color,
-                                                                                    self.roi_img)
-            cv.circle(self.roi_hsv, (self.x_nuevo, self.y_nuevo), self.r_nuevo, (0, 0, 0), 1)
+            x_nuevo, y_nuevo, r_nuevo = self.detectar_circulos_color(self.roi_hsv, self.color, self.roi_img)
+            cv.circle(self.roi_hsv, (x_nuevo, y_nuevo), r_nuevo, (0, 0, 0), 1)
             # Reescribe el centro y actualiza este en el objeto
-            self.x, self.y = self.x + self.x_nuevo - self.vecindad, self.y + self.y_nuevo - self.vecindad
-            # Dibuja un circulo en el centro de la pelota
+            self.x, self.y = self.x + x_nuevo - self.vecindad, self.y + y_nuevo - self.vecindad
+            # Dibuja un círculo en el centro de la pelota
             cv.circle(frame, (self.x, self.y), 1, (0, 0, 0), -1)
-            cv.circle(self.roi_hsv, (self.x, self.y), self.r_nuevo, (0, 0, 0), 1)
+            cv.circle(self.roi_hsv, (self.x, self.y), r_nuevo, (0, 0, 0), 1)
             self.goles(frame)
 
         return self.x, self.y
@@ -50,15 +52,14 @@ class Ball:
         """
         Detecta los goles de cada uno de los equipos ****
         """
-        r = 10
         # distancia_derecha = ((self.x - x__der_arco)**2 + (self.y - y_der_arco)**2)**0.5
         # Contador de goles para el equipo azul
-        if self.x + 5 >= 1260 and self.y > 225 and self.y < 325 and self.pelota_fuera:
+        if self.x + 5 >= 1260 and 225 < self.y < 325 and self.pelota_fuera:
             self.goles_azul += 1
             self.pelota_fuera = False
 
         # Contador de goles para el equipo rojo
-        elif self.x - 5 <= 22 and self.y > 225 and self.y < 325 and self.pelota_fuera:
+        elif self.x - 5 <= 22 and 225 < self.y < 325 and self.pelota_fuera:
             self.goles_rojo += 1
             self.pelota_fuera = False
 
@@ -74,12 +75,12 @@ class Ball:
         cv.putText(frame, goles_texto_azul, posicion_texto_azul, font, 0.7, color_azul, 2, cv.LINE_AA)
 
     @classmethod
-    def detectar_circulos_color(cls, imagen_hsv, colores, imagen_original):
+    def detectar_circulos_color(cls, img_hsv, colores, img_origi):
         """
         Detecta los circulos de colores
 
         Args:
-        imagen_hsv  -- (matriz) Matriz de la imagen en HSV
+        img_hsv  -- (matriz) Matriz de la imagen en HSV
         colores     -- (array) Rangos de los colores.
         imagen      -- (matriz) Matriz de la imagen en RGB
 
@@ -87,14 +88,13 @@ class Ball:
         circulos_detetados  -- (array)  Contiene un vector por cada color detectado
                                         este contiene: el rago de colores, centro, radio
         """
-        circulos_detectados = []
         color_bajo, color_alto = colores
 
         # Crear una máscara utilizando los rangos de color especificados
-        mascara = cv.inRange(imagen_hsv, color_bajo, color_alto)
+        mascara = cv.inRange(img_hsv, color_bajo, color_alto)
 
         # Aplicar la máscara a la imagen original
-        imagen_filtrada = cv.bitwise_and(imagen_original, imagen_original, mask=mascara)
+        imagen_filtrada = cv.bitwise_and(img_origi, img_origi, mask=mascara)
 
         # Convertir la imagen filtrada a escala de grises
         imagen_gris = cv.cvtColor(imagen_filtrada, cv.COLOR_BGR2GRAY)

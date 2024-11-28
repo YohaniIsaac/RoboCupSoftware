@@ -8,6 +8,20 @@ ancho = 1500
 alto = 900
 
 
+class Node:
+    def __init__(self, n):
+        self.x = n[0]
+        self.y = n[1]
+        self.parent = None
+        self.flag = "VALID"
+
+    def __eq__(self, other):
+        # Comprobar si 'other' es una instancia de Node
+        if isinstance(other, Node):
+            return self.x == other.x and self.y == other.y
+        return False
+
+
 class Env:
     """
     Define el entorno en el que se moverá el robot

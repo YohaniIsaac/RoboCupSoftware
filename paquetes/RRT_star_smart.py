@@ -1,19 +1,12 @@
-"""
-RRT_STAR_SMART 2D
-@author: huiming zhou
-"""
-#
-# import os
-# import sys
+import os
 import math
+import copy
 import random
 import numpy as np
 import time
 import matplotlib.pyplot as plt
 from matplotlib.patches import Polygon
-
-
-from sub import env, utils
+from paquetes.sub import env, utils
 
 
 class Node:
@@ -21,35 +14,87 @@ class Node:
         self.x = n[0]
         self.y = n[1]
         self.parent = None
+        self.flag = "VALID"
+
+    def __eq__(self, other):
+        # Comprobar si 'other' es una instancia de Node
+        if isinstance(other, Node):
+            return self.x == other.x and self.y == other.y
+        return False
+
+
+# Representación de una conexión entre dos nodos
+class Edge:
+    def __init__(self, n_p, n_c):
+        self.parent = n_p
+        self.child = n_c
+        self.flag = "VALID"
 
 
 # Implementación del algoritmo RRt* smart
 class RrtStarSmart:
-    def __init__(self, x_start, x_goal, step_len,
-                 goal_sample_rate, search_radius, iter_max, list_obs):
-        self.x_start = Node(x_start)
-        self.x_goal = Node(x_goal)
+    def __init__(self, step_len, goal_sample_rate,
+                 search_radius, iter_max, list_obs=None, x_start=None, x_goal=None):
+
+        self.x_start = Node(x_start) if x_start else None
+        self.V = [self.x_start]
+        self.x_goal = Node(x_goal) if x_goal else None
+
         self.step_len = step_len
         self.goal_sample_rate = goal_sample_rate
         self.search_radius = search_radius
         self.iter_max = iter_max
+        if list_obs is not None:
+            self.env = env.Env(list_obs)
+            self.utils = utils.Utils(list_obs)
+            self.obs_vertex = self.utils.get_obs_vertex()
+            self.obs_circle = self.env.obs_circle
+            self.obs_rectangle = self.env.obs_rectangle
+            self.obs_boundary = self.env.obs_boundary
 
-        self.env = env.Env(list_obs)
-        self.utils = utils.Utils(list_obs)
+            self.delta = self.utils.delta
 
-        self.delta = self.utils.delta
-        self.x_range = self.env.x_range
-        self.y_range = self.env.y_range
-        self.obs_circle = self.env.obs_circle
-        self.obs_rectangle = self.env.obs_rectangle
-        self.obs_boundary = self.env.obs_boundary
+            self.x_range = self.env.x_range
+            self.y_range = self.env.y_range
 
-        self.V = [self.x_start]
         self.beacons = []
         self.beacons_radius = 2
         self.direct_cost_old = np.inf
-        self.obs_vertex = self.utils.get_obs_vertex()
         self.path = None
+
+        # Para la replanificación (dynamic)
+        waypoint_sample_rate = 0.6
+        self.waypoint_sample_rate = waypoint_sample_rate
+        # self.vertex = [self.x_start]
+        self.vertex_old = []
+        self.vertex_new = []
+        self.edges = []
+        self.waypoint = []
+        self.obs_rect_modify = []
+        self.obs_cir_modify = []
+
+        self.last_node = None
+
+    def setup(self, x_start, x_goal, list_obs):
+        if x_start is not None:
+            self.x_start = Node(x_start)
+            self.V = [self.x_start]
+
+        if x_goal is not None:
+            self.x_goal = Node(x_goal)
+
+        if list_obs is not None:
+            self.env = env.Env(list_obs)
+            self.utils = utils.Utils(list_obs)
+            self.obs_vertex = self.utils.get_obs_vertex()
+            self.obs_circle = self.env.obs_circle
+            self.obs_rectangle = self.env.obs_rectangle
+            self.obs_boundary = self.env.obs_boundary
+
+            self.delta = self.utils.delta
+
+            self.x_range = self.env.x_range
+            self.y_range = self.env.y_range
 
     def planning(self):
         """
@@ -86,6 +131,8 @@ class RrtStarSmart:
                 # Agrega x_new al conjunto de nodos
                 self.V.append(x_new)
 
+                # self.edges.append(Edge(x_nearest, x_new))
+
                 if X_near:
                     # Elegir padre,
                     # Para la optimización, al elegir al padre con el menor costo acumulado
@@ -115,11 +162,18 @@ class RrtStarSmart:
                     n = k
                 # Optimización principal
                 if InitPathFlag:
-                    print("por llamar a la función")
+                    self.waypoint = self.extract_waypoint(x_new)
                     self.PathOptimization(x_new)
-                    self.path = self.ExtractPath()
+                    path = self.ExtractPath()
+                    # Convertir todos los números a enteros
+                    path = [[int(num) for num in sublist] for sublist in path]
+                    self.path = path
                     elapsed_time = time.time() - start_time  # Tiempo en segundos
                     print(f"Tiempo de ejecución RRt* smart:\t {elapsed_time:.6f} segundos")
+                    self.conect_edges()
+
+                    # layers = self.count_layers(x_new) borrar si no se usa
+
                     return
 
                 if k % 5 == 0:
@@ -145,9 +199,6 @@ class RrtStarSmart:
             # Evaluar si es posible saltar nodos intermedios y conectar directamente
             # los nodos más lejanos sin colisiones
             node_parent = node.parent
-            p_x = node.x
-            p_y = node.y
-            parent = node.parent
 
             # Verifica si Hay una Conexión Directa sin Colisión
             if not self.utils.is_collision(node_parent, node_end):
@@ -200,6 +251,7 @@ class RrtStarSmart:
         Expande el árbol hacia un punto objetivo, limitando el paso a la longitud máxima definida.
         """
         dist, theta = self.get_distance_and_angle(x_start, x_goal)
+
         dist = min(self.step_len, dist)
         node_new = Node((x_start.x + dist * math.cos(theta),
                          x_start.y + dist * math.sin(theta)))
@@ -282,6 +334,313 @@ class RrtStarSmart:
 
         return False
 
+# *********************************************************************************************************************
+# ------------------------------------------ For dynamic --------------------------------------------------------------
+# *********************************************************************************************************************
+
+    def update_obstacle(self, n_list_obs, start_new):
+        """
+        Actualiza los puntos de inicio, meta y la lista de obstáculos.
+        Verifica si estos continuan siendo los mismos, si no, replanifica la ruta
+        """
+
+        # Encuentra deiferencias entre los obstáculos anteriores y los nuevos
+        diferencia_rect = self.comparar_listas(self.obs_rectangle, env.Env.obs_rectangle_met(n_list_obs))
+        diferencia_circ = self.comparar_listas(self.obs_circle, env.Env.obs_circle_met(n_list_obs))
+
+        if diferencia_rect or diferencia_circ:
+            if diferencia_rect:
+                self.obs_rect_modify = diferencia_rect
+            if diferencia_circ:
+                self.obs_cir_modify = diferencia_circ[0]
+
+            # Actualiza dentro de env los obtáculos
+            self.env.update_obtacle(n_list_obs)
+
+            # Actualiza dentro de utils los obstáculos
+            self.utils.update_obstacle(n_list_obs)
+
+            # Reasigna los valores de los obstáculos dentro de la clase
+            self.obs_rectangle = self.env.obs_rectangle
+            self.obs_circle = self.env.obs_circle
+
+            # Obtiene los vertices de cada obtáculos rectángular
+            # Vetices_de_los_obstaculos = self.utils.get_obs_vertex()
+
+            # Reforma la lista de vértices de los obstáculos
+            #
+
+            # Marca las aristas como inválidas
+            self.InvalidateNodes()
+
+            # La ruta actual es válida?
+            if self.is_path_invalid():
+                # self.ReformObsVertex()
+                path, waypoint = self.replanning()
+                # Convertir todos los valores en enteros
+                path = [[int(value) for value in sublist] for sublist in path]
+                self.vertex_new = []
+                self.path = path
+                self.waypoint = waypoint
+
+            else:
+                self.TrimRRT()
+
+        elif self.x_start != Node(start_new):
+            self.setup(start_new, (self.x_goal.x, self.x_goal.y), n_list_obs)
+            self.planning()
+
+        else:
+            print("no se encontraron diferencias, se consevó la misma ruta")
+
+    def extract_waypoint(self, node_end):
+        """
+        Extrae los puntos de referencia (waypoints) deq < la meta hacia el inicio, usando las relaciones padre-hijo de
+        los nodos.
+        """
+        waypoint = [self.x_goal]
+        node_now = node_end
+
+        while node_now.parent is not None:
+            node_now = node_now.parent
+            waypoint.append(node_now)
+
+        return waypoint
+
+    def InvalidateNodes(self):
+        """
+        Marca nodos como inválidos si la nueva arista colisiona con un obstáculo.
+        """
+        for edge in self.edges:
+            if self.is_collision_obs_modify(edge.parent, edge.child):
+                edge.child.flag = "INVALID"
+        # -------------------------------------------------------
+        self.last_node = None
+        nodo_now = self.x_goal
+        while nodo_now.parent:
+            if nodo_now.flag == "INVALID":
+                self.last_node = nodo_now.parent
+            nodo_now = nodo_now.parent
+
+    def is_collision_obs_modify(self, start, end):
+        """
+        Verifica si una nueva arista colisiona con un obstáculo agregado dinámicamente.
+        """
+
+        delta = self.utils.delta
+        if self.obs_cir_modify:
+            obs_cir = self.obs_cir_modify
+
+            if math.hypot(start.x - obs_cir[0], start.y - obs_cir[1]) <= obs_cir[2] + delta:
+                return True
+
+            if math.hypot(end.x - obs_cir[0], end.y - obs_cir[1]) <= obs_cir[2] + delta:
+                return True
+
+            o, d = self.utils.get_ray(start, end)
+
+            if self.utils.is_intersect_circle(o, d, [obs_cir[0], obs_cir[1]], obs_cir[2]):
+                return True
+
+        if self.obs_rect_modify:
+            obs_rect = self.obs_rect_modify
+
+            for rect in obs_rect:
+                # verifica si el punto está dentro del rectángulo
+                if self.utils.verificar_punto(rect, start.x, start.y):
+                    return True
+
+                if self.utils.verificar_punto(rect, end.x, end.y):
+                    return True
+
+                o, d = self.utils.get_ray(start, end)
+
+                v1, v2, v3, v4 = rect
+
+                if self.utils.is_intersect_rec(start, end, o, d, v1, v2):
+                    return True
+                if self.utils.is_intersect_rec(start, end, o, d, v2, v3):
+                    return True
+                if self.utils.is_intersect_rec(start, end, o, d, v3, v4):
+                    return True
+                if self.utils.is_intersect_rec(start, end, o, d, v4, v1):
+                    return True
+
+        return False
+
+    def is_path_invalid(self):
+        """
+        Comprueba si algún nodo en la ruta actual es inválido, lo que indicaría la necesidad de replantear la ruta.
+        """
+        for node in self.waypoint:
+            if node.flag == "INVALID":
+                return True
+
+    def replanning(self):
+        """
+        Ejecuta el algoritmo de replanificación cuando la ruta existente se vuelve inválida debido a nuevos obstáculos.
+        """
+        # Quita nodos y aristas inválidos
+        self.TrimRRT()
+        self.x_goal.flag = "VALID"
+        # Si self.x_goal está en self.V, elimínalo
+        if self.x_goal in self.V:
+            self.V.remove(self.x_goal)
+
+        for i in range(self.iter_max):
+            # Genera nodo aleatorio
+            node_rand = self.generate_random_node_replanning(self.goal_sample_rate)
+            # Encuentra el nodo más cercano en el árbol
+            node_near = self.Nearest(self.V, node_rand)
+            # Calcula un nuevo nodo en la dirección del nuevo nodo generado
+            node_new = self.Steer(node_near, node_rand)
+
+            if node_new and not self.utils.is_collision(node_near, node_new):
+                self.V.append(node_new)
+                self.vertex_new.append(node_new)
+                self.edges.append(Edge(node_near, node_new))
+                dist, _ = self.get_distance_and_angle(node_new, self.x_goal)
+
+                if dist <= self.step_len:
+                    self.x_goal.parent = None  # Eliminar la ruta anterior
+                    # self.Steer(node_new, self.x_goal)
+                    self.PathOptimization(node_new)
+                    path = self.ExtractPath()
+                    # Convertir todos los números a enteros
+                    path = [[int(num) for num in sublist] for sublist in path]
+
+                    waypoint = self.extract_waypoint(node_new)
+                    self.conect_edges()
+                    # print("path: ", len(path))
+                    # print("waypoint: ", len(waypoint))
+
+                    return path, waypoint
+        print("return none")
+        return self.planning()
+
+    def TrimRRT(self):
+        """
+        Recorre la lista de nodos y elimina nodos y subnodos inválidos de `self.V`.
+        Mantiene solo los nodos válidos y sus padres válidos.
+        """
+        for i in range(len(self.V)-1):
+            node = self.V[i]
+            if node.parent:
+                node_p = node.parent
+                if node_p.flag == "INVALID":
+                    node.flag = "INVALID"
+
+        cleaned_nodes = []
+
+        for node in self.V:
+            current = node
+            node_invalid = False
+            node_valid = True
+            aux_node = None
+            # Verificar la cadena de padres
+            while current:
+                if current.flag == "INVALID":
+                    node_invalid = True
+                    node_valid = False
+
+                if node_invalid and current.flag == "VALID":
+                    aux_node = current
+                    node_invalid = False
+
+                current = current.parent
+            if node_valid:
+                cleaned_nodes.append(node)
+            if aux_node:
+                cleaned_nodes.append(aux_node)
+
+        # Actualizar la lista de nodos con solo los válidos
+        self.V = cleaned_nodes
+
+    def TrimRRT2(self):
+        """
+        Recorta los nodos y aristas inválidos del árbol en caso de cambios en el entorno, lo que ayuda a optimizar la
+        eficiencia en la planificación posterior.
+        """
+        for i in range(1, len(self.V)-1):
+            node = self.V[i]
+            node_p = node.parent
+            if node_p.flag == "INVALID":
+                node.flag = "INVALID"
+
+        new_V = []
+        for node in reversed(self.V):
+            if node.flag == "INVALID":
+                break
+            new_V.append(node)
+        self.V = new_V
+
+        new_V = []
+        for node in reversed(self.waypoint):
+            if node.flag == "INVALID":
+                break
+            new_V.append(node)
+        self.waypoint = new_V
+        self.vertex_old = copy.deepcopy(self.V)
+        self.edges = [Edge(node.parent, node) for node in self.V[1:len(self.V)]]
+        self.waypoint = [node for node in self.waypoint if node.flag == 'VALID']
+        # a = 0
+
+    def generate_random_node_replanning(self, goal_sample_rate):
+        """
+        Generan un nodo aleatorio, para la replanificación, con probabilidad de muestrear hacia el objetivo o puntos
+        intermedios.
+        """
+        delta = self.utils.delta
+        p = np.random.random()
+
+        if p < goal_sample_rate:
+            return self.x_goal
+        # elif goal_sample_rate < p < goal_sample_rate + waypoint_sample_rate:
+        #     return self.waypoint[np.random.randint(0, len(self.waypoint) - 1)]
+        else:
+            return Node((np.random.uniform(self.x_range[0] + delta, self.x_range[1] - delta),
+                         np.random.uniform(self.y_range[0] + delta, self.y_range[1] - delta)))
+
+    def conect_edges(self):
+        """
+        Genera las aristas (edges) directamente desde la meta hacia el inicio usando los punteros a los padres.
+        """
+        # Crear una lista temporal para almacenar los nodos de la ruta final
+        ruta_final = []
+
+        node = self.x_goal  # Nodo objetivo desde donde empieza el recorrido
+
+        while node.parent:
+            # Nodo actual (x_new) y su padre (x_nearest)
+            x_new = node
+            x_nearest = node.parent
+
+            # Añadir la arista entre el nodo actual y su padre
+            self.edges.append(Edge(x_nearest, x_new))
+
+            # Añadir el nodo actual a la ruta final
+            ruta_final.append(x_new)
+
+            # Avanzar al siguiente nodo en el camino hacia atrás
+            node = node.parent
+
+        # Añadir el nodo de inicio a la ruta final
+        ruta_final.append(self.x_start)
+
+        # Actualizar self.V con solo los nodos de la ruta optimizada
+        self.V = ruta_final
+
+    @staticmethod
+    def count_layers(node):
+        """
+        Cuenta la cantidad de nodos desde el nodo final hasta el nodo inicial.
+        """
+        layers = 0
+        while node:
+            layers += 1
+            node = node.parent  # Se mueve al nodo padre
+        return layers
+
     @staticmethod
     def Nearest(nodelist, n):
         """
@@ -323,7 +682,21 @@ class RrtStarSmart:
         return math.hypot(dx, dy), math.atan2(dy, dx)
 
     @staticmethod
-    def plot_path(path, list_obs, color='red'):
+    def comparar_listas(lista1, lista2):
+        """
+        Compara dos listas de obstáculos y devuelve los elementos diferentes.
+        """
+        diferencias = []
+
+        # Verifica cada elemento de lista2 que no esté en lista1
+        for elem in lista2:
+            if elem not in lista1:
+                diferencias.append(elem)
+
+        return diferencias
+
+    @staticmethod
+    def plot_path(path, list_obs, show, tiempo=None):
         """
         Dibuja la ruta final planificada y los obstáculos
         """
@@ -344,12 +717,16 @@ class RrtStarSmart:
             v1, v2, v3, v4 = rec
             RrtStarSmart.graficar_rectangulo(v1, v2, v3, v4)
 
-        plt.plot([x[0] for x in path], [x[1] for x in path], linewidth=2, color=color)
+        plt.plot([x[0] for x in path], [x[1] for x in path], linewidth=2, color='red')
+        if tiempo is not None:
+            plt.title(str(tiempo))
         # plt.pause(0.01)
-        # nombre_archivo = RrtStarSmart.generar_nombre_archivo("grafico")
+        nombre_archivo = RrtStarSmart.generar_nombre_archivo("grafico")
         plt.grid()
-        # plt.savefig(nombre_archivo, dpi=300, bbox_inches='tight')
-        plt.show()
+        if show:
+            plt.show()
+        else:
+            plt.savefig(nombre_archivo, dpi=300, bbox_inches='tight')
         plt.close()
 
     @staticmethod
@@ -370,21 +747,17 @@ class RrtStarSmart:
                        closed=True, edgecolor=color, fill=False, linewidth=2, label=etiqueta)
         plt.gca().add_patch(rect)  # Añadir el polígono al gráfico
 
+    @staticmethod
+    def generar_nombre_archivo(base_name, extension='png'):
+        """
+        Genera un nombre de archivo único si el original ya existe.
+        """
+        counter = 1
+        nombre_final = f"./graf/{base_name}.{extension}"
 
-def main():
-    x_start = (2, 2)  # Starting node
-    x_goal = (1400, 600)  # Goal node
-    list_obs = [
-        [300, 250, 52*2, 70*2, math.radians(45)],
-        [700, 500, 52*2, 70*2, math.radians(180)],
-        [600, 100, 52*2, 70*2, math.radians(180)],
-        [1000, 400, 50*2]
-    ]
-    rrt = RrtStarSmart(x_start, x_goal, 50, 0.50, 5, 2000, list_obs)
-    rrt.planning()
-    RrtStarSmart.plot_path(rrt.path, list_obs)
+        # Mientras el archivo exista, incrementar el contador y cambiar el nombre
+        while os.path.exists(nombre_final):
+            nombre_final = f"./graf/{base_name}_{counter}.{extension}"
+            counter += 1
 
-
-if __name__ == '__main__':
-    for _ in range(10):
-        main()
+        return nombre_final

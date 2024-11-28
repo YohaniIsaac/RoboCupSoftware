@@ -7,7 +7,7 @@ import math
 import numpy as np
 
 from . import env
-from paquetes.RRT_dinamic import Node
+from paquetes.sub.env import Node
 
 
 class Utils:
@@ -17,7 +17,7 @@ class Utils:
     def __init__(self, list_obs):
         self.env = env.Env(list_obs)
 
-        self.delta = 0.5
+        self.delta = 20
         self.obs_circle = self.env.obs_circle
         self.obs_rectangle = self.env.obs_rectangle
         self.obs_boundary = self.env.obs_boundary

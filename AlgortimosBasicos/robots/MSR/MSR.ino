@@ -96,7 +96,7 @@ void ejecutarComando(char comando) {
       tiempoInicio = millis(); // Iniciar el temporizador
       break;
     case 'P': // Patear
-      ();
+      activarSolenoide();
       break;
     case 'D': // Activar el motor DC (rodillo)
       activarMotorDC();

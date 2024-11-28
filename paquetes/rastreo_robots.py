@@ -2,7 +2,6 @@ import math
 
 import numpy as np
 import cv2 as cv
-from scipy.spatial import ConvexHull
 
 ##############################
 # BUSQUEDA DE LLOS JUGADORES #
@@ -37,33 +36,31 @@ def deteccionJugadoresArucoTag(frame):
 
             identificador = aruco_id[0]
 
-            # print(f"Marcador {ids[i]} - Centro: ({center_x}, {center_y}), Ángulo: {angle_deg} grados")
-
-
             # para el rectángulo que representa al robot
             des_x = 52
             des_y = 70
             esquinas = [
-                (center_x - des_x, center_y + des_y), # Esquina superior izquierda
-                (center_x + des_x, center_y + des_y), # Esquina superior derecha
-                (center_x + des_x, center_y - des_y), # Esquina inferior izquierda
-                (center_x - des_x, center_y - des_y), # Esquina inferior derecha
+                (center_x - des_x, center_y + des_y),  # Esquina superior izquierda
+                (center_x + des_x, center_y + des_y),  # Esquina superior derecha
+                (center_x + des_x, center_y - des_y),  # Esquina inferior izquierda
+                (center_x - des_x, center_y - des_y),  # Esquina inferior derecha
             ]
             list_puntos_rotados = []
 
             for punto in esquinas:
-                x_desplazado , y_desplazado = punto[0] - center_x , punto[1] - center_y
+                x_desplazado, y_desplazado = punto[0] - center_x, punto[1] - center_y
 
                 # Aplicar la matriz de rotacion
                 x_rotado = x_desplazado * math.cos(angle) - y_desplazado * math.sin(angle)
                 y_rotado = x_desplazado * math.sin(angle) + y_desplazado * math.cos(angle)
 
                 list_puntos_rotados.append((int(center_x + x_rotado), int(center_y + y_rotado)))
-            datos.append({"id": identificador, "x": center_x, "y": center_y, "angulo": angle_deg, "esquinas": list_puntos_rotados})
+            datos.append({"id": identificador, "x": center_x, "y": center_y, "angulo": angle_deg,
+                          "esquinas": list_puntos_rotados})
 
             for i in range(4):
-                cv.line(frame, list_puntos_rotados[i], list_puntos_rotados[(i+1) % 4], (0,255,0), 2)
-                cv.circle(frame, list_puntos_rotados[i], 5,(255,0,0), -1)
+                cv.line(frame, list_puntos_rotados[i], list_puntos_rotados[(i+1) % 4], (0, 255, 0), 2)
+                cv.circle(frame, list_puntos_rotados[i], 5, (255, 0, 0), -1)
             # Dibujar el centro y la orientación en la imagen
             cv.circle(frame, (int(center_x), int(center_y)), 5, (0, 255, 0), -1)
             end_point = (int(center_x + 50 * np.cos(angle)), int(center_y + 50 * np.sin(angle)))

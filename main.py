@@ -10,13 +10,11 @@ import cv2 as cv
 import paquetes.simulacion_base as sim_mk
 import paquetes.rastreo_pelota as track_ball
 import paquetes.rastreo_robots as track_rob
-import paquetes.rrt as rrt
+import paquetes.rrt_star_smart as rrt
 
 
-
-def make(conn1, conn3, env_ruta, frame_env):
+def simulacion_principal(fr2ball_env, fr2player_env, env_ruta, fr2traj_env):
     """
-    
     env_ruta -- (list) nodos de la planificación de rutas para enviar
     """
     # Dimensiones de la cancha
@@ -28,18 +26,17 @@ def make(conn1, conn3, env_ruta, frame_env):
 
     largo_arco = 200
 
-
     fps = 40
-    duracion = 10  # Duración en segundos 
 
+    # duracion = 10  # Duración en segundos
     # Colores
-    rojo = (0, 0, 255)
-    azul = (255, 0, 0)
-    cian = (0, 255, 255)
-    magenta = (255, 0, 255)
+    # rojo = (0, 0, 255)
+    # azul = (255, 0, 0)
+    # cian = (0, 255, 255)
+    # magenta = (255, 0, 255)
     blanco = (255, 255, 255)
     cesped = (40, 128, 40)
-    naranjo = (244, 98, 0)
+    # naranjo = (244, 98, 0)
 
     # Crear la ventana de pygame
     pygame.init()
@@ -52,12 +49,12 @@ def make(conn1, conn3, env_ruta, frame_env):
     fondo_inicial.fill(cesped)
 
     # Dibujar las líneas de la cancha
-    # Dibujar la cancha con los elementos en base al margen
+    # Dibujar la cancha con los elementos basándonos en el margen
     # Rectángulo que representa la cancha
     pygame.draw.rect(fondo_inicial, blanco, (margen_cancha, margen_cancha, ancho, alto), 2)
 
     # Círculo central
-    pygame.draw.circle(fondo_inicial, blanco,(margen_cancha + int(ancho / 2), margen_cancha + int(alto / 2)), 146, 2)
+    pygame.draw.circle(fondo_inicial, blanco, (margen_cancha + int(ancho / 2), margen_cancha + int(alto / 2)), 146, 2)
 
     # Línea central
     pygame.draw.line(fondo_inicial, blanco,
@@ -70,15 +67,21 @@ def make(conn1, conn3, env_ruta, frame_env):
 
     # Área chica derecha
     pygame.draw.rect(fondo_inicial, blanco,
-                     (margen_cancha + ancho -1, margen_cancha + (alto // 2) - largo_arco // 2, ancho_total -1, largo_arco), 2)
+                     (margen_cancha + ancho - 1, margen_cancha + (alto // 2) - largo_arco // 2, ancho_total - 1,
+                      largo_arco), 2)
 
     # Crear instancias de la clase Objeto y pelota
-    player_1 = sim_mk.Objeto(400, 1000, 300, 0, 0, 0, 0, 30, 1)
-    player_2 = sim_mk.Objeto(400, int(ancho - 200), int(alto / 2), 45, -1, -1, -1.1, 30, 2)
-    player_3 = sim_mk.Objeto(400, int(ancho / 2), 250, 180, -1, 1, 1.26, 30, 3)
-    player_4 = sim_mk.Objeto(400, int(ancho / 2), int(alto - 250), 270, 1, -1, -1.29, 30, 4)
+    player_1 = sim_mk.Objeto(400, 1000, 300, 0, 0, 0, 0,
+                             30, 1)
+    player_2 = sim_mk.Objeto(400, int(ancho - 200), int(alto / 2), 45, -1, -1, -1.1,
+                             30, 2)
+    player_3 = sim_mk.Objeto(400, int(ancho / 2), 250, 180, -1, 1, 1.26,
+                             30, 3)
+    player_4 = sim_mk.Objeto(400, int(ancho / 2), int(alto - 250), 270, 1, -1, -1.29,
+                             30, 4)
 
-    pelota = sim_mk.Objeto(2.7, 400, 500, 0, 0, 0, 0, 190, 0)
+    pelota = sim_mk.Objeto(2.7, 400, 500, 0, 0, 0, 0,
+                           190, 0)
     objetos = [pelota, player_1, player_2]
     inicio = 0
     en_curso = False
@@ -111,12 +114,10 @@ def make(conn1, conn3, env_ruta, frame_env):
             # pelota.generatiosnBall(fondo)
             pelota.generationBallV2(fondo)
 
-
             # Permite mover a un jugador con las teclas
             player_1.teclas()
 
             sim_mk.detectar_colisiones(objetos)
-
 
             # Actualizar la posición de los jugadores
             player_1.motion_player(pelota, player_2, None, None)
@@ -125,7 +126,6 @@ def make(conn1, conn3, env_ruta, frame_env):
             # player_4.motion_player(pelota, player_1, player_2, player_3)
 
             pelota.motion_ball()
-
 
             # auxiliar = player_1.intrucciones((100, 100))
 
@@ -170,15 +170,15 @@ def make(conn1, conn3, env_ruta, frame_env):
             frame = np.transpose(frame, (1, 0, 2))
             frame = cv.cvtColor(frame, cv.COLOR_RGB2BGR)
 
-            conn1.send(frame)
-            conn3.send(frame)
-            frame_env.send(frame)
+            fr2ball_env.send(frame)
+            fr2player_env.send(frame)
+            fr2traj_env.send(frame)
             # inicio += 1
-    except:
-        print("error en make")
+    except Exception as e:
+        print(f"error en make {e}")
 
 
-def busqueda_ball(conn2, ballSend):
+def busqueda_ball(fr2ball_recv, ballSend):
     # Color          
     naranjo = ((10, 100, 20), (30, 255, 255))  # Rango de color para el naranjo
 
@@ -186,7 +186,7 @@ def busqueda_ball(conn2, ballSend):
     pelota = None
     try:
         while True:
-            frame = conn2.recv()  # Recibir datos como bytes a través de la tubería
+            frame = fr2ball_recv.recv()  # Recibir datos como bytes a través de la tubería
             img = np.copy(frame)
             hsv = cv.cvtColor(frame, cv.COLOR_BGR2HSV)
 
@@ -208,11 +208,11 @@ def busqueda_ball(conn2, ballSend):
                 break
 
         cv.destroyAllWindows()
-    except:
-        print("error en la busqueda de pelota")
+    except Exception as e:
+        print(f"error en la busqueda de pelota {e}")
 
 
-def busqueda_player(conn4, playerSend):
+def busqueda_player(fr2player_recv, playerSend):
     # Colores
     rojo = ((0, 100, 20), (8, 255, 255), (175, 100, 20), (179, 255, 255))  # Rango de color para el rojo
     azul = ((110, 150, 150), (130, 255, 255), None, None)  # Rango de color para el azul
@@ -225,7 +225,7 @@ def busqueda_player(conn4, playerSend):
     try:
         while True:
             # Recibir datos como bytes a través de la tubería
-            frame = conn4.recv()
+            frame = fr2player_recv.recv()
             img = np.copy(frame)
 
             salida, datos = track_rob.deteccionJugadoresArucoTag(img)
@@ -244,17 +244,14 @@ def busqueda_player(conn4, playerSend):
                 break
         cv.destroyAllWindows()
 
-
-    except:
-        print("error en busqueda de jugadores")
+    except Exception as e:
+        print(f"error en busqueda de jugadores {e}")
 
 
 # def comandos(env_ruta):
 #     """
 #     env_ruta -- (list) nodos de la planificación de rutas para enviar
 #     """
-
-
 #     try:
 #         time.sleep(2)
 #         ruta = [(1200,600),(300,300),(600,600)]
@@ -271,7 +268,7 @@ def busqueda_player(conn4, playerSend):
 #     except:
 #         print("error en comandos")
 
-def trayectoria(ballReceived, playerReceived, frame_recv):
+def trayectoria(ballReceived, playerReceived, fr2traj_recv):
     try:
         # Inicializar el tiempo de inicio para el retraso
         start_time = time.time()
@@ -279,16 +276,21 @@ def trayectoria(ballReceived, playerReceived, frame_recv):
         # print("---------COORDENADAS DE PELOTA------------")
         # print("---------COORDENADAS DE JUGADORES------------")
         que_robot_mover = 1
+        first = True
+        path_rrt = rrt.RrtStarSmart(50, 0.50, 5, 10000,
+                                    None, None, None)
+
         while True:
             # que_robot_mover = que_robot_mover.recv()
             # final = final.recv()
-            frame = frame_recv.recv()
+            frame = fr2traj_recv.recv()
             x_ball, y_ball = ballReceived.recv()
             coords_players = playerReceived.recv()
 
-            final = (100, 100)
+            final = (100, 500)
             inicio = None
             path = []
+
             if time.time() - start_time >= delay_seconds and que_robot_mover is not None:
 
                 radio_ball = 30
@@ -300,10 +302,16 @@ def trayectoria(ballReceived, playerReceived, frame_recv):
                         inicio = (info["x"], info["y"])
                     else:
                         lista_obstaculos.append([info["x"], info["y"], 52, 70, math.radians(info["angulo"])])
-                lista_obstaculos.append(ball)
 
-                if inicio is not None:
-                    path = rrt.main(inicio, final, lista_obstaculos)
+                lista_obstaculos.append(ball)
+                if first:
+                    path_rrt.setup(inicio, final, lista_obstaculos)
+                    path_rrt.planning()
+                    first = False
+                else:
+                    path_rrt.update_obstacle(lista_obstaculos, inicio)
+
+                path = path_rrt.path
 
             if len(path) > 0:
                 new_frame = dibujar(frame, path)
@@ -313,12 +321,11 @@ def trayectoria(ballReceived, playerReceived, frame_recv):
                     break
         cv.destroyAllWindows()
 
-    except:
-        print("error en trayectoria")
+    except Exception as e:
+        print(f"error en trayectoria {e}")
 
 
 def dibujar(img, path):
-    print("hi")
     # Color de la línea (en BGR)
     color = (0, 0, 255)  # Verde
     for i in range(1, len(path)):
@@ -328,56 +335,47 @@ def dibujar(img, path):
     return img
 
 
+def main():
+    try:
+        # Configurar el logger principal, para ver los todos los mensajes
+        # en el proceso principal
+        # logging.basicConfig(level=logging.INFO)
+        # 8 multiprocesos maximospy
+
+        # Crear una tubería para la comunicación entre procesos
+        fr2ball_env, fr2ball_recv = multiprocessing.Pipe()  # envia el frame
+        fr2player_env, fr2player_recv = multiprocessing.Pipe()  # envia el frame
+
+        ballSend, ballReceived = multiprocessing.Pipe()         # Enviar las coordenadas de la pelota
+        playerSend, playerReceived = multiprocessing.Pipe()     # Enviar las coordenadas de los jugadores
+        fr2traj_env, fr2traj_recv = multiprocessing.Pipe()          # Para probar la ruta
+
+        # lista para enviar la ruta planificada
+        env_ruta = multiprocessing.Queue()
+
+        # Crear los procesos
+        p1 = multiprocessing.Process(target=simulacion_principal, args=(fr2ball_env, fr2player_env, env_ruta,
+                                                                        fr2traj_env))
+        p2 = multiprocessing.Process(target=busqueda_ball, args=(fr2ball_recv, ballSend))
+        p3 = multiprocessing.Process(target=busqueda_player, args=(fr2player_recv, playerSend))
+        p4 = multiprocessing.Process(target=trayectoria, args=(ballReceived, playerReceived, fr2traj_recv))
+        # p5 = multiprocessing.Process(target=comandos,       args=(env_ruta,) )
+
+        # Iniciar los procesos
+        p1.start()
+        p2.start()
+        p3.start()
+        p4.start()
+
+        # Esperar a que los procesos terminen
+        p1.join()
+        p2.join()
+        p3.join()
+        p4.join()
+
+    except Exception as e:
+        print(f"Error en main {e}")
+
 
 if __name__ == '__main__':
-    # Configurar el logger principal, para ver los todos los mensajes 
-    # en el proceso principal
-    # logging.basicConfig(level=logging.INFO)
-
-    # 8 multiprocesos maximospy p
-
-    # Crear una tubería para la comunicación entre procesos
-    conn1, conn2 = multiprocessing.Pipe()  # envia el frame
-    conn3, conn4 = multiprocessing.Pipe()  # envia el frame
-
-    ballSend, ballReceived = multiprocessing.Pipe()         # Enviar las coordenadas de la pelota
-    playerSend, playerReceived = multiprocessing.Pipe()     # Enviar las coordenadas de los jugadores
-    frame_env, frame_recv = multiprocessing.Pipe()          # Para probar la ruta
-    # conn5, conn6 = multiprocessing.Pipe()
-
-    # Crear la cola compartida
-    # queue = multiprocessing.Queue() # Envia las coordenadas de la pelota y jugadores
-
-    # Crea un evento
-    # evento = Event() # Para una sincronización de los datos enviados y recibidos
-
-    #iniciales
-    # evento.set()
-    # cerca_ball = False
-    # evento2 = Event()
-
-    # Crea una lista compartida
-    # manager = multiprocessing.Manager()
-
-    # lista para enviar la ruta planificada
-    env_ruta = multiprocessing.Queue()
-
-    # Crear los procesos
-    p1 = multiprocessing.Process(target=make, args=(conn1, conn3, env_ruta, frame_env))
-    p2 = multiprocessing.Process(target=busqueda_ball, args=(conn2, ballSend))
-    p3 = multiprocessing.Process(target=busqueda_player, args=(conn4, playerSend))
-
-    p4 = multiprocessing.Process(target=trayectoria, args=(ballReceived, playerReceived, frame_recv))
-    # p5 = multiprocessing.Process(target=comandos,       args=(env_ruta,) )
-
-    # Iniciar los procesos
-    p1.start()
-    p2.start()
-    p3.start()
-    p4.start()
-
-    # Esperar a que los procesos terminen
-    p1.join()
-    p2.join()
-    p3.join()
-    p4.join()
+    main()
