@@ -1,7 +1,8 @@
 import math
-
 import numpy as np
 import cv2 as cv
+from config import *
+
 
 ##############################
 # BUSQUEDA DE LLOS JUGADORES #
@@ -59,10 +60,10 @@ def deteccionJugadoresArucoTag(frame):
                           "esquinas": list_puntos_rotados})
 
             for i in range(4):
-                cv.line(frame, list_puntos_rotados[i], list_puntos_rotados[(i+1) % 4], (0, 255, 0), 2)
-                cv.circle(frame, list_puntos_rotados[i], 5, (255, 0, 0), -1)
+                cv.line(frame, list_puntos_rotados[i], list_puntos_rotados[(i+1) % 4], COLOR_VERDE, 2)
+                cv.circle(frame, list_puntos_rotados[i], 5, COLOR_AZUL_CV, -1)
             # Dibujar el centro y la orientación en la imagen
-            cv.circle(frame, (int(center_x), int(center_y)), 5, (0, 255, 0), -1)
+            cv.circle(frame, (int(center_x), int(center_y)), 5, COLOR_VERDE, -1)
             end_point = (int(center_x + 50 * np.cos(angle)), int(center_y + 50 * np.sin(angle)))
-            cv.line(frame, (int(center_x), int(center_y)), end_point, (0, 255, 0), 2)
+            cv.line(frame, (int(center_x), int(center_y)), end_point, COLOR_VERDE, 2)
     return frame, datos

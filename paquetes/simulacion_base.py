@@ -1,5 +1,7 @@
 import pygame
 import math
+from config import *
+
 
 ######################
 # CREACION DEL JUEGO #
@@ -43,10 +45,6 @@ class Objeto:
 
         # Para realizar la toma de pelota y posterior disparo de la misma
         self.ball_hold = False
-
-        # Dimensiones del campo de futbol
-        self.ancho_campo = 1600
-        self.alto_campo = 1000
 
         # Imagen del robot
         if self.identificador != 0:
@@ -153,8 +151,8 @@ class Objeto:
         self.rotated_rect = self.img_robot_rotated.get_rect(center=(self.x, self.y))
 
         # Ajustar la posición del robot dentro de los bordes del campo de forma eficiente
-        self.x = min(max(self.x, self.rotated_rect.width // 2), self.ancho_campo - self.rotated_rect.width // 2)
-        self.y = min(max(self.y, self.rotated_rect.height // 2), self.alto_campo - self.rotated_rect.height // 2)
+        self.x = min(max(self.x, self.rotated_rect.width // 2), ANCHO_CAMPO - self.rotated_rect.width // 2)
+        self.y = min(max(self.y, self.rotated_rect.height // 2), ALTO_CAMPO - self.rotated_rect.height // 2)
 
         # Actualizar de nuevo el rectángulo después de ajustar la posición
         self.rotated_rect = self.img_robot_rotated.get_rect(center=(self.x, self.y))
@@ -179,9 +177,9 @@ class Objeto:
 
         # Bordes del campo
         left_edge = 0
-        right_edge = self.ancho_campo
+        right_edge = ANCHO_CAMPO
         top_edge = 0
-        bottom_edge = self.alto_campo
+        bottom_edge = ALTO_CAMPO
 
         # Revisar colisiones con los bordes del campo
         colision_borde_izq = robot_rect.left < left_edge

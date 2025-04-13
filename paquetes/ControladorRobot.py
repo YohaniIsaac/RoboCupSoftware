@@ -1,203 +1,301 @@
-import paquetes.rrt_star_smart as rrt
+# import paquetes.rrt_star_smart as rrt
+# import logging
 import numpy as np
-import logging
+from config import *
+import time
 
 
 class RobotController:
     """
-    Controlador para los robots del equipo de fútbol. Implementa comportamientos
-    básicos como presionar, interceptar, capturar pelota, etc.
-
-    Atributos:
-        robot_id (int): Identificador del robot (1-4)
-        velocity (float): Velocidad actual del robot
-        position (np.array): Posición actual del robot [x, y]
-        orientation (float): Orientación actual del robot en radianes
+    Controlador que orquesta las estrategias de los robots en el campo.
+    Interpreta decisiones del AdministradorEstados y define acciones estratégicas.
     """
 
-    def __init__(self, aliado_1, aliado_2, rival_1, rival_2, ball):
+    def __init__(self, team_players, opponents, ball):
+        self.team_players = team_players  # Lista de objetos Player del equipo
+        self.opponents = opponents        # Lista de objetos Player del equipo rival
+        self.ball = ball                  # Referencia a la pelota
+        # ===========================================================
+        # Tiempo mínimo entre cambios de rol para evitar oscilaciones
+        self.min_time_between_role_changes = 0.5  # segundos
+        self.last_role_change_time = time.time()
+
+        # Factor de ponderación para la orientación vs. distancia
+        self.orientation_weight = 0.3
+
+        # Umbral de distancia para considerar un cambio de rol
+        self.role_change_threshold = 100  # unidades de distancia
+
+    def _assign_dynamic_roles(self):
         """
-        Inicializa el controlador de un robot.
-
-        Args:
-            aliado_1 (obj): Objeto de aliado 1
-            aliado_2 (obj): Objeto de aliado 2
-            rival_1 (obj): Objeto de rival 1
-            rival_2 (obj): Objeto de rival 2
-            ball (obj): Objeto de la pelota
-        """
-        self.aliado_1 = aliado_1
-        self.aliado_2 = aliado_2
-        self.rival_1 = rival_1
-        self.rival_2 = rival_2
-        self.ball = ball
-
-        self.velocity = 0.0
-        self.position = np.array([0.0, 0.0])
-        self.orientation = 0.0
-        self.rrt_planner_one = rrt.RrtStarSmart(step_len=50, goal_sample_rate=0.5, search_radius=5, iter_max=10000)
-        self.rrt_planner_two = rrt.RrtStarSmart(step_len=50, goal_sample_rate=0.5, search_radius=5, iter_max=10000)
-        self.current_path = None
-
-        self.estado_robot_ataque = None
-        self.estado_robot_defensa = None
-        self.position_ball = None
-
-    def evaluar_ctrRobot(self, estado_robot_ataque, estado_robot_defensa):
-        self.estado_robot_ataque = estado_robot_ataque
-        self.estado_robot_defensa = estado_robot_defensa
-        self.position_ball = self.ball.get_position()
-
-        for robot in [self.aliado_1, self.aliado_2]:
-            if robot.rol == 1:
-                if self.estado_robot_ataque <= 0.2:
-                    self.presionar(robot)
-                elif 0.2 < self.estado_robot_ataque <= 0.5:
-                    self.interceptar(robot)
-                elif 0.5 < self.estado_robot_ataque <= 0.8:
-                    self.capturar_pelota(robot)
-                elif 0.8 < self.estado_robot_ataque <= 1.1:
-                    self.adelantar_lanzar(robot)
-            else:
-                if self.estado_robot_defensa <= 0.2:
-                    self.preparar_pase(robot)
-                elif 0.2 < self.estado_robot_defensa <= 0.5:
-                    self.marcar(robot)
-                elif 0.5 < self.estado_robot_defensa <= 0.8:
-                    self.posicion_defensiva(robot)
-                elif 0.8 < self.estado_robot_defensa <= 1.1:
-                    self.bloquear_tiro(robot)
-
-    def presionar(self, robot):
-        """
-        Implementa la acción de presionar al oponente que tiene la pelota.
-        Esta acción se activa cuando el equipo rival tiene posesión de la pelota.
-        El robot se posiciona entre el oponente y la portería, y avanza hacia el oponente
-        para intentar quitarle la posesión de la pelota.
-
-        Args:
-            robot (obj): Objeto del robot que realizará la acción
+        Asigna roles de atacante y defensor basados en la situación actual.
 
         Returns:
-            dict: Comandos de velocidad y dirección para el robot
+            tuple: (jugador_atacante, jugador_defensor)
         """
-        # Definimos la posición de portería aliada (esto dependerá de qué equipo somos)
-        goal_pos = np.array([0.0, 750.0])  # Ejemplo: portería en x=0
+        # Verificar si ha pasado suficiente tiempo desde el último cambio
+        current_time = time.time()
+        if current_time - self.last_role_change_time < self.min_time_between_role_changes:
+            # Mantener roles actuales
+            attacker = next((p for p in self.team_players if p.rol == 1), self.team_players[0])
+            defender = next((p for p in self.team_players if p.rol == 0), self.team_players[1])
+            return attacker, defender
 
-        # Obtenemos la posición actual del robot
-        robot_pos = robot.get_position()
+        # Calcular puntuación para cada jugador
+        scores = []
+        for player in self.team_players:
+            # Factores principales: distancia y orientación hacia la pelota
+            distance = player.distance_to_ball(self.ball)
+            orientation = player.angle_difference_ball(self.ball)
+
+            # Normalizar la orientación (0-1, donde 0 es perfectamente orientado)
+            orientation_normalized = min(1.0, orientation / np.pi)
+
+            # Calcular puntuación (mayor es mejor)
+            # Fórmula: 1000 - distancia - (peso_orientación * orientación_normalizada * 100)
+            # Esto favorece al jugador más cercano con mejor orientación
+            score = 1000 - distance - (self.orientation_weight * orientation_normalized * 100)
+            scores.append((player, score))
+
+        # Ordenar por puntuación descendente
+        scores.sort(key=lambda x: x[1], reverse=True)
+
+        # Verificar si la diferencia justifica un cambio de roles
+        current_attacker = next((p for p in self.team_players if p.rol == 1), None)
+
+        # Si ya hay un atacante, verificar si debería cambiarse
+        if current_attacker and current_attacker != scores[0][0]:
+            # Obtener puntuación del atacante actual
+            current_score = next(score for player, score in scores if player == current_attacker)
+            best_score = scores[0][1]
+
+            # Solo cambiar si hay una diferencia significativa
+            if best_score - current_score < self.role_change_threshold:
+                # No cambiar roles, mantener al atacante actual
+                attacker = current_attacker
+                defender = next(player for player in self.team_players if player != attacker)
+
+        # Asignar nuevos roles
+        attacker = scores[0][0]
+        defender = scores[1][0]
+
+        # Actualizar roles en los objetos jugador
+        attacker.set_rol(ROL_ATACANTE)
+        defender.set_rol(ROL_DEFENSIVO)
+
+        # Registrar el tiempo del cambio
+        self.last_role_change_time = current_time
+
+    def execute_team_strategy(self, attacker_state, defender_state):
+        """
+        Método principal que asigna acciones a los jugadores basándose
+        en los estados determinados por el AdministradorEstados.
+        """
+        self._assign_dynamic_roles()
+        # Identificar jugadores por rol
+        attacker = next(p for p in self.team_players if p.rol == 1)
+        defender = next(p for p in self.team_players if p.rol == 0)
+
+        # Asignar acciones según estados
+        self._execute_attacker_action(attacker, attacker_state)
+        self._execute_defender_action(defender, defender_state)
+
+    def _execute_attacker_action(self, attacker, state):
+        """Determina y ejecuta la acción del atacante según su estado"""
+        if state <= 0.2:
+            self.presionar(attacker)
+        elif 0.2 < state <= 0.5:
+            self.interceptar(attacker)
+        elif 0.5 < state <= 0.8:
+            self.capturar_pelota(attacker)
+        elif 0.8 < state <= 1.1:
+            self.adelantar_lanzar(attacker)
+
+    def _execute_defender_action(self, defender, state):
+        """Determina y ejecuta la acción del defensor según su estado"""
+        if state <= 0.2:
+            self.preparar_pase(defender)
+        elif 0.2 < state <= 0.5:
+            self.marcar(defender)
+        elif 0.5 < state <= 0.8:
+            self.posicion_defensiva(defender)
+        elif 0.8 < state <= 1.1:
+            self.bloquear_tiro(defender)
+
+    # ======================================================
+    # ================= ACCIONES OFENSIVAS =================
+    # ======================================================
+
+    def presionar(self, player):
+        """Presiona al jugador rival con la pelota"""
+        # Identificar rival más cercano a la pelota
+        closest_opponent = min(self.opponents,
+                               key=lambda op: op.distance_to_ball(self.ball))
+
+        # Calcular posición estratégica para presionar
+        # (entre el rival y nuestra portería)
+        our_goal_pos = [0, ALTO_CAMPO / 2] if player.team == 'red' else [ANCHO_CAMPO, ALTO_CAMPO / 2]
+        opponent_pos = closest_opponent.get_position()
+
+        # Vector desde rival a portería (normalizado y escalado)
+        to_goal_vector = np.array(our_goal_pos) - opponent_pos
+        if np.linalg.norm(to_goal_vector) > 0:
+            to_goal_vector = to_goal_vector / np.linalg.norm(to_goal_vector) * 60
+
+        # Posición final de presión
+        pressing_position = opponent_pos + to_goal_vector
+
+        # Ordenar al jugador moverse a esa posición
+        player.move_to_position(pressing_position, speed_factor=1.3)
+
+    def interceptar(self, player):
+        """Intercepta la trayectoria de la pelota"""
+        # Determinar tiempo de predicción según velocidad de la pelota
+        ball_speed = np.linalg.norm([getattr(self.ball, 'dx', 0),
+                                     getattr(self.ball, 'dy', 0)])
+        prediction_time = min(1.0, 0.3 + ball_speed * 0.05)
+
+        # Delegar la intercepción al jugador
+        player.intercept_ball(self.ball, prediction_time)
+
+    def capturar_pelota(self, player):
+        """Captura la pelota de forma controlada"""
+        player.capture_ball(self.ball)
+
+    def adelantar_lanzar(self, player):
+        """Avanza con la pelota y busca oportunidad de lanzamiento"""
+        # Ubicación de la portería rival
+        opponent_goal_pos = [ANCHO_CAMPO,
+                             ALTO_CAMPO / 2] if player.team == 'red' else [0, ALTO_CAMPO / 2]
+
+        if player.has_ball():
+            # Determinar si estamos en posición de tiro
+            dist_to_goal = np.linalg.norm(player.get_position() - np.array(opponent_goal_pos))
+
+            if dist_to_goal < 300:  # Distancia adecuada para disparar
+                # Calcular punto óptimo para el tiro
+                shooting_target = self._calculate_shooting_target(player, opponent_goal_pos)
+                player.kick_ball(shooting_target, power=0.9)
+            else:
+                # Avanzar hacia la portería evitando obstáculos
+                advancing_path = self._calculate_advancing_path(player, opponent_goal_pos)
+                player.move_with_ball(advancing_path)
+        else:
+            # Si no tiene la pelota, intentar capturarla
+            player.capture_ball(self.ball)
+
+    # ======================================================
+    # ================= ACCIONES DEFENSIVAS ================
+    # ======================================================
+
+    def preparar_pase(self, player):
+        """Busca posición para recibir un pase del compañero"""
+        # Identificar compañero
+        teammate = next(p for p in self.team_players if p != player)
+
+        # Determinar si el compañero tiene la pelota
+        if teammate.has_ball():
+            # Calcular posición óptima para recibir pase
+            ball_pos = self.ball.get_position()
+            opponent_goal_pos = [ANCHO_CAMPO,
+                                 ALTO_CAMPO / 2] if player.team == 'red' else [0, ALTO_CAMPO / 2]
+
+            # Vector hacia la portería y perpendicular
+            forward_vector = np.array(opponent_goal_pos) - ball_pos
+            if np.linalg.norm(forward_vector) > 0:
+                forward_vector = forward_vector / np.linalg.norm(forward_vector) * 200
+
+            # Vector perpendicular para dar opción de pase lateral
+            perp_vector = np.array([-forward_vector[1], forward_vector[0]]) * 0.7
+
+            # Posición para recibir pase
+            passing_position = ball_pos + forward_vector + perp_vector
+
+            # Moverse a esa posición
+            player.move_to_position(passing_position)
+        else:
+            # Si el compañero no tiene la pelota, posición defensiva
+            self.posicion_defensiva(player)
+
+    def marcar(self, player):
+        """Marca al jugador rival más peligroso"""
+        # Identificar rival más peligroso
+        dangerous_opponent = self._identify_most_dangerous_opponent()
+
+        # Calcular posición para marcar (entre el rival y nuestra portería)
+        our_goal_pos = [0, ALTO_CAMPO / 2] if player.team == 'red' else [ANCHO_CAMPO, ALTO_CAMPO / 2]
+        opponent_pos = dangerous_opponent.get_position()
+
+        # Vector desde rival a portería
+        to_goal_vector = np.array(our_goal_pos) - opponent_pos
+        if np.linalg.norm(to_goal_vector) > 0:
+            to_goal_vector = to_goal_vector / np.linalg.norm(to_goal_vector) * 50
+
+        # Posición de marcaje
+        marking_position = opponent_pos + to_goal_vector
+
+        # Moverse a esa posición
+        player.move_to_position(marking_position, speed_factor=1.2)
+
+    def posicion_defensiva(self, player):
+        """Mantiene una posición defensiva óptima"""
+        # Entre la pelota y nuestra portería
+        our_goal_pos = [0, ALTO_CAMPO / 2] if player.team == 'red' else [ANCHO_CAMPO, ALTO_CAMPO / 2]
         ball_pos = self.ball.get_position()
 
-        # Velocidad máxima del robot para esta acción
-        velocity = 100.0  # Ajusta según las capacidades del robot
+        # Vector desde pelota a portería
+        to_goal_vector = np.array(our_goal_pos) - ball_pos
 
-        # Calculamos el vector desde el oponente hacia nuestra portería
-        opponent_1_to_goal = ball_pos - self.rival_1.get_position()
-        opponent_2_to_goal = ball_pos - self.rival_2.get_position()
+        if np.linalg.norm(to_goal_vector) > 0:
+            to_goal_vector = to_goal_vector / np.linalg.norm(to_goal_vector)
 
-        # Normalizamos el vector para obtener solo la dirección
-        if np.linalg.norm(opponent_1_to_goal) > 0:
-            opponent_1_to_goal = opponent_1_to_goal / np.linalg.norm(opponent_1_to_goal)
-        if np.linalg.norm(opponent_2_to_goal) > 0:
-            opponent_2_to_goal = opponent_2_to_goal / np.linalg.norm(opponent_2_to_goal)
+        # Distancia variable según la posición de la pelota
+        distance_factor = min(np.linalg.norm(ball_pos - np.array(our_goal_pos)) * 0.6, 300)
 
-        # Determinamos qué rival está más cerca de la pelota
-        dist_rival1_to_ball = np.linalg.norm(self.rival_1.get_position() - ball_pos)
-        dist_rival2_to_ball = np.linalg.norm(self.rival_2.get_position() - ball_pos)
+        # Posición defensiva
+        defensive_position = ball_pos + to_goal_vector * distance_factor
 
-        if dist_rival1_to_ball <= dist_rival2_to_ball:
-            # Calculamos un punto entre el oponente y nuestra portería
-            # donde debemos posicionarnos (a una distancia de 50 unidades del oponente)
-            target_pos = self.rival_1.get_position() + opponent_1_to_goal * 50
+        # Moverse a esa posición
+        player.move_to_position(defensive_position)
 
-            # Vector dirección desde nuestra posición hacia el punto objetivo
-            direction_vector = target_pos - robot_pos
-        else:
-            # Calculamos un punto entre el oponente y nuestra portería
-            # donde debemos posicionarnos (a una distancia de 50 unidades del oponente)
-            target_pos = self.rival_2.get_position() + opponent_2_to_goal * 50
+    def bloquear_tiro(self, player):
+        """Bloquea posible tiro a portería"""
+        # Identificar rival con posesión o más cercano a la pelota
+        ball_possessor = min(self.opponents, key=lambda op: op.distance_to_ball(self.ball))
 
-            # Vector dirección desde nuestra posición hacia el punto objetivo
-            direction_vector = target_pos - robot_pos
+        # Calcular línea de tiro probable
+        our_goal_pos = [0, ALTO_CAMPO / 2] if player.team == 'red' else [ANCHO_CAMPO, ALTO_CAMPO / 2]
 
-        # Calculamos el ángulo objetivo en radianes
-        target_angle = np.arctan2(direction_vector[1], direction_vector[0])
+        # Vector de tiro
+        shoot_vector = np.array(our_goal_pos) - ball_possessor.get_position()
+        if np.linalg.norm(shoot_vector) > 0:
+            shoot_vector = shoot_vector / np.linalg.norm(shoot_vector)
 
-        # Calculamos la distancia al objetivo
-        distance_to_target = np.linalg.norm(direction_vector)
+        # Punto de intercepción
+        intercept_point = ball_possessor.get_position() + shoot_vector * 70
 
-        # Una vez cerca del objetivo, orientarnos hacia la pelota para intentar interceptarla
-        if distance_to_target < 70:
-            ball_direction = ball_pos - robot_pos
-            target_angle = np.arctan2(ball_direction[1], ball_direction[0])
+        # Moverse a posición de bloqueo con alta prioridad
+        player.move_to_position(intercept_point, speed_factor=1.5)
 
-            # Si estamos muy cerca de la pelota, intentar capturarla
-            if np.linalg.norm(ball_direction) < 30:
-                logging.info(
-                    f"Robot {robot.id if hasattr(robot, 'id') else 'desconocido'}"
-                    f"intentando capturar la pelota durante presión")
-                return {
-                    "command": "capture",
-                    "velocity": velocity,
-                    "angle": target_angle,
-                    "target_position": target_pos
-                }
+    # =====================================================
+    # ================= MÉTODOS AUXILIARES ================
+    # =====================================================
 
-        logging.debug(
-            f"Robot {robot.id if hasattr(robot, 'id') else 'desconocido'} presionando - Posición objetivo: {target_pos}, "
-            f"Ángulo: {target_angle}, Velocidad: {velocity}")
+    def _calculate_shooting_target(self, player, goal_pos):
+        """Calcula el mejor punto para un tiro a portería"""
+        # Versión básica: apuntar cerca de las esquinas
+        goal_width = 200
+        side_offset = goal_width * 0.4 * (1 if np.random.random() > 0.5 else -1)
+        return [goal_pos[0], goal_pos[1] + side_offset]
 
-        # Actualizamos la posición objetivo del robot
-        robot.set_target_position(target_pos)  # Asumiendo que existe este método
+    def _calculate_advancing_path(self, player, goal_pos):
+        """Calcula la ruta óptima para avanzar hacia la portería rival"""
+        # Usando el planificador del jugador para generar la ruta
+        player.plan_path_to(goal_pos, self.opponents)
+        return player.current_path or [player.get_position(), goal_pos]
 
-        # Devolvemos los comandos para que el robot se mueva hacia el punto objetivo
-        return {
-            "command": "move",
-            "velocity": velocity,
-            "angle": target_angle,
-            "target_position": target_pos
-        }
-
-    def interceptar(self, id_ataque):
-        # Lógica para que el robot intercepte la pelota
-        print("Ejecutando acción: Interceptar")
-        # Generar trayectoria y mover el robot
-        self.generar_trayectoria("interceptar")
-
-    def capturar_pelota(self, id_ataque):
-        # Lógica para que el robot capture la pelota
-        print("Ejecutando acción: Capturar pelota")
-        # Generar trayectoria y mover el robot
-        self.generar_trayectoria("capturar_pelota")
-
-    def adelantar_lanzar(self, id_ataque):
-        # Lógica para que el robot adelante y lance
-        print("Ejecutando acción: Adelantar y lanzar")
-        # Generar trayectoria y mover el robot
-        self.generar_trayectoria("adelantar_lanzar")
-
-    def preparar_pase(self, id_defensa):
-        # Lógica para que el robot prepare un pase
-        print("Ejecutando acción: Preparar pase")
-        # Generar trayectoria y mover el robot
-        self.generar_trayectoria("preparar_pase")
-
-    def marcar(self, id_defensa):
-        # Lógica para que el robot marque a un rival
-        print("Ejecutando acción: Marcar")
-        # Generar trayectoria y mover el robot
-        self.generar_trayectoria("marcar")
-
-    def posicion_defensiva(self, id_defensa):
-        # Lógica para que el robot se coloque en posición defensiva
-        print("Ejecutando acción: Posición defensiva")
-        # Generar trayectoria y mover el robot
-        self.generar_trayectoria("posicion_defensiva")
-
-    def bloquear_tiro(self, id_defensa):
-        # Lógica para que el robot bloquee un tiro
-        print("Ejecutando acción: Bloquear tiro")
-        # Generar trayectoria y mover el robot
-        self.generar_trayectoria("bloquear_tiro")
-
-
+    def _identify_most_dangerous_opponent(self):
+        """Identifica al rival más peligroso"""
+        # Rival más cercano a nuestra portería es el más peligroso
+        our_goal = [0, ALTO_CAMPO / 2] if self.team_players[0].team == 'red' else [ANCHO_CAMPO, ALTO_CAMPO / 2]
+        return min(self.opponents, key=lambda op: np.linalg.norm(op.get_position() - np.array(our_goal)))

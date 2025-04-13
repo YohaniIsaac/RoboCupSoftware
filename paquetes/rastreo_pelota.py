@@ -1,4 +1,6 @@
 import cv2 as cv
+from config import *
+
 
 #########################
 # BUSQUEDA DE LA PELOTA #
@@ -38,12 +40,12 @@ class Ball:
         if len(self.roi_hsv) > 0:
             # Detecta los circulos dentro del recorte y su centro
             x_nuevo, y_nuevo, r_nuevo = self.detectar_circulos_color(self.roi_hsv, self.color, self.roi_img)
-            cv.circle(self.roi_hsv, (x_nuevo, y_nuevo), r_nuevo, (0, 0, 0), 1)
+            cv.circle(self.roi_hsv, (x_nuevo, y_nuevo), r_nuevo, COLOR_NEGRO, 1)
             # Reescribe el centro y actualiza este en el objeto
             self.x, self.y = self.x + x_nuevo - self.vecindad, self.y + y_nuevo - self.vecindad
             # Dibuja un círculo en el centro de la pelota
-            cv.circle(frame, (self.x, self.y), 1, (0, 0, 0), -1)
-            cv.circle(self.roi_hsv, (self.x, self.y), r_nuevo, (0, 0, 0), 1)
+            cv.circle(frame, (self.x, self.y), 1, COLOR_NEGRO, -1)
+            cv.circle(self.roi_hsv, (self.x, self.y), r_nuevo, COLOR_NEGRO, 1)
             self.goles(frame)
 
         return self.x, self.y
@@ -66,13 +68,11 @@ class Ball:
         font = cv.FONT_HERSHEY_SIMPLEX
         posicion_texto_rojo = (50, 50)
         posicion_texto_azul = (frame.shape[1] - 200, 50)
-        color_rojo = (0, 0, 255)  # Rojo en formato BGR
-        color_azul = (255, 0, 0)  # Azul en formato BGR
         goles_texto_rojo = f"Goles Rojos: {self.goles_rojo}"
         goles_texto_azul = f"Goles Azules: {self.goles_azul}"
 
-        cv.putText(frame, goles_texto_rojo, posicion_texto_rojo, font, 0.7, color_rojo, 2, cv.LINE_AA)
-        cv.putText(frame, goles_texto_azul, posicion_texto_azul, font, 0.7, color_azul, 2, cv.LINE_AA)
+        cv.putText(frame, goles_texto_rojo, posicion_texto_rojo, font, 0.7, COLOR_ROJO_CV, 2, cv.LINE_AA)
+        cv.putText(frame, goles_texto_azul, posicion_texto_azul, font, 0.7, COLOR_AZUL_CV, 2, cv.LINE_AA)
 
     @classmethod
     def detectar_circulos_color(cls, img_hsv, colores, img_origi):

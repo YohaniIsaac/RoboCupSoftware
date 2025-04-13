@@ -1,45 +1,232 @@
 import math
 import numpy as np
 from paquetes.rrt_star_smart import RrtStarSmart
-import multiprocessing
+# import multiprocessing
 import threading
 import time
+from config import *
 
 
 class Player:
-    def __init__(self, player_id, x, y, angle, team='red'):
-        """
-        Inicializa un jugador con sus características principales.
+    """
+    Representa un jugador con capacidades para ejecutar acciones físicas.
+    Implementa la lógica de bajo nivel para movimiento, control de pelota y navegación.
+    """
 
-        :param player_id: Identificador único del jugador
-        :param x: Coordenada x de la posición
-        :param y: Coordenada y de la posición
-        :param angle: Ángulo de orientación del jugador
-        :param team: Equipo al que pertenece el jugador (opcional)
-        """
+    def __init__(self, player_id, x, y, angle, ball, team='red'):
+        # Mantener atributos existentes
         self.id = player_id
         self.x = int(x)
         self.y = int(y)
         self.angle = angle
         self.team = team
+        self.ball = ball
 
         self.distance2ball = None
         self.anglerobot2ball = None
-        self.rol = None # 0: defensivo, 1: atacante
+        self.rol = None  # 0: defensivo, 1: atacante
 
-        # Componentes de planificación
-        self.planner = RrtStarSmart(
-            step_len=20,
-            goal_sample_rate=0.05,
-            search_radius=50,
-            iter_max=500  # Reducido para planificación rápida
-        )
+        # Estado de posesión
+        self._has_ball = False
+        self.ball_capture_distance = 30
+
+        # Parámetros de movimiento
+        self.max_speed = 10
+        self.max_rotation_speed = 5
+
+        # Mantener componentes de planificación existentes...
+        self.planner = RrtStarSmart(step_len=20, goal_sample_rate=0.05,
+                                    search_radius=50, iter_max=500)
         self.current_path = None
         self.goal = None
-        self.path_lock = threading.Lock()  # Para acceso seguro desde múltiples hilos
+        self.path_lock = threading.Lock()
         self.needs_replanning = False
         self.last_planning_time = 0
-        self.min_replanning_interval = 0.2  # Segundos entre replanificaciones
+        self.min_replanning_interval = 0.2
+        # === MÉTODOS DE MOVIMIENTO BÁSICO ===
+
+    def move_to_position(self, target_position, speed_factor=1.0):
+        """Mueve al jugador hacia una posición objetivo"""
+        # Planificar ruta si es necesario
+        target_position = np.array(target_position)
+        if (self.goal is None or
+                np.linalg.norm(target_position - np.array(self.goal)) > 20):
+            self.set_goal(target_position)
+
+        # Ajustar velocidad máxima
+        self.max_speed = 10 * speed_factor
+
+        # Ejecutar un paso de movimiento
+        if self.current_path and len(self.current_path) > 1:
+            self._follow_path()
+        else:
+            # Movimiento directo si no hay ruta planificada
+            self._move_directly_to(target_position)
+
+    def _move_directly_to(self, target_position):
+        """Movimiento directo hacia un punto sin planificación de ruta"""
+        direction = np.array(target_position) - np.array([self.x, self.y])
+        distance = np.linalg.norm(direction)
+
+        if distance > 0:
+            # Normalizar y aplicar velocidad
+            direction = direction / distance * min(distance, self.max_speed)
+
+            # Actualizar posición
+            self.x += int(direction[0])
+            self.y += int(direction[1])
+
+            # Actualizar orientación
+            self._orient_towards(target_position)
+
+    def _orient_towards(self, target_position):
+        """Orienta al jugador hacia una posición"""
+        # Calcular ángulo objetivo
+        dx = target_position[0] - self.x
+        dy = target_position[1] - self.y
+        target_angle = math.degrees(math.atan2(dy, dx))
+
+        # Calcular diferencia angular
+        angle_diff = (target_angle - self.angle) % 360
+        if angle_diff > 180:
+            angle_diff -= 360
+
+        # Aplicar rotación con límite de velocidad
+        rotation = min(abs(angle_diff), self.max_rotation_speed) * (1 if angle_diff > 0 else -1)
+        self.angle = (self.angle + rotation) % 360
+
+    def _follow_path(self):
+        """Sigue el camino planificado actual"""
+        if not self.current_path or len(self.current_path) < 2:
+            return
+
+        # Obtener el siguiente punto en la ruta
+        next_point = self.current_path[-2]  # El último punto es la posición inicial
+
+        # Moverse hacia ese punto
+        self._move_directly_to(next_point)
+
+        # Si llegamos al punto, avanzar al siguiente
+        current_pos = np.array([self.x, self.y])
+        if np.linalg.norm(current_pos - np.array(next_point)) < 20:
+            self.current_path.pop()
+
+        # === MÉTODOS DE INTERACCIÓN CON LA PELOTA ===
+
+    def has_ball(self):
+        """Verifica si el jugador tiene control de la pelota"""
+        return self._has_ball
+
+    def intercept_ball(self, ball, prediction_time=0.5):
+        """Intercepta la pelota en su trayectoria futura"""
+        # Predicción de posición: posición actual + velocidad * tiempo
+        if hasattr(ball, 'dx') and hasattr(ball, 'dy'):
+            ball_velocity = np.array([ball.dx, ball.dy])
+            predicted_pos = ball.get_position() + ball_velocity * prediction_time
+        else:
+            # Sin información de velocidad, ir a la posición actual
+            predicted_pos = ball.get_position()
+
+        # Moverse a alta velocidad hacia el punto de intercepción
+        self.move_to_position(predicted_pos, speed_factor=1.5)
+
+    def capture_ball(self, ball):
+        """Captura la pelota controlando la velocidad de aproximación"""
+        ball_pos = ball.get_position()
+        dist_to_ball = self.distance_to_ball(ball)
+
+        if dist_to_ball < self.ball_capture_distance:
+            # Cerca de la pelota: movimiento preciso y lento
+            approach_speed = max(0.2, min(0.6, dist_to_ball / self.ball_capture_distance))
+
+            # Orientarse hacia la pelota con precisión
+            self._orient_towards(ball_pos)
+
+            # Verificar si podemos capturar
+            angle_diff = self.angle_difference_ball(ball)
+            if dist_to_ball < 10 and angle_diff < 0.5:
+                self._has_ball = True
+                # Actualizar posición de la pelota (física)
+                if hasattr(ball, 'set_position'):
+                    front_offset = 20  # Distancia desde el centro del robot
+                    angle_rad = math.radians(self.angle)
+                    ball_x = self.x + front_offset * math.cos(angle_rad)
+                    ball_y = self.y + front_offset * math.sin(angle_rad)
+                    ball.set_position(ball_x, ball_y)
+        else:
+            # Lejos de la pelota: aproximación rápida
+            approach_speed = 1.0
+
+        # Moverse hacia la pelota
+        self.move_to_position(ball_pos, speed_factor=approach_speed)
+
+    def kick_ball(self, target_position, power=1.0):
+        """Patea la pelota hacia un objetivo"""
+        if not self._has_ball:
+            return False
+
+        # Calcular dirección del tiro
+        kick_direction = np.array(target_position) - self.get_position()
+        if np.linalg.norm(kick_direction) > 0:
+            kick_direction = kick_direction / np.linalg.norm(kick_direction)
+
+        # Determinar velocidad según potencia (escala de 0 a máx_velocidad)
+        max_kick_speed = 15  # Velocidad máxima de disparo
+        kick_speed = power * max_kick_speed
+
+        # Aplicar velocidad a la pelota (comunicación con el sistema físico)
+        # [Implementación según tu motor físico]
+        if hasattr(self.ball, 'dx') and hasattr(self.ball, 'dy'):
+            self.ball.dx = kick_direction[0] * kick_speed
+            self.ball.dy = kick_direction[1] * kick_speed
+
+        self._has_ball = False
+        return True
+
+    def move_with_ball(self, path_points, speed_factor=0.7):
+        """Avanza con la pelota en control"""
+        if not self._has_ball:
+            return False
+
+        # Establecer camino
+        self.current_path = path_points
+
+        # Avanzar a velocidad controlada
+        self._follow_path()
+
+        # Actualizar posición de la pelota
+        if hasattr(self.ball, 'set_position'):
+            # Calcular posición adelante del jugador
+            front_offset = 20
+            angle_rad = math.radians(self.angle)
+            ball_x = self.x + front_offset * math.cos(angle_rad)
+            ball_y = self.y + front_offset * math.sin(angle_rad)
+
+            # Actualizar pelota
+            self.ball.set_position(ball_x, ball_y)
+
+        return True
+
+        # === MÉTODOS DE PLANIFICACIÓN ===
+
+    def plan_path_to(self, goal_position, obstacles=None):
+        """Planifica una ruta hacia un objetivo evitando obstáculos"""
+        obstacles_list = []
+
+        # Convertir obstáculos a formato compatible con RRT
+        if obstacles:
+            for obstacle in obstacles:
+                # Para jugadores, crear obstáculos circulares
+                if hasattr(obstacle, 'get_position'):
+                    pos = obstacle.get_position()
+                    obstacles_list.append([pos[0], pos[1], 40])  # Radio 40
+
+        # Configurar y ejecutar planificador
+        with self.path_lock:
+            self.planner.setup([self.x, self.y], goal_position, obstacles_list)
+            self.planner.planning()
+            self.current_path = self.planner.path
+            self.goal = goal_position
 
     def update(self, all_players):
         """Método principal a llamar en cada ciclo del hilo"""
@@ -72,6 +259,7 @@ class Player:
             self.planner.setup([self.x, self.y], self.goal, obstacles)
             self.planner.planning()
             self.current_path = self.planner.path
+
     def set_goal(self, goal_position):
         """Establece el objetivo del jugador"""
         self.goal = goal_position
@@ -166,14 +354,9 @@ class Player:
         """Actualiza el ángulo del jugador."""
         self.angle = angle
 
-    def set_rol(self, rol_str):
+    def set_rol(self, rol):
         """Actualiza el rol del jugador."""
-        if rol_str == "atacante" or "ATACANTE":
-            self.rol = 1
-        elif rol_str == "defensa" or "DEFENSA":
-            self.rol = 0
-        else:
-            self.rol = None
+        self.rol = rol
 
     def distance_to_ball(self, ball):
         """Calcula la distancia euclidiana entre este jugador y otro."""
@@ -246,7 +429,7 @@ def separate_coords(datos, _id):
     raise ValueError(f"ID {_id} no encontrado en los datos")  # Opción con excepción
 
 
-def angle_robot2ball(robot_pos, robot_angle_grados, pelota_pos, umbral_grados=5):
+def angle_robot2ball(robot_pos, robot_angle_grados, pelota_pos):
     """
     Determina si el robot está apuntando hacia la pelota.
 
@@ -254,13 +437,11 @@ def angle_robot2ball(robot_pos, robot_angle_grados, pelota_pos, umbral_grados=5)
         robot_pos (np.array): Coordenadas [x, y] del robot
         robot_angle_grados (float): Ángulo de orientación del robot en grados
         pelota_pos (np.array): Coordenadas [x, y] de la pelota
-        umbral_grados (float): Umbral en grados para considerar que el robot apunta hacia la pelota
 
     Returns:
         bool: True si el robot apunta hacia la pelota, False en caso contrario.
     """
     robot_angle_radians = np.radians(robot_angle_grados)
-    umbral_radianes = np.radians(umbral_grados)
     # 1. Calcular el vector de diferencia entre la pelota y el robot
     delta_pos = pelota_pos - robot_pos
 
@@ -339,7 +520,7 @@ def distancias_players2ball(datos, ball):
     return distancias
 
 
-def ball_zone2(ball, zone_team, ancho=1500, zonas=(0.3, 0.7)):
+def ball_zone2(ball, zone_team, zonas=(0.3, 0.7)):
     """
     Determina la zona del campo en la que se encuentra la pelota, dividiendo
     el campo en tres zonas: 'DEFENSIVA', 'NEUTRAL' y 'OFENSIVA'.
@@ -347,7 +528,6 @@ def ball_zone2(ball, zone_team, ancho=1500, zonas=(0.3, 0.7)):
     Args:
         ball (class):   Coordenadas [x, y] del punto
         zone_team(str): Indica la posición en el campo que tiene el jugador del equipo
-        ancho (int):    Ancho del mapa (por defecto 1500)
         zonas (tuple):  Porcentajes de corte para dividir las zonas
 
     Returns:
@@ -355,46 +535,46 @@ def ball_zone2(ball, zone_team, ancho=1500, zonas=(0.3, 0.7)):
     """
     center_ball = ball.get_position()
     x, _ = center_ball
-    izquierda, derecha = [ancho * z for z in zonas]
+    izquierda, derecha = [ANCHO_CAMPO * z for z in zonas]
 
-    if zone_team == "LEFT":
+    if zone_team == LADO_IZQUIERDO:
         if x < izquierda:
-            return "DEFENSIVA"
+            return ZONA_DEFENSIVA
         elif izquierda <= x < derecha:
-            return "NEUTRAL"
-        elif derecha <= x <= ancho:
-            return "OFENSIVA"
+            return ZONA_NEUTRAL
+        elif derecha <= x <= ANCHO_CAMPO:
+            return ZONA_OFENSIVA
         else:
-            return "FUERA"
+            return ZONA_FUERA
     else:
         if x < izquierda:
-            return "OFENSIVA"
+            return ZONA_OFENSIVA
         elif izquierda <= x < derecha:
-            return "NEUTRAL"
-        elif derecha <= x <= ancho:
-            return "DEFENSIVA"
+            return ZONA_NEUTRAL
+        elif derecha <= x <= ANCHO_CAMPO:
+            return ZONA_DEFENSIVA
         else:
-            return "FUERA"
+            return ZONA_FUERA
 
 
-def ball_zone(ball, zone_team, ancho=1500, zonas=(0.3, 0.7)):
+def ball_zone(ball, zone_team, zonas=(0.3, 0.7)):
     x, _ = ball.get_position()
-    izquierda, derecha = [ancho * z for z in zonas]
+    izquierda, derecha = [ANCHO_CAMPO * z for z in zonas]
 
     zonas_mapa = {
-        "LEFT": {
-            (0, izquierda): "DEFENSIVA",
-            (izquierda, derecha): "NEUTRAL",
-            (derecha, ancho): "OFENSIVA"
+        LADO_IZQUIERDO: {
+            (0, izquierda): ZONA_DEFENSIVA,
+            (izquierda, derecha): ZONA_NEUTRAL,
+            (derecha, ANCHO_CAMPO): ZONA_OFENSIVA
         },
-        "RIGHT": {
-            (0, izquierda): "OFENSIVA",
-            (izquierda, derecha): "NEUTRAL",
-            (derecha, ancho): "DEFENSIVA"
+        LADO_DERECHO: {
+            (0, izquierda): ZONA_OFENSIVA,
+            (izquierda, derecha): ZONA_NEUTRAL,
+            (derecha, ANCHO_CAMPO): ZONA_DEFENSIVA
         }
     }
 
     for (inicio, fin), zona in zonas_mapa[zone_team].items():
         if inicio <= x < fin:
             return zona
-    return "FUERA"
+    return ZONA_FUERA

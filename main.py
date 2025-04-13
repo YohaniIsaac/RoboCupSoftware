@@ -11,73 +11,56 @@ import paquetes.simulacion_base as sim_mk
 import paquetes.rastreo_pelota as track_ball
 import paquetes.rastreo_robots as track_rob
 import paquetes.rrt_star_smart as rrt
+from config import *
 
 
 def simulacion_principal(fr2ball_env, fr2player_env, env_ruta, fr2traj_env):
     """
     env_ruta -- (list) nodos de la planificación de rutas para enviar
     """
-    # Dimensiones de la cancha
-    margen_cancha = 50
-    ancho = 1500  # Ancho del área de juego
-    alto = 900  # Alto del área de juego
-    ancho_total = ancho + margen_cancha * 2  # Incluir el margen
-    alto_total = alto + margen_cancha * 2
-
-    largo_arco = 200
-
-    fps = 40
-
-    # duracion = 10  # Duración en segundos
-    # Colores
-    # rojo = (0, 0, 255)
-    # azul = (255, 0, 0)
-    # cian = (0, 255, 255)
-    # magenta = (255, 0, 255)
-    blanco = (255, 255, 255)
-    cesped = (40, 128, 40)
-    # naranjo = (244, 98, 0)
-
     # Crear la ventana de pygame
     pygame.init()
-    ventana = pygame.display.set_mode((ancho_total, alto_total))
+    ventana = pygame.display.set_mode((ANCHO_TOTAL, ALTO_TOTAL))
     pygame.display.set_caption("Video de fútbol")
     reloj = pygame.time.Clock()
 
     # Fondo incial
     fondo_inicial = pygame.Surface(ventana.get_size())
-    fondo_inicial.fill(cesped)
+    fondo_inicial.fill(COLOR_CESPED_PG)
 
     # Dibujar las líneas de la cancha
     # Dibujar la cancha con los elementos basándonos en el margen
     # Rectángulo que representa la cancha
-    pygame.draw.rect(fondo_inicial, blanco, (margen_cancha, margen_cancha, ancho, alto), 2)
+    pygame.draw.rect(fondo_inicial, COLOR_BLANCO, (MARGEN_CANCHA, MARGEN_CANCHA,
+                                                   ANCHO_CAMPO, ALTO_CAMPO), 2)
 
     # Círculo central
-    pygame.draw.circle(fondo_inicial, blanco, (margen_cancha + int(ancho / 2), margen_cancha + int(alto / 2)), 146, 2)
+    pygame.draw.circle(fondo_inicial, COLOR_BLANCO, (MARGEN_CANCHA + int(ANCHO_CAMPO / 2),
+                                                     MARGEN_CANCHA + int(ALTO_CAMPO / 2)), 146, 2)
 
     # Línea central
-    pygame.draw.line(fondo_inicial, blanco,
-                     (margen_cancha + ancho // 2, margen_cancha),
-                     (margen_cancha + ancho // 2, margen_cancha + alto), 2)
+    pygame.draw.line(fondo_inicial, COLOR_BLANCO,
+                     (MARGEN_CANCHA + ANCHO_CAMPO // 2, MARGEN_CANCHA),
+                     (MARGEN_CANCHA + ANCHO_CAMPO // 2, MARGEN_CANCHA + ALTO_CAMPO), 2)
 
     # Área chica izquierda
-    pygame.draw.rect(fondo_inicial, blanco,
-                     (1, margen_cancha + (alto // 2) - largo_arco // 2, margen_cancha, largo_arco), 2)
+    pygame.draw.rect(fondo_inicial, COLOR_BLANCO,
+                     (1, MARGEN_CANCHA + (ALTO_CAMPO // 2) - LARGO_ARCO // 2, MARGEN_CANCHA, LARGO_ARCO), 2)
 
     # Área chica derecha
-    pygame.draw.rect(fondo_inicial, blanco,
-                     (margen_cancha + ancho - 1, margen_cancha + (alto // 2) - largo_arco // 2, ancho_total - 1,
-                      largo_arco), 2)
+    pygame.draw.rect(fondo_inicial, COLOR_BLANCO,
+                     (MARGEN_CANCHA + ANCHO_CAMPO - 1, MARGEN_CANCHA + (ALTO_CAMPO // 2) - LARGO_ARCO // 2,
+                      ANCHO_TOTAL - 1,
+                      LARGO_ARCO), 2)
 
     # Crear instancias de la clase Objeto y pelota
     player_1 = sim_mk.Objeto(400, 1000, 300, 0, 0, 0, 0,
                              30, 1)
-    player_2 = sim_mk.Objeto(400, int(ancho - 200), int(alto / 2), 45, -1, -1, -1.1,
+    player_2 = sim_mk.Objeto(400, int(ANCHO_CAMPO - 200), int(ALTO_CAMPO / 2), 45, -1, -1, -1.1,
                              30, 2)
-    player_3 = sim_mk.Objeto(400, int(ancho / 2), 250, 180, -1, 1, 1.26,
+    player_3 = sim_mk.Objeto(400, int(ANCHO_CAMPO / 2), 250, 180, -1, 1, 1.26,
                              30, 3)
-    player_4 = sim_mk.Objeto(400, int(ancho / 2), int(alto - 250), 270, 1, -1, -1.29,
+    player_4 = sim_mk.Objeto(400, int(ANCHO_CAMPO / 2), int(ALTO_CAMPO - 250), 270, 1, -1, -1.29,
                              30, 4)
 
     pelota = sim_mk.Objeto(2.7, 400, 500, 0, 0, 0, 0,
@@ -163,7 +146,7 @@ def simulacion_principal(fr2ball_env, fr2player_env, env_ruta, fr2traj_env):
             # Actualizar la pantalla con la copia del fondo y los elementos dibujados
             ventana.blit(fondo, (0, 0))
             pygame.display.update()
-            reloj.tick(fps)
+            reloj.tick(FPS)
 
             # Obtener el frame actual de la ventana de Pygame
             frame = pygame.surfarray.array3d(ventana)
@@ -214,10 +197,10 @@ def busqueda_ball(fr2ball_recv, ballSend):
 
 def busqueda_player(fr2player_recv, playerSend):
     # Colores
-    rojo = ((0, 100, 20), (8, 255, 255), (175, 100, 20), (179, 255, 255))  # Rango de color para el rojo
-    azul = ((110, 150, 150), (130, 255, 255), None, None)  # Rango de color para el azul
-    magenta = ((145, 150, 150), (165, 255, 255), None, None)  # Rango de color para el magenta
-    cian = ((85, 150, 150), (95, 255, 255), None, None)  # Rango de color para el cian           
+    # rojo = ((0, 100, 20), (8, 255, 255), (175, 100, 20), (179, 255, 255))  # Rango de color para el rojo
+    # azul = ((110, 150, 150), (130, 255, 255), None, None)  # Rango de color para el azul
+    # magenta = ((145, 150, 150), (165, 255, 255), None, None)  # Rango de color para el magenta
+    # cian = ((85, 150, 150), (95, 255, 255), None, None)  # Rango de color para el cian
 
     first_frame = True
 

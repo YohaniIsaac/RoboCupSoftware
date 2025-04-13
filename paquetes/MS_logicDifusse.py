@@ -2,8 +2,8 @@ import numpy as np
 import skfuzzy as fuzz
 from skfuzzy import control as ctrl
 import logging
-from paquetes.AdministradorEstados import StateManager
 from paquetes.ControladorRobot import RobotController
+from config import *
 
 
 class FuzzyRobotTeamManager:
@@ -20,20 +20,19 @@ class FuzzyRobotTeamManager:
         lim_izquierdo       (float): Límite izquierdo del campo para determinar zonas aliada, neutral o rival
         lim_derecho         (float): Límite derecho del campo para determinar zonas aliada, neutral o rival.
     """
-    def __init__(self, player_1, player_2, player_3, player_4, ball, team='red',  ancho=1500, zonas=(0.3, 0.7)):
+    def __init__(self, player_1, player_2, player_3, player_4, ball, team='red', zonas=(0.3, 0.7)):
         """
         Inicializa la máquina de estados.
 
         Args:
             team    (str): Equipo del robot ('red' o 'blue')
-            ancho   (int): Ancho del campo en píxeles
             zonas   (tuple): Porcentajes de corte para dividir las zonas del campo entrea alida, neutral o rival.
         """
         # Configuración del equipo
-        self.side = "LEFT" if team == 'red' else "RIGHT"
+        self.side = LADO_IZQUIERDO if team == EQUIPO_ROJO else LADO_DERECHO
         self.team = team
         # Pasando objetos Player directamente
-        if team == 'red':
+        if team == EQUIPO_ROJO:
             self.aliado_1 = player_1  # Objeto Player
             self.aliado_2 = player_2  # Objeto Player
             self.rival_1 = player_3  # Objeto Player
@@ -45,12 +44,9 @@ class FuzzyRobotTeamManager:
             self.rival_2 = player_2  # Objeto Player
 
         self.ball = ball
-        # self.robot_aliado_one, self.robot_aliado_two = (1, 2) if team == 'red' else (3, 4)
-        # self.robot_rival_one, self.robot_rival_two = (3, 4) if team == 'red' else (1, 2)
 
         # Configuración de la cancha
-        self.ancho_campo = ancho
-        self.lim_izquierdo, self.lim_derecho = [ancho * z for z in zonas]
+        self.lim_izquierdo, self.lim_derecho = [ANCHO_CAMPO * z for z in zonas]
 
         # Inicializar sistemas difusos
         self._init_posesion_system()
@@ -58,8 +54,8 @@ class FuzzyRobotTeamManager:
         self._init_zona_system()
         self._init_rol_system()
 
-        self.controlEstados = StateManager()
-        self.robot_controller = RobotController(self.aliado_1, self.aliado_2, self.rival_1, self.rival_2, self.ball)
+        self.robot_controller = RobotController([self.aliado_1, self.aliado_2], [self.rival_1,
+                                                self.rival_2], self.ball)
 
     def _init_posesion_system(self):
         """
@@ -310,17 +306,17 @@ class FuzzyRobotTeamManager:
                 self.posicion_x.universe, [0, 0, self.lim_izquierdo]
             )
             self.posicion_x['media'] = fuzz.trimf(
-                self.posicion_x.universe, [self.lim_izquierdo-80, self.ancho_campo//2, self.lim_derecho+80]
+                self.posicion_x.universe, [self.lim_izquierdo-80, ANCHO_CAMPO//2, self.lim_derecho+80]
             )
             self.posicion_x['ofensiva'] = fuzz.trimf(
-                self.posicion_x.universe, [self.lim_derecho, self.ancho_campo, self.ancho_campo]
+                self.posicion_x.universe, [self.lim_derecho, ANCHO_CAMPO, ANCHO_CAMPO]
             )
         else:
             self.posicion_x['defensiva'] = fuzz.trimf(
-                self.posicion_x.universe, [self.lim_derecho, self.ancho_campo, self.ancho_campo]
+                self.posicion_x.universe, [self.lim_derecho, ANCHO_CAMPO, ANCHO_CAMPO]
             )
             self.posicion_x['media'] = fuzz.trimf(
-                self.posicion_x.universe, [self.lim_izquierdo-80, self.ancho_campo//2, self.lim_derecho+80]
+                self.posicion_x.universe, [self.lim_izquierdo-80, ANCHO_CAMPO//2, self.lim_derecho+80]
             )
             self.posicion_x['ofensiva'] = fuzz.trimf(
                 self.posicion_x.universe, [0, 0, self.lim_izquierdo]
@@ -558,7 +554,6 @@ class FuzzyRobotTeamManager:
         except Exception as e:
             logging.error(f"Error en sim_rol: {e}")
             # Valor por defecto si el cálculo falla
-            robot_ataque = 0
             logging.debug("Asignando valor por defecto para robot_ataque")
         # if self.side == "LEFT":
             # self.rol_atacante.view(sim=self.sim_rol)
@@ -575,16 +570,12 @@ class FuzzyRobotTeamManager:
         proximidad = round(self.sim_proximidad.output['proximidad_equipo'], 1)
         zona = round(self.sim_zona.output['zona_pelota'], 1)
 
-        informationRobot = self.controlEstados.evaluar_admEstados(posesion, proximidad, zona)
-        estado_robot_ataque = informationRobot['estado robot cercano/Ataque']
-        estado_robot_defensa = informationRobot['estado robot lejano/Defensa']
-
-        self.robot_controller.evaluar_ctrRobot(estado_robot_ataque, estado_robot_defensa)
+        # Ejecutar las acciones a través del controlador
+        self.robot_controller.execute_team_strategy(estado_robot_ataque, estado_robot_defensa)
 
         # Retornar resultados
         return {
             'estado_pelota': self.sim_posesion.output['posesion_pelota'],
             'equipo_cercano': self.sim_proximidad.output['proximidad_equipo'],
             'zona_pelota': self.sim_zona.output['zona_pelota']
-            # **informationRobot
         }

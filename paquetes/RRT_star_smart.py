@@ -7,6 +7,7 @@ import time
 import matplotlib.pyplot as plt
 from matplotlib.patches import Polygon
 from paquetes.sub import env, utils
+# from config import *
 
 
 class Node:

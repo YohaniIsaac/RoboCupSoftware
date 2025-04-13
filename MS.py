@@ -1,6 +1,7 @@
 import paquetes.tools as tools
 import numpy as np
 import time
+from config import *
 
 
 class RobotStateMachine:
@@ -34,41 +35,37 @@ class RobotStateMachine:
         ids_teams               (list): Identificadores de los robots del equipo
 
         last_role_change_time       (float): Alamacena el tiempo del último cambio de roles que hubo
-        MIN_TIME_BETWEEN_CHANGES    (float): Tiempo mínimo que debe pasar antes de cambiar nuevamente el rol
         UMBRAL_CAMBIO_ROLES         (float): Umbral de distancia para que haya un cambio de roles
 
         last_zone_change_time   (float): Almacena el tiempo del último cambio de zona de la pelota que hubo
         last_field_area         (str):   Almacena el último cambio de zona de la pelota que hubo, esto para compararlo
                                          con el actual
-        MIN_TIME_IN_ZONE        (float): Tiempo mínimo que debe trascurrir para efectuar un cambio en la zona.
     """
 
     def __init__(self, one, two, team='red', umbral_cambio_roles=10):
-        self.state_ball = "LIBRE"           # estado de la pelota LIBRE, POSESION
-        self.state_ball_proximity = None    # ALIADO, RIVAL
-        self.field_area = None              # DEFENSIVA, NEUTRAL, OFENSIVA
+        self.state_ball = ESTADO_PELOTA_LIBRE   # estado de la pelota LIBRE, POSESION
+        self.state_ball_proximity = None        # ALIADO, RIVAL
+        self.field_area = None                  # DEFENSIVA, NEUTRAL, OFENSIVA
 
-        self.player_close_to_ball = None    # ID del robot más cercano a la pelota
-        self.information_robots = None      # Información de los robots ordenados segun las distancia con la pelota
-                                            # (disntancia con la pelota, id, centro del robot, angulo del robot)
+        self.player_close_to_ball = None        # ID del robot más cercano a la pelota
+        self.information_robots = None          # Información de los robots ordenados segun las distancia con la pelota
+                                                # (disntancia con la pelota, id, centro del robot, angulo del robot)
 
         # Roles de los robots
         self.state_robot_defense = None
         self.state_robot_attack = None
 
         # Configuración del equipo
-        self.team = "LEFT" if team == 'red' else "RIGHT"
+        self.team = LADO_IZQUIERDO if team == EQUIPO_ROJO else LADO_DERECHO
         self.ids_teams = [one, two]
 
         # Tiempo mínimo para que ocurra un cambio en los roles de los jugadores
         self.last_role_change_time = time.time()
-        self.MIN_TIME_BETWEEN_CHANGES = 5               # Tiempo mínimo en segundos entre cambios de rol
         self.UMBRAL_CAMBIO_ROLES = umbral_cambio_roles  # Umbral de distancia para cambiar roles
 
         # Filtro para cambios de zona del campo con un tiempo mínim, antes de volver a cambiar de zona la pelota
         self.last_zone_change_time = time.time()
         self.last_field_area = None
-        self.MIN_TIME_IN_ZONE = 3                   # Tiempo mínimo en segundos para cambiar de zona
 
     def update_state(self, ball, coords_players):
         """
@@ -94,13 +91,13 @@ class RobotStateMachine:
             return print("Error! no hay suficientes robots para asignar roles")
 
         # Determinar si la pelota la posee alguno de los dos equipos
-        self.state_ball = "POSESION" if possession else "LIBRE"
+        self.state_ball = ESTADO_PELOTA_POSESION if possession else ESTADO_PELOTA_LIBRE
 
         # ID del jugador que tiene la pelota más cercana (idependiente del equipo)
         id_player_closest2ball = information_all_robots[0][1]
 
         # Determinar si la pelota está más cerca de un rival o un aliado
-        self.state_ball_proximity = "ALIADA" if id_player_closest2ball in self.ids_teams else "RIVAL"
+        self.state_ball_proximity = PROXIMIDAD_ALIADA if id_player_closest2ball in self.ids_teams else PROXIMIDAD_RIVAL
 
         # Filtrar ID's del equipo
         self.information_robots = [d for d in information_all_robots if d[1] in self.ids_teams]
@@ -110,7 +107,7 @@ class RobotStateMachine:
 
         # Solo cambiar la zona si ha pasado el tiempo mínimo
         if new_field_area != self.last_field_area:
-            if time.time() - self.last_zone_change_time >= self.MIN_TIME_IN_ZONE:
+            if time.time() - self.last_zone_change_time >= MIN_TIME_IN_ZONE:
                 self.field_area = new_field_area
                 self.last_field_area = new_field_area
                 self.last_zone_change_time = time.time()
@@ -118,7 +115,7 @@ class RobotStateMachine:
             self.last_zone_change_time = time.time()
 
         # Validar si la pelota está fuera de los límites
-        if self.field_area == "FUERA":
+        if self.field_area == ZONA_FUERA:
             pass
         else:
             # Asigna roles a cada robot dependiendo de la cercanía con la pelota
@@ -130,7 +127,7 @@ class RobotStateMachine:
         """
 
         # Verificar si ha pasado el tiempo mínimo desde el último cambio
-        if time.time() - self.last_role_change_time < self.MIN_TIME_BETWEEN_CHANGES:
+        if time.time() - self.last_role_change_time < MIN_TIME_BETWEEN_CHANGES:
             return
 
         dist_robot1_with_ball, id_robot1, _, _ = self.information_robots[0]
@@ -148,9 +145,9 @@ class RobotStateMachine:
             return
 
         # Asignar roles según el estado de la pelota
-        if self.state_ball == "LIBRE":
+        if self.state_ball == ESTADO_PELOTA_LIBRE:
             self._assign_free_ball_roles(attacker, defender)
-        elif self.state_ball == "POSESION":
+        elif self.state_ball == ESTADO_PELOTA_POSESION:
             self._assign_possession_roles(attacker, defender)
 
         # Actualizar el tiempo del último cambio de roles
@@ -165,23 +162,23 @@ class RobotStateMachine:
             defender (int): ID del robot defensor.
         """
 
-        if self.state_ball_proximity == "ALIADA":
-            if self.field_area in ["DEFENSIVA", "NEUTRAL"]:
-                self.state_robot_attack = f"Robot {attacker}: INTENTA CAPTURAR LA PELOTA"
-                self.state_robot_defense = f"Robot {defender}: SE POSICIONA DE FORMA DEFENSIVA"
+        if self.state_ball_proximity == PROXIMIDAD_ALIADA:
+            if self.field_area in [ZONA_DEFENSIVA, ZONA_NEUTRAL]:
+                self.state_robot_attack = f"Robot {attacker}: {ESTADO_CAPTURAR}"
+                self.state_robot_defense = f"Robot {defender}: {ESTADO_DEFENSIVO}"
 
-            elif self.field_area == "OFENSIVA":
-                self.state_robot_attack = f"Robot {attacker}: INTENTA CAPTURAR LA PELOTA"
-                self.state_robot_defense = f"Robot {defender}: SE PREPARA PARA UN PASE"
+            elif self.field_area == ZONA_OFENSIVA:
+                self.state_robot_attack = f"Robot {attacker}: {ESTADO_CAPTURAR}"
+                self.state_robot_defense = f"Robot {defender}: {ESTADO_PREPARAR_PASE}"
 
-        elif self.state_ball_proximity == "RIVAL":
-            if self.field_area in ["DEFENSIVA", "NEUTRAL"]:
-                self.state_robot_attack = f"Robot {attacker}: INTERCEPTA QUE EL RIVAL TOME LA PELOTA"
-                self.state_robot_defense = f"Robot {defender}: BLOQUEA POSIBLES TIROS"
+        elif self.state_ball_proximity == PROXIMIDAD_RIVAL:
+            if self.field_area in [ZONA_DEFENSIVA, ZONA_NEUTRAL]:
+                self.state_robot_attack = f"Robot {attacker}: {ESTADO_INTERCEPTAR}"
+                self.state_robot_defense = f"Robot {defender}: {ESTADO_BLOQUEAR}"
 
-            elif self.field_area == "OFENSIVA":
-                self.state_robot_attack = f"Robot {attacker}: INTENTA CAPTURAR LA PELOTA"
-                self.state_robot_defense = f"Robot {defender}: PRESIONA A LOS RIVALES"
+            elif self.field_area == ZONA_OFENSIVA:
+                self.state_robot_attack = f"Robot {attacker}: {ESTADO_CAPTURAR}"
+                self.state_robot_defense = f"Robot {defender}: {ESTADO_PRESIONAR}"
 
     def _assign_possession_roles(self, attacker, defender):
         """
@@ -192,20 +189,20 @@ class RobotStateMachine:
             defender (int): ID del robot defensor.
         """
 
-        if self.state_ball_proximity == "ALIADA":
-            if self.field_area in ["DEFENSIVA", "NEUTRAL"]:
-                self.state_robot_attack = f"Robot {attacker}: LLEVA LA PELOTA A LA MITAD RIVAL"
-                self.state_robot_defense = f"Robot {defender}: SE ADELANTA A LA MITAD RIVAL"
-            elif self.field_area == "OFENSIVA":
-                self.state_robot_attack = f"Robot {attacker}: SE PREPARA PARA LANZAR AL ARCO"
-                self.state_robot_defense = f"Robot {defender}: BUSCA UNA POSICIÓN PARA APOYAR"
-        elif self.state_ball_proximity == "RIVAL":
-            if self.field_area in ["DEFENSIVA", "NEUTRAL"]:
-                self.state_robot_attack = f"Robot {attacker}: PRESIONA AL RIVAL CON LA PELOTA"
-                self.state_robot_defense = f"Robot {defender}: BLOQUEA EL TIRO"
-            elif self.field_area == "OFENSIVA":
-                self.state_robot_attack = f"Robot {attacker}: PRESIONA AL RIVAL CON LA PELOTA"
-                self.state_robot_defense = f"Robot {defender}: RETROCEDE A DEFENDER ARCO ALIADO"
+        if self.state_ball_proximity == PROXIMIDAD_ALIADA:
+            if self.field_area in [ZONA_DEFENSIVA, ZONA_NEUTRAL]:
+                self.state_robot_attack = f"Robot {attacker}: {ESTADO_AVANZAR}"
+                self.state_robot_defense = f"Robot {defender}: {ESTADO_ADELANTAR}"
+            elif self.field_area == ZONA_OFENSIVA:
+                self.state_robot_attack = f"Robot {attacker}: {ESTADO_LANZAR}"
+                self.state_robot_defense = f"Robot {defender}: {ESTADO_APOYAR}"
+        elif self.state_ball_proximity == PROXIMIDAD_RIVAL:
+            if self.field_area in [ZONA_DEFENSIVA, ZONA_NEUTRAL]:
+                self.state_robot_attack = f"Robot {attacker}: {ESTADO_PRESIONAR}"
+                self.state_robot_defense = f"Robot {defender}: {ESTADO_BLOQUEAR}"
+            elif self.field_area == ZONA_OFENSIVA:
+                self.state_robot_attack = f"Robot {attacker}: {ESTADO_PRESIONAR}"
+                self.state_robot_defense = f"Robot {defender}: {ESTADO_RETROCEDER}"
 
 
 # Simulación de la Máquina de Estados
@@ -214,7 +211,7 @@ if __name__ == "__main__":
     # coords_players = playerReceived.recv()
 
     # Ejemplo de uso
-    team_red = RobotStateMachine(1, 2, team='red')
+    team_red = RobotStateMachine(1, 2, team=EQUIPO_ROJO)
     team_red.update_state(ball=np.array([5, 5]), coords_players=[
         {'id': 1, 'x': 3, 'y': 3, 'angulo': 90},
         {'id': 2, 'x': 7, 'y': 7, 'angulo': 270},
@@ -222,7 +219,7 @@ if __name__ == "__main__":
         {'id': 3, 'x': 10, 'y': 30, 'angulo': 0}
     ])
 
-    team_blue = RobotStateMachine(3, 4, team='red')
+    team_blue = RobotStateMachine(3, 4, team=EQUIPO_AZUL)
     team_blue.update_state(ball=np.array([5, 5]), coords_players=[
         {'id': 1, 'x': 3, 'y': 3, 'angulo': 90},
         {'id': 2, 'x': 7, 'y': 7, 'angulo': 270},

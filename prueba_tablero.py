@@ -6,12 +6,8 @@ from paquetes.MS_logicDifusse import FuzzyRobotTeamManager
 # from MS import RobotStateMachine
 # team_red = FuzzyRobotTeamManager(1, 2, 'red')
 # team_blue = FuzzyRobotTeamManager(3, 4, 'blue')
+from config import *
 
-
-
-# Tamaño del campo
-ANCHO_CAMPO = 1500
-ALTO_CAMPO = 900
 
 # Posiciones iniciales de jugadores y pelota
 posiciones_jugadores = {
@@ -21,12 +17,12 @@ posiciones_jugadores = {
     4: [1200, 700, 0],   # [x, y, ángulo]
 }
 posicion_pelota = [750, 450]  # Coordenadas de la pelota [x, y]
-players = {
-    1: tools.Player(1, 200, 200, 90),
-    2: tools.Player(2, 200, 700, 180),
-    3: tools.Player(3, 1200, 200, 270),
-    4: tools.Player(4, 1200, 700, 0),
-}
+# players = {
+#     1: tools.Player(1, 200, 200, 90),
+#     2: tools.Player(2, 200, 700, 180),
+#     3: tools.Player(3, 1200, 200, 270),
+#     4: tools.Player(4, 1200, 700, 0),
+# }
 player_1 = tools.Player(1, 200, 200, 90, 'red')
 player_2 = tools.Player(2, 200, 700, 180, 'red')
 player_3 = tools.Player(3, 1200, 200, 270, 'blue')
