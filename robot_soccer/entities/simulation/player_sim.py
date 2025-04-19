@@ -1,6 +1,5 @@
 import pygame
 import math
-import numpy as np
 from robot_soccer.config import *
 
 

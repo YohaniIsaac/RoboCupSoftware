@@ -2,7 +2,6 @@ import math
 import time
 import cv2 as cv
 from robot_soccer.ai.path_planning.rrt_star_smart import RrtStarSmart
-# from config import *
 
 
 def trayectoria(ballReceived, playerReceived, fr2traj_recv):

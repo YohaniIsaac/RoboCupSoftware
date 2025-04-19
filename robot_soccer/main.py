@@ -3,7 +3,7 @@
 Robot Soccer Simulation - Main Entry Point
 """
 import multiprocessing
-from core.game_controller import GameController
+from core.game_controller import execute_multiprocessing
 
 
 def main():
@@ -14,7 +14,7 @@ def main():
     multiprocessing.set_start_method('spawn')
 
     # Crear e iniciar el controlador principal del juego
-    game = GameController()
+    game = execute_multiprocessing()
     game.run()
 
 

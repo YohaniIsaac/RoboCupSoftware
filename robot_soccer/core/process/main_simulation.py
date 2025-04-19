@@ -5,7 +5,7 @@ import cv2 as cv
 from robot_soccer.entities.simulation.player_sim import Player4Simulation
 from robot_soccer.entities.simulation.ball_sim import Ball4Simulation
 from robot_soccer.core.physics import detectar_colisiones
-from config import *
+from robot_soccer.config import *
 
 
 def simulacion_principal(fr2ball_env, fr2player_env, env_ruta, fr2traj_env):

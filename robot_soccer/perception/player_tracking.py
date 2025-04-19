@@ -1,7 +1,7 @@
 import math
 import numpy as np
 import cv2 as cv
-from config import *
+from robot_soccer.config import *
 
 ##############################
 # BUSQUEDA DE LLOS JUGADORES #

@@ -5,7 +5,7 @@ from .process.search_for_players import busqueda_player
 from .process.path import trayectoria
 
 
-def main():
+def execute_multiprocessing():
     try:
         # Configurar el logger principal, para ver los todos los mensajes
         # en el proceso principal

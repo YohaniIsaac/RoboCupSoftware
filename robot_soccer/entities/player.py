@@ -3,7 +3,6 @@ import numpy as np
 from robot_soccer.ai.path_planning.rrt_star_smart import RrtStarSmart
 import threading
 import time
-# from robot_soccer.config import *
 
 
 class Player:

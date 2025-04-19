@@ -1,6 +1,5 @@
 import numpy as np
 import cv2 as cv
-# import paquetes.rastreo_robots as track_rob
 from robot_soccer.perception.player_tracking import deteccionJugadoresArucoTag
 
 

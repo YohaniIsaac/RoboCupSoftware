@@ -1,5 +1,5 @@
 import pygame
-from config import *
+from robot_soccer.config import *
 
 
 class Ball4Simulation:
@@ -20,6 +20,7 @@ class Ball4Simulation:
         self.y = y
         self.dx = dx
         self.dy = dy
+        self.identificador = 0  # Para poder determianr colisiones!!
 
         self.radio = radio
 
@@ -39,8 +40,8 @@ class Ball4Simulation:
         # Dibujar un círculo en la superficie
         pygame.draw.circle(self.surface, (244, 98, 0, 255), (diameter // 2, diameter // 2), diameter // 2)
 
-        self.surface_rotated = pygame.transform.rotate(self.surface, 0)
-        self.rotated_rect = self.surface_rotated.get_rect(center=(self.x, self.y))
+        self.img_robot_rotated = pygame.transform.rotate(self.surface, 0)
+        self.rotated_rect = self.img_robot_rotated.get_rect(center=(self.x, self.y))
 
         self.cooldown = 0  # Tiempo de cooldown inicial
         self.distanciaConPelota = None

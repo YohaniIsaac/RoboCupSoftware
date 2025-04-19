@@ -1,5 +1,5 @@
 import numpy as np
-from config import *
+from robot_soccer.config import *
 import time
 
 

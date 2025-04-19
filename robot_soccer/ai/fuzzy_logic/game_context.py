@@ -1,9 +1,9 @@
 import numpy as np
 import skfuzzy as fuzz
-from skfuzzy import control as ctrl
 import logging
-from paquetes.ControladorRobot import RobotController
-from config import *
+from skfuzzy import control as ctrl
+from robot_soccer.ai.controllers.robot_controller import RobotController
+from robot_soccer.config import *
 
 
 class FuzzyRobotTeamManager:

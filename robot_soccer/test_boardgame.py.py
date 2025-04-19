@@ -1,11 +1,10 @@
 import matplotlib.pyplot as plt
 from matplotlib.widgets import TextBox
 import numpy as np
-import paquetes.tools as tools
-from paquetes.MS_logicDifusse import FuzzyRobotTeamManager
-# from MS import RobotStateMachine
-# team_red = FuzzyRobotTeamManager(1, 2, 'red')
-# team_blue = FuzzyRobotTeamManager(3, 4, 'blue')
+from robot_soccer.entities.player import Player
+from robot_soccer.entities.ball import Ball
+from robot_soccer.ai.fuzzy_logic.game_context import FuzzyRobotTeamManager
+
 from config import *
 
 
@@ -23,12 +22,12 @@ posicion_pelota = [750, 450]  # Coordenadas de la pelota [x, y]
 #     3: tools.Player(3, 1200, 200, 270),
 #     4: tools.Player(4, 1200, 700, 0),
 # }
-player_1 = tools.Player(1, 200, 200, 90, 'red')
-player_2 = tools.Player(2, 200, 700, 180, 'red')
-player_3 = tools.Player(3, 1200, 200, 270, 'blue')
-player_4 = tools.Player(4, 1200, 700, 0, 'blue')
+player_1 = Player(1, 200, 200, 90, 'red')
+player_2 = Player(2, 200, 700, 180, 'red')
+player_3 = Player(3, 1200, 200, 270, 'blue')
+player_4 = Player(4, 1200, 700, 0, 'blue')
 
-ball = tools.Ball(750, 450)
+ball = Ball(750, 450)
 
 team_red = FuzzyRobotTeamManager(player_1, player_2, player_3, player_4, ball)
 team_blue = FuzzyRobotTeamManager(player_1, player_2, player_3, player_4, ball, team='blue')

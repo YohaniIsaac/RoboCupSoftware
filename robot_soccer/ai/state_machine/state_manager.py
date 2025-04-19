@@ -2,7 +2,6 @@ import numpy as np
 import skfuzzy as fuzz
 from skfuzzy import control as ctrl
 import logging
-# from config import *
 
 
 class StateManager:
