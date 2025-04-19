@@ -1,0 +1,58 @@
+robot_soccer/                      # Directorio raíz del proyecto
+│
+├── main.py                        # Punto de entrada principal
+├── config.py                      # Configuración centralizada. Constantes globales
+│
+├── core/                          # Módulo core con funcionalidad central
+│   ├── __init__.py
+│   ├── game_controller.py         # Inicialización y control de cada uno de los juegos
+│   ├── process/   					# Funciones de cada uno de los procesos por separado
+│   │    ├── __init__.py
+│   │    ├── main_simulation.py  		# Función para iniciar la simulación principal
+│   │    ├── ball_search.py          	# Función para iniciar y realizar la búsqueda de la pelota
+│   │    ├── search_for_players.py    # Función para iniciar y realizar la búsqueda de los jugadores
+│   │    └── path.py            		# Función para iniciar y realizar la creación de rutas
+│   └── physics.py                 # Motor físico y colisiones
+│ 
+├── perception/                    # Módulo de percepción
+│   ├── __init__.py
+│   ├── ball_tracking.py           # Seguimiento de pelota
+│   └── player_tracking.py         # Seguimiento de jugadores
+│
+├──entities/				# Almacena los archivos de las Clases de los participantes
+│   ├── __init__.py
+│   ├── ball.py                    # Clase Ball para la toma de decisiones
+│   ├── player.py                  # Clase Player para la toma de decisiones
+│   └── simulation/			# Almacena los archivos de las Clases para crear la simulación 
+│        ├── __init__.py
+│        ├── player_sim.py          # Player4Simulation. Clase para crear a los jugadores para simulación
+│        └── ball_sim.py            # Ball4Simulation. h 
+│
+├── ai/                            # Inteligencia artificial
+│   ├── __init__.py
+│   ├── controllers/               # Controladores específicos
+│   │    ├── __init__.py
+│   │    ├── robot_controller.py    # Controlador de robot
+│   │    └── tools_controller.py    # Controlador de herramientas
+│   │
+│   ├── fuzzy_logic  			# Sistema lódigo difuso
+│   │    ├── __init__.py
+│   │    └── game_context.py       	# Entrega el contexto del juego, donde está la pelota, equipo cercano, 
+│   │
+│   ├── path_planning/             # Algoritmos de planificación
+│   │    ├── __init__.py
+│   │    ├── rrt_star_smart.py		# Algoritmo RRT*
+│   │    └── tools.py     			# Herramientas para el algoritmo RRT
+│   │
+│   └── state_machine/             # Máquina de estados
+│       ├── __init__.py
+│       ├── state_manager.py       # Gestor de estados (AdministradorEstados.py)
+│       └── logic_diffuse.py       # Lógica difusa (MS_logicDifusse.py)
+│
+└── utils/                         # Utilidades
+    ├── __init__.py
+    ├── geometry.py                # Funciones geométricas
+    ├── tools.py                   # Herramientas generales
+    └── collision.py               # Detección de colisiones
+
+
