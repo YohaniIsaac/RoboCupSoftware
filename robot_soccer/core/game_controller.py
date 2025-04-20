@@ -4,6 +4,23 @@ from .process.ball_search import busqueda_ball
 from .process.search_for_players import busqueda_player
 from .process.path import trayectoria
 
+# ==========================================
+# LOG
+# ==========================================
+from robot_soccer.utils.logger import get_logger
+from robot_soccer.utils.logger import set_level, disable_module, enable_module
+module_name = "core"
+
+logger = get_logger(module_name)
+
+# Activar depuración detallada para un módulo
+set_level(module_name, "WARNING")  # DEBUG, INFO, WARNING, ERROR, CRITICAL, DISABLED
+# # Desactivar registro para un módulo que está generando demasiados mensajes
+# disable_module("core.physics")
+# # Reactivar registro para un módulo previamente desactivado
+# enable_module("core.physics", "INFO")
+# ==========================================
+
 
 def execute_multiprocessing():
     try:

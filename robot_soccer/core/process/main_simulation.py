@@ -8,6 +8,24 @@ from robot_soccer.core.physics import detectar_colisiones
 from robot_soccer.config import *
 
 
+# ==========================================
+# LOG
+# ==========================================
+from robot_soccer.utils.logger import get_logger
+from robot_soccer.utils.logger import set_level, disable_module, enable_module
+module_name = "core.process"
+
+logger = get_logger(module_name)
+
+# Activar depuración detallada para un módulo
+set_level(module_name, "WARNING")  # DEBUG, INFO, WARNING, ERROR, CRITICAL, DISABLED
+# # Desactivar registro para un módulo que está generando demasiados mensajes
+# disable_module("core.physics")
+# # Reactivar registro para un módulo previamente desactivado
+# enable_module("core.physics", "INFO")
+# ==========================================
+
+
 def simulacion_principal(fr2ball_env, fr2player_env, env_ruta, fr2traj_env):
     """
     env_ruta -- (list) nodos de la planificación de rutas para enviar

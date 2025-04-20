@@ -1,0 +1,21 @@
+{
+    "default_level": "INFO",
+    "modules": {
+        ".": "DEBUG",
+        "ai": "WARNING",
+        "ai.controllers": "WARNING",
+        "ai.fuzzy_logic": "INFO",
+        "ai.path_planning": "DEBUG",
+        "ai.state_machine": "WARNING",
+        "core": "WARNING",
+        "core.process": "WARNING",
+        "entities": "WARNING",
+        "entities.simulation": "WARNING",
+        "perception": "WARNING",
+        "utils": "WARNING"
+    },
+    "log_to_file": false,
+    "log_to_console": true,
+    "max_file_size_mb": 10,
+    "backup_count": 5
+}

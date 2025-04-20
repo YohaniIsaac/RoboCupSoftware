@@ -3,6 +3,23 @@ import time
 import cv2 as cv
 from robot_soccer.ai.path_planning.rrt_star_smart import RrtStarSmart
 
+# ==========================================
+# LOG
+# ==========================================
+from robot_soccer.utils.logger import get_logger
+from robot_soccer.utils.logger import set_level, disable_module, enable_module
+module_name = "core.process"
+
+logger = get_logger(module_name)
+
+# Activar depuración detallada para un módulo
+set_level(module_name, "WARNING")  # DEBUG, INFO, WARNING, ERROR, CRITICAL, DISABLED
+# # Desactivar registro para un módulo que está generando demasiados mensajes
+# disable_module("core.physics")
+# # Reactivar registro para un módulo previamente desactivado
+# enable_module("core.physics", "INFO")
+# ==========================================
+
 
 def trayectoria(ballReceived, playerReceived, fr2traj_recv):
     try:

@@ -2,6 +2,24 @@ import pygame
 from robot_soccer.config import *
 
 
+# ==========================================
+# LOG
+# ==========================================
+from robot_soccer.utils.logger import get_logger
+from robot_soccer.utils.logger import set_level, disable_module, enable_module
+module_name = "entities.simulation"
+
+logger = get_logger(module_name)
+
+# Activar depuración detallada para un módulo
+set_level(module_name, "WARNING")  # DEBUG, INFO, WARNING, ERROR, CRITICAL, DISABLED
+# # Desactivar registro para un módulo que está generando demasiados mensajes
+# disable_module("core.physics")
+# # Reactivar registro para un módulo previamente desactivado
+# enable_module("core.physics", "INFO")
+# ==========================================
+
+
 class Ball4Simulation:
     def __init__(self, masa, x, y, dx, dy, radio):
         """

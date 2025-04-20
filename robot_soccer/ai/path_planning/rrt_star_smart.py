@@ -8,6 +8,22 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Polygon
 from .tools_for_path_planing import Env, Utils
 
+# ==========================================
+# LOG
+# ==========================================
+from robot_soccer.utils.logger import get_logger
+from robot_soccer.utils.logger import set_level, disable_module, enable_module
+
+logger = get_logger("ai.path_planning")
+
+# Activar depuración detallada para un módulo
+set_level("ai.path_planning", "DEBUG")  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+# # Desactivar registro para un módulo que está generando demasiados mensajes
+# disable_module("core.physics")
+# # Reactivar registro para un módulo previamente desactivado
+# enable_module("core.physics", "INFO")
+# ==========================================
+
 
 class Node:
     def __init__(self, n):
@@ -391,7 +407,7 @@ class RrtStarSmart:
             self.planning()
 
         else:
-            print("no se encontraron diferencias, se consevó la misma ruta")
+            logger.debug("no se encontraron diferencias, se consevó la misma ruta")
 
     def extract_waypoint(self, node_end):
         """

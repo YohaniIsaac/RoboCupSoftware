@@ -4,6 +4,23 @@ from robot_soccer.ai.path_planning.rrt_star_smart import RrtStarSmart
 import threading
 import time
 
+# ==========================================
+# LOG
+# ==========================================
+from robot_soccer.utils.logger import get_logger
+from robot_soccer.utils.logger import set_level, disable_module, enable_module
+module_name = "entities"
+
+logger = get_logger(module_name)
+
+# Activar depuración detallada para un módulo
+set_level(module_name, "WARNING")  # DEBUG, INFO, WARNING, ERROR, CRITICAL, DISABLED
+# # Desactivar registro para un módulo que está generando demasiados mensajes
+# disable_module("core.physics")
+# # Reactivar registro para un módulo previamente desactivado
+# enable_module("core.physics", "INFO")
+# ==========================================
+
 
 class Player:
     """
@@ -16,7 +33,7 @@ class Player:
         self.id = player_id
         self.x = int(x)
         self.y = int(y)
-        self.angle = angle
+        self.angle = angle  # En grados 0 - 360
         self.team = team
         self.ball = ball
 
@@ -362,7 +379,7 @@ class Player:
         return self.distance2ball
 
     def angle_difference_ball(self, ball):
-        """Calcula la diferencia angular entre este jugador y otro.
+        """Calcula la diferencia angular entre este jugador y objeto.
 
         :param ball: Instancia de pelota con el que se calcula la diferencia angular
         :return: Diferencia angular en radianes
@@ -388,6 +405,6 @@ class Player:
         if delta_theta > np.pi:
             delta_theta = 2 * np.pi - delta_theta
 
-        self.anglerobot2ball = abs(delta_theta)
+        self.anglerobot2ball = delta_theta
 
-        return self.anglerobot2ball
+        return delta_theta

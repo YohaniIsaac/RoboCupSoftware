@@ -4,6 +4,24 @@ import logging
 from skfuzzy import control as ctrl
 from robot_soccer.ai.controllers.robot_controller import RobotController
 from robot_soccer.config import *
+from .tools_fuzzy import calcular_posicion_estrategica
+
+# ==========================================
+# LOG
+# ==========================================
+from robot_soccer.utils.logger import get_logger
+from robot_soccer.utils.logger import set_level, disable_module, enable_module
+module_name = "ai.fuzzy_logic"
+
+logger = get_logger(module_name)
+
+# Activar depuración detallada para un módulo
+set_level(module_name, "DEBUG")  # DEBUG, INFO, WARNING, ERROR, CRITICAL, DISABLED
+# # Desactivar registro para un módulo que está generando demasiados mensajes
+# disable_module("core.physics")
+# # Reactivar registro para un módulo previamente desactivado
+# enable_module("core.physics", "INFO")
+# ==========================================
 
 
 class FuzzyRobotTeamManager:
@@ -87,118 +105,129 @@ class FuzzyRobotTeamManager:
         """
         Define las funciones de membresía para las variables de entrada y salida del sistema de posesión.
         """
-        # ENTRADAS
-        self.distancia_aliado1['cerca'] = fuzz.trimf(self.distancia_aliado1.universe, [0, 0, 200])
-        self.distancia_aliado1['media'] = fuzz.trimf(self.distancia_aliado1.universe, [50, 350, 1000])
-        self.distancia_aliado1['lejos'] = fuzz.trimf(self.distancia_aliado1.universe, [700, 1750, 1750])
+        # ENTRADAS - Distancias
+        self.distancia_aliado1['cerca'] = fuzz.trapmf(self.distancia_aliado1.universe, [0, 0, 100, 200])
+        self.distancia_aliado1['media'] = fuzz.trapmf(self.distancia_aliado1.universe, [150, 250, 450, 550])
+        self.distancia_aliado1['lejos'] = fuzz.trapmf(self.distancia_aliado1.universe, [500, 800, 1500, 1500])
 
-        self.distancia_aliado2['cerca'] = fuzz.trimf(self.distancia_aliado2.universe, [0, 0, 200])
-        self.distancia_aliado2['media'] = fuzz.trimf(self.distancia_aliado2.universe, [50, 350, 1000])
-        self.distancia_aliado2['lejos'] = fuzz.trimf(self.distancia_aliado2.universe, [700, 1750, 1750])
+        self.distancia_aliado2['cerca'] = fuzz.trapmf(self.distancia_aliado2.universe, [0, 0, 100, 200])
+        self.distancia_aliado2['media'] = fuzz.trapmf(self.distancia_aliado2.universe, [150, 250, 450, 550])
+        self.distancia_aliado2['lejos'] = fuzz.trapmf(self.distancia_aliado2.universe, [500, 800, 1500, 1500])
 
-        self.distancia_rival1['cerca'] = fuzz.trimf(self.distancia_rival1.universe, [0, 0, 200])
-        self.distancia_rival1['media'] = fuzz.trimf(self.distancia_rival1.universe, [50, 350, 1000])
-        self.distancia_rival1['lejos'] = fuzz.trimf(self.distancia_rival1.universe, [700, 1750, 1750])
+        self.distancia_rival1['cerca'] = fuzz.trapmf(self.distancia_rival1.universe, [0, 0, 100, 200])
+        self.distancia_rival1['media'] = fuzz.trapmf(self.distancia_rival1.universe, [150, 250, 450, 550])
+        self.distancia_rival1['lejos'] = fuzz.trapmf(self.distancia_rival1.universe, [500, 800, 1500, 1500])
 
-        self.distancia_rival2['cerca'] = fuzz.trimf(self.distancia_rival2.universe, [0, 0, 200])
-        self.distancia_rival2['media'] = fuzz.trimf(self.distancia_rival2.universe, [50, 350, 1000])
-        self.distancia_rival2['lejos'] = fuzz.trimf(self.distancia_rival2.universe, [700, 1750, 1750])
+        self.distancia_rival2['cerca'] = fuzz.trapmf(self.distancia_rival2.universe, [0, 0, 100, 200])
+        self.distancia_rival2['media'] = fuzz.trapmf(self.distancia_rival2.universe, [150, 250, 450, 550])
+        self.distancia_rival2['lejos'] = fuzz.trapmf(self.distancia_rival2.universe, [500, 800, 1500, 1500])
 
-        apuntando_parte1 = fuzz.trimf(np.arange(0, 361, 1), [0, 0, 10])
-        apuntando_parte2 = fuzz.trimf(np.arange(0, 361, 1), [350, 360, 360])
+        # ENTRADAS - Orientaciones (en radianes)
+        self.orientacion_aliado1['apuntando'] = fuzz.trapmf(self.orientacion_aliado1.universe,
+                                                            [0, 0, 0.2, 0.4])
+        self.orientacion_aliado1['medio_apuntando'] = fuzz.trapmf(self.orientacion_aliado1.universe,
+                                                                  [0.3, 0.5, 1.0, 1.2])
+        self.orientacion_aliado1['no_apuntando'] = fuzz.trapmf(self.orientacion_aliado1.universe,
+                                                               [1.0, 1.5, 3.15, 3.15])
 
-        apuntado_mid_parte1 = fuzz.trimf(np.arange(0, 361, 1), [5, 55, 105])
-        apuntado_mid_parte2 = fuzz.trimf(np.arange(0, 361, 1), [255, 305, 355])
+        self.orientacion_aliado2['apuntando'] = fuzz.trapmf(self.orientacion_aliado2.universe,
+                                                            [0, 0, 0.2, 0.4])
+        self.orientacion_aliado2['medio_apuntando'] = fuzz.trapmf(self.orientacion_aliado2.universe,
+                                                                  [0.3, 0.5, 1.0, 1.2])
+        self.orientacion_aliado2['no_apuntando'] = fuzz.trapmf(self.orientacion_aliado2.universe,
+                                                               [1.0, 1.5, 3.15, 3.15])
 
-        self.orientacion_aliado1['apuntando'] = np.fmax(apuntando_parte1, apuntando_parte2)
-        self.orientacion_aliado1['medio_apuntando'] = np.fmax(apuntado_mid_parte1, apuntado_mid_parte2)
-        self.orientacion_aliado1['no_apuntando'] = fuzz.trimf(self.orientacion_aliado1.universe, [20, 180, 340])
+        self.orientacion_rival1['apuntando'] = fuzz.trapmf(self.orientacion_rival1.universe,
+                                                           [0, 0, 0.2, 0.4])
+        self.orientacion_rival1['medio_apuntando'] = fuzz.trapmf(self.orientacion_rival1.universe,
+                                                                 [0.3, 0.5, 1.0, 1.2])
+        self.orientacion_rival1['no_apuntando'] = fuzz.trapmf(self.orientacion_rival1.universe,
+                                                              [1.0, 1.5, 3.15, 3.15])
 
-        self.orientacion_aliado2['apuntando'] = np.fmax(apuntando_parte1, apuntando_parte2)
-        self.orientacion_aliado2['medio_apuntando'] = np.fmax(apuntado_mid_parte1, apuntado_mid_parte2)
-        self.orientacion_aliado2['no_apuntando'] = fuzz.trimf(self.orientacion_aliado2.universe, [20, 180, 340])
-
-        self.orientacion_rival1['apuntando'] = np.fmax(apuntando_parte1, apuntando_parte2)
-        self.orientacion_rival1['medio_apuntando'] = np.fmax(apuntado_mid_parte1, apuntado_mid_parte2)
-        self.orientacion_rival1['no_apuntando'] = fuzz.trimf(self.orientacion_rival1.universe, [20, 180, 340])
-
-        self.orientacion_rival2['apuntando'] = np.fmax(apuntando_parte1, apuntando_parte2)
-        self.orientacion_rival2['medio_apuntando'] = np.fmax(apuntado_mid_parte1, apuntado_mid_parte2)
-        self.orientacion_rival2['no_apuntando'] = fuzz.trimf(self.orientacion_rival2.universe, [20, 180, 340])
+        self.orientacion_rival2['apuntando'] = fuzz.trapmf(self.orientacion_rival2.universe,
+                                                           [0, 0, 0.2, 0.4])
+        self.orientacion_rival2['medio_apuntando'] = fuzz.trapmf(self.orientacion_rival2.universe,
+                                                                 [0.3, 0.5, 1.0, 1.2])
+        self.orientacion_rival2['no_apuntando'] = fuzz.trapmf(self.orientacion_rival2.universe,
+                                                              [1.0, 1.5, 3.15, 3.15])
 
         # SALIDAS
-        self.posesion_pelota['posesion_aliada'] = fuzz.trimf(self.posesion_pelota.universe, [0, 0, 0.3])
-        self.posesion_pelota['libre'] = fuzz.trimf(self.posesion_pelota.universe, [0.2, 0.5, 0.8])
-        self.posesion_pelota['posesion_rival'] = fuzz.trimf(self.posesion_pelota.universe, [0.7, 1, 1])
+        self.posesion_pelota['posesion_aliada'] = fuzz.trimf(self.posesion_pelota.universe, [0, 0, 0.4])
+        self.posesion_pelota['libre'] = fuzz.trimf(self.posesion_pelota.universe, [0.3, 0.5, 0.7])
+        self.posesion_pelota['posesion_rival'] = fuzz.trimf(self.posesion_pelota.universe, [0.6, 1, 1])
 
     def _definir_reglas_posesion(self):
         """
         Define las reglas para determinar el estado de la pelota.
         """
-        # Reglas para determinar el estado de la pelota
-        regla_posesion_pelota1 = ctrl.Rule(self.distancia_aliado1['cerca'] &
-                                           self.orientacion_aliado1['apuntando'],
-                                           self.posesion_pelota['posesion_aliada']
-                                           )
-        regla_posesion_pelota2 = ctrl.Rule(self.distancia_aliado1['cerca'] &
-                                           self.orientacion_aliado1['medio_apuntando'],
-                                           self.posesion_pelota['libre']
-                                           )
-        regla_posesion_pelota3 = ctrl.Rule(self.distancia_aliado1['cerca'] &
-                                           self.orientacion_aliado1['no_apuntando'],
-                                           self.posesion_pelota['libre']
-                                           )
-        regla_posesion_pelota4 = ctrl.Rule(self.distancia_aliado1['cerca'] &
-                                           self.orientacion_aliado1['apuntando'],
-                                           self.posesion_pelota['posesion_aliada']
-                                           )
-        regla_posesion_pelota5 = ctrl.Rule(self.distancia_aliado2['cerca'] &
-                                           self.orientacion_aliado2['medio_apuntando'],
-                                           self.posesion_pelota['libre']
-                                           )
-        regla_posesion_pelota6 = ctrl.Rule(self.distancia_aliado2['cerca'] &
-                                           self.orientacion_aliado2['no_apuntando'],
-                                           self.posesion_pelota['libre']
-                                           )
-        regla_posesion_pelota7 = ctrl.Rule(self.distancia_rival1['cerca'] &
-                                           self.orientacion_rival1['apuntando'],
-                                           self.posesion_pelota['posesion_rival']
-                                           )
-        regla_posesion_pelota8 = ctrl.Rule(self.distancia_rival1['cerca'] &
-                                           self.orientacion_rival1['medio_apuntando'],
-                                           self.posesion_pelota['libre']
-                                           )
-        regla_posesion_pelota9 = ctrl.Rule(self.distancia_rival1['cerca'] &
-                                           self.orientacion_rival1['no_apuntando'],
-                                           self.posesion_pelota['libre']
-                                           )
-        regla_posesion_pelota10 = ctrl.Rule(self.distancia_rival2['cerca'] &
-                                            self.orientacion_rival2['apuntando'],
-                                            self.posesion_pelota['posesion_rival']
-                                            )
-        regla_posesion_pelota11 = ctrl.Rule(self.distancia_rival2['cerca'] &
-                                            self.orientacion_rival2['medio_apuntando'],
-                                            self.posesion_pelota['libre']
-                                            )
-        regla_posesion_pelota12 = ctrl.Rule(self.distancia_rival2['cerca'] &
-                                            self.orientacion_rival2['no_apuntando'],
-                                            self.posesion_pelota['libre']
-                                            )
-        regla_posesion_pelota13 = ctrl.Rule(self.distancia_aliado1['lejos'] & self.distancia_aliado2['lejos'] &
-                                            self.distancia_rival1['lejos'] & self.distancia_rival2['lejos'],
-                                            self.posesion_pelota['libre']
-                                            )
-        regla_posesion_pelota14 = ctrl.Rule(self.distancia_aliado1['media'] & self.distancia_aliado2['media'] &
-                                            self.distancia_rival1['media'] & self.distancia_rival2['media'],
-                                            self.posesion_pelota['libre']
-                                            )
+        # Reglas para cuando un aliado está cerca
+        regla1 = ctrl.Rule(
+            self.distancia_aliado1['cerca'] & self.orientacion_aliado1['apuntando'],
+            self.posesion_pelota['posesion_aliada']
+        )
 
-        self.reglas_posesion = [regla_posesion_pelota1, regla_posesion_pelota2, regla_posesion_pelota3,
-                                regla_posesion_pelota4, regla_posesion_pelota5, regla_posesion_pelota6,
-                                regla_posesion_pelota7, regla_posesion_pelota8, regla_posesion_pelota9,
-                                regla_posesion_pelota10, regla_posesion_pelota11, regla_posesion_pelota12,
-                                regla_posesion_pelota13, regla_posesion_pelota14
-                                ]
+        regla2 = ctrl.Rule(
+            self.distancia_aliado2['cerca'] & self.orientacion_aliado2['apuntando'],
+            self.posesion_pelota['posesion_aliada']
+        )
+
+        # Reglas para cuando un rival está cerca
+        regla3 = ctrl.Rule(
+            self.distancia_rival1['cerca'] & self.orientacion_rival1['apuntando'],
+            self.posesion_pelota['posesion_rival']
+        )
+
+        regla4 = ctrl.Rule(
+            self.distancia_rival2['cerca'] & self.orientacion_rival2['apuntando'],
+            self.posesion_pelota['posesion_rival']
+        )
+
+        # Reglas para pelota libre
+        regla5 = ctrl.Rule(
+            (self.distancia_aliado1['media'] | self.distancia_aliado1['lejos']) &
+            (self.distancia_aliado2['media'] | self.distancia_aliado2['lejos']) &
+            (self.distancia_rival1['media'] | self.distancia_rival1['lejos']) &
+            (self.distancia_rival2['media'] | self.distancia_rival2['lejos']),
+            self.posesion_pelota['libre']
+        )
+
+        regla6 = ctrl.Rule(
+            self.distancia_aliado1['cerca'] & self.orientacion_aliado1['no_apuntando'] &
+            (self.distancia_rival1['media'] | self.distancia_rival1['lejos']) &
+            (self.distancia_rival2['media'] | self.distancia_rival2['lejos']),
+            self.posesion_pelota['libre']
+        )
+
+        regla7 = ctrl.Rule(
+            self.distancia_aliado2['cerca'] & self.orientacion_aliado2['no_apuntando'] &
+            (self.distancia_rival1['media'] | self.distancia_rival1['lejos']) &
+            (self.distancia_rival2['media'] | self.distancia_rival2['lejos']),
+            self.posesion_pelota['libre']
+        )
+
+        regla8 = ctrl.Rule(
+            self.distancia_rival1['cerca'] & self.orientacion_rival1['no_apuntando'] &
+            (self.distancia_aliado1['media'] | self.distancia_aliado1['lejos']) &
+            (self.distancia_aliado2['media'] | self.distancia_aliado2['lejos']),
+            self.posesion_pelota['libre']
+        )
+
+        regla9 = ctrl.Rule(
+            self.distancia_rival2['cerca'] & self.orientacion_rival2['no_apuntando'] &
+            (self.distancia_aliado1['media'] | self.distancia_aliado1['lejos']) &
+            (self.distancia_aliado2['media'] | self.distancia_aliado2['lejos']),
+            self.posesion_pelota['libre']
+        )
+
+        # Regla por defecto (si ninguna otra regla se activa)
+        regla10 = ctrl.Rule(
+            ~self.distancia_aliado1['cerca'] & ~self.distancia_aliado2['cerca'] &
+            ~self.distancia_rival1['cerca'] & ~self.distancia_rival2['cerca'],
+            self.posesion_pelota['libre']
+        )
+
+        self.reglas_posesion = [regla1, regla2, regla3, regla4, regla5,
+                                regla6, regla7, regla8, regla9, regla10]
 
     def _init_proximidad_system(self):
         """
@@ -206,6 +235,9 @@ class FuzzyRobotTeamManager:
         """
         # Variable de entrada
         self.posesion_pelota_result = ctrl.Antecedent(np.arange(0, 1.1, 0.1), 'posesion_pelota_result')
+
+        # Ventaja de proximidad
+        self.ventaja_proximidad = ctrl.Antecedent(np.arange(-1000, 1001, 1), 'ventaja_proximidad')
 
         # Variable de salida
         self.proximidad_equipo = ctrl.Consequent(np.arange(0, 2.1, 0.1), 'proximidad_equipo')
@@ -227,56 +259,64 @@ class FuzzyRobotTeamManager:
         self.posesion_pelota_result['libre'] = fuzz.trimf(self.posesion_pelota.universe, [0.2, 0.5, 0.8])
         self.posesion_pelota_result['posesion_rival'] = fuzz.trimf(self.posesion_pelota.universe, [0.7, 1, 1])
 
+        # Ventaja de proximidad (negativo = ventaja aliada, positivo = ventaja rival)
+        self.ventaja_proximidad['ventaja_aliada_grande'] = fuzz.trimf(self.ventaja_proximidad.universe,
+                                                                      [-1000, -1000, -300])
+        self.ventaja_proximidad['ventaja_aliada_media'] = fuzz.trimf(self.ventaja_proximidad.universe,
+                                                                     [-500, -200, -50])
+        self.ventaja_proximidad['equilibrado'] = fuzz.trimf(self.ventaja_proximidad.universe, [-100, 0, 100])
+        self.ventaja_proximidad['ventaja_rival_media'] = fuzz.trimf(self.ventaja_proximidad.universe, [50, 200, 500])
+        self.ventaja_proximidad['ventaja_rival_grande'] = fuzz.trimf(self.ventaja_proximidad.universe,
+                                                                     [300, 1000, 1000])
+
         # SALIDAS
-        self.proximidad_equipo['aliado'] = fuzz.trimf(self.proximidad_equipo.universe, [0, 0, 1])
-        self.proximidad_equipo['neutro'] = fuzz.trimf(self.proximidad_equipo.universe, [0.3, 1, 1.7])
-        self.proximidad_equipo['rival'] = fuzz.trimf(self.proximidad_equipo.universe, [1, 2, 2])
+        self.proximidad_equipo['aliado'] = fuzz.trimf(self.proximidad_equipo.universe, [0, 0, 0.8])
+        self.proximidad_equipo['neutro'] = fuzz.trimf(self.proximidad_equipo.universe, [0.6, 1, 1.4])
+        self.proximidad_equipo['rival'] = fuzz.trimf(self.proximidad_equipo.universe, [1.2, 2, 2])
 
     def _definir_reglas_proximidad(self):
         """
-        Define las reglas para determinar la proximidad de la pelota.
+        Define las reglas para determinar la proximidad de la pelota con un conjunto más completo.
         """
-        regla_proximidad_equipo1 = ctrl.Rule(self.posesion_pelota_result['posesion_aliada'],
-                                             self.proximidad_equipo['aliado'])
-        regla_proximidad_equipo2 = ctrl.Rule(self.posesion_pelota_result['posesion_rival'],
-                                             self.proximidad_equipo['rival'])
-        regla_proximidad_equipo3 = ctrl.Rule(
+        # Reglas básicas basadas en posesión
+        regla1 = ctrl.Rule(self.posesion_pelota_result['posesion_aliada'],
+                           self.proximidad_equipo['aliado'])
+
+        regla2 = ctrl.Rule(self.posesion_pelota_result['posesion_rival'],
+                           self.proximidad_equipo['rival'])
+
+        # Reglas basadas en ventaja de proximidad cuando la pelota está libre
+        regla3 = ctrl.Rule(
             self.posesion_pelota_result['libre'] &
-            (self.distancia_aliado1['cerca'] | self.distancia_aliado2['cerca']) &
-            (self.distancia_rival1['lejos'] | self.distancia_rival1['media']) &
-            (self.distancia_rival2['lejos'] | self.distancia_rival2['media']),
+            self.ventaja_proximidad['ventaja_aliada_grande'],
             self.proximidad_equipo['aliado']
         )
-        regla_proximidad_equipo4 = ctrl.Rule(
+
+        regla4 = ctrl.Rule(
             self.posesion_pelota_result['libre'] &
-            (self.distancia_rival1['cerca'] | self.distancia_rival2['cerca']) &
-            (self.distancia_aliado1['lejos'] | self.distancia_aliado1['media']) &
-            (self.distancia_aliado2['lejos'] | self.distancia_aliado2['media']),
-            self.proximidad_equipo['rival']
+            self.ventaja_proximidad['ventaja_aliada_media'],
+            self.proximidad_equipo['aliado']
         )
-        regla_proximidad_equipo5 = ctrl.Rule(
+
+        regla5 = ctrl.Rule(
             self.posesion_pelota_result['libre'] &
-            (self.distancia_aliado1['lejos'] & self.distancia_aliado2['lejos']) &
-            (self.distancia_rival1['lejos'] & self.distancia_rival2['lejos']),
+            self.ventaja_proximidad['equilibrado'],
             self.proximidad_equipo['neutro']
         )
-        regla_proximidad_equipo6 = ctrl.Rule(
-            self.posesion_pelota_result['libre'] &
-            (self.distancia_aliado1['media'] | self.distancia_aliado2['media']) &
-            (self.distancia_rival1['lejos'] & self.distancia_rival2['lejos']),
-            self.proximidad_equipo['aliado']
-        )
 
-        regla_proximidad_equipo7 = ctrl.Rule(
+        regla6 = ctrl.Rule(
             self.posesion_pelota_result['libre'] &
-            (self.distancia_rival1['media'] | self.distancia_rival2['media']) &
-            (self.distancia_aliado1['lejos'] & self.distancia_aliado2['lejos']),
+            self.ventaja_proximidad['ventaja_rival_media'],
             self.proximidad_equipo['rival']
         )
 
-        self.reglas_proximidad = [regla_proximidad_equipo1, regla_proximidad_equipo2, regla_proximidad_equipo3,
-                                  regla_proximidad_equipo4, regla_proximidad_equipo5, regla_proximidad_equipo6,
-                                  regla_proximidad_equipo7]
+        regla7 = ctrl.Rule(
+            self.posesion_pelota_result['libre'] &
+            self.ventaja_proximidad['ventaja_rival_grande'],
+            self.proximidad_equipo['rival']
+        )
+
+        self.reglas_proximidad = [regla1, regla2, regla3, regla4, regla5, regla6, regla7]
 
     def _init_zona_system(self):
         """
@@ -347,6 +387,10 @@ class FuzzyRobotTeamManager:
         """
         Inicializa el sistema difuso para determinar cuál robot tomará el rol de atacante.
         """
+        # Variables de entrada adicionales para posición estratégica
+        self.posicion_estrategica1 = ctrl.Antecedent(np.arange(0, 1.1, 0.1), 'posicion_estrategica1')
+        self.posicion_estrategica2 = ctrl.Antecedent(np.arange(0, 1.1, 0.1), 'posicion_estrategica2')
+
         # Variable de salida
         self.rol_atacante = ctrl.Consequent(np.arange(0, 1.1, 0.1), 'rol_atacante')
 
@@ -362,99 +406,83 @@ class FuzzyRobotTeamManager:
         """
         Define las funciones de membresía para las variables de entrada y salida del sistema de rol.
         """
-        # SALIDAS
-        self.rol_atacante['robot1'] = fuzz.trimf(self.rol_atacante.universe, [0, 0, 0.5])
-        self.rol_atacante['robot2'] = fuzz.trimf(self.rol_atacante.universe, [0.5, 1, 1])
+        # Posición estratégica (qué tan bien posicionado está respecto a la meta)
+        self.posicion_estrategica1['favorable'] = fuzz.trimf(self.posicion_estrategica1.universe, [0.7, 1, 1])
+        self.posicion_estrategica1['neutral'] = fuzz.trimf(self.posicion_estrategica1.universe, [0.3, 0.5, 0.7])
+        self.posicion_estrategica1['desfavorable'] = fuzz.trimf(self.posicion_estrategica1.universe, [0, 0, 0.3])
+
+        self.posicion_estrategica2['favorable'] = fuzz.trimf(self.posicion_estrategica2.universe, [0.7, 1, 1])
+        self.posicion_estrategica2['neutral'] = fuzz.trimf(self.posicion_estrategica2.universe, [0.3, 0.5, 0.7])
+        self.posicion_estrategica2['desfavorable'] = fuzz.trimf(self.posicion_estrategica2.universe, [0, 0, 0.3])
+
+        # SALIDAS - más refinadas para considerar una zona intermedia
+        self.rol_atacante['robot1_fuerte'] = fuzz.trimf(self.rol_atacante.universe, [0, 0.1, 0.3])
+        self.rol_atacante['robot1_moderado'] = fuzz.trimf(self.rol_atacante.universe, [0.2, 0.35, 0.5])
+        self.rol_atacante['indeciso'] = fuzz.trimf(self.rol_atacante.universe, [0.4, 0.5, 0.6])
+        self.rol_atacante['robot2_moderado'] = fuzz.trimf(self.rol_atacante.universe, [0.5, 0.65, 0.8])
+        self.rol_atacante['robot2_fuerte'] = fuzz.trimf(self.rol_atacante.universe, [0.7, 0.9, 1])
 
     def _definir_reglas_rol(self):
         """
-        Define las reglas para determinar cuál robot tomará el rol de atacante.
+        Define las reglas más completas para determinar cuál robot tomará el rol de atacante.
         """
-        # Reglas con mayor prioridad para robot1
+        # Reglas basadas en distancia
         regla_rol1 = ctrl.Rule(
-            # Si robot 1 está más cerca de la pelota que robot 2 y rivales
-            (self.distancia_aliado1['cerca'] &
-             (self.distancia_aliado2['media'] | self.distancia_aliado2['lejos']) &
-             (self.distancia_rival1['media'] | self.distancia_rival1['lejos']) &
-             (self.distancia_rival2['media'] | self.distancia_rival2['lejos'])),
-            self.rol_atacante['robot1']
+            self.distancia_aliado1['cerca'] & self.distancia_aliado2['media'] & self.orientacion_aliado1['apuntando'],
+            self.rol_atacante['robot1_fuerte']
         )
+
         regla_rol2 = ctrl.Rule(
-            # Si robot 1 está más cerca de la pelota que robot 2 y rivales
-            (self.distancia_aliado2['cerca'] &
-             (self.distancia_aliado1['media'] | self.distancia_aliado1['lejos']) &
-             (self.distancia_rival1['media'] | self.distancia_rival1['lejos']) &
-             (self.distancia_rival2['media'] | self.distancia_rival2['lejos'])),
-            self.rol_atacante['robot2']
+            self.distancia_aliado2['cerca'] & self.distancia_aliado1['media'] & self.orientacion_aliado2['apuntando'],
+            self.rol_atacante['robot2_fuerte']
         )
+
+        # Reglas basadas en la posición en el campo y cercanía a la pelota
         regla_rol3 = ctrl.Rule(
-            # Si robot 1 está más cerca de la pelota que roby rivales
-            (self.distancia_aliado1['media'] &
-             (self.distancia_rival1['media'] | self.distancia_rival1['lejos']) &
-             (self.distancia_rival2['media'] | self.distancia_rival2['lejos'])),
-            self.rol_atacante['robot1']
+            self.distancia_aliado1['cerca'] & self.posicion_estrategica1['favorable'],
+            self.rol_atacante['robot1_fuerte']
         )
+
         regla_rol4 = ctrl.Rule(
-            # Si robot 1 está más cerca de la pelota que robot 2 y rivales
-            (self.distancia_aliado2['media'] &
-             (self.distancia_rival1['media'] | self.distancia_rival1['lejos']) &
-             (self.distancia_rival2['media'] | self.distancia_rival2['lejos'])),
-            self.rol_atacante['robot2']
+            self.distancia_aliado2['cerca'] & self.posicion_estrategica2['favorable'],
+            self.rol_atacante['robot2_fuerte']
         )
-        #
-        # regla_rol1 = ctrl.Rule(
-        #     # Robot 1 cerca de la pelota y apuntando directamente
-        #     (self.distancia_aliado1['cerca'] & self.orientacion_aliado1['apuntando']) |
-        #     # Robot 1 en zona media, con buena orientación y rivales lejos
-        #     (self.distancia_aliado1['media'] & self.orientacion_aliado1['medio_apuntando'] &
-        #      self.distancia_rival1['lejos'] & self.distancia_rival2['lejos']),
-        #     self.rol_atacante['robot1']
+
+        # Reglas para situaciones de igual cercanía pero diferente orientación
+        regla_rol5 = ctrl.Rule(
+            self.distancia_aliado1['cerca'] & self.distancia_aliado2['cerca'] &
+            self.orientacion_aliado1['apuntando'] & self.orientacion_aliado2['medio_apuntando'],
+            self.rol_atacante['robot1_moderado']
+        )
+
+        regla_rol6 = ctrl.Rule(
+            self.distancia_aliado1['cerca'] & self.distancia_aliado2['cerca'] &
+            self.orientacion_aliado1['medio_apuntando'] & self.orientacion_aliado2['apuntando'],
+            self.rol_atacante['robot2_moderado']
+        )
+
+        # Regla para situaciones muy igualadas
+        regla_rol7 = ctrl.Rule(
+            self.distancia_aliado1['cerca'] & self.distancia_aliado2['cerca'] &
+            self.orientacion_aliado1['apuntando'] & self.orientacion_aliado2['apuntando'],
+            self.rol_atacante['indeciso']
+        )
+
+        # Incluir reglas considerando la posición de los rivales
+        # regla_rol8 = ctrl.Rule(
+        #     self.distancia_aliado1['cerca'] & self.distancia_rival1['cerca'] &
+        #     self.posicion_estrategica2['favorable'],
+        #     self.rol_atacante['robot2_moderado']
         # )
         #
-        # # Reglas con mayor prioridad para robot2
-        # regla_rol2 = ctrl.Rule(
-        #     # Robot 2 cerca de la pelota y apuntando directamente
-        #     (self.distancia_aliado2['cerca'] & self.orientacion_aliado2['apuntando']) |
-        #     # Robot 2 en zona media, con buena orientación y rivales lejos
-        #     (self.distancia_aliado2['media'] & self.orientacion_aliado2['medio_apuntando'] &
-        #      self.distancia_rival1['lejos'] & self.distancia_rival2['lejos']),
-        #     self.rol_atacante['robot2']
-        # )
-        #
-        # # Reglas considerando la proximidad de los rivales
-        # regla_rol3 = ctrl.Rule(
-        #     # Si robot 1 está más cerca de la pelota que robot 2 y rivales
-        #     (self.distancia_aliado1['cerca'] &
-        #      (self.distancia_aliado2['media'] | self.distancia_aliado2['lejos']) &
-        #      (self.distancia_rival1['media'] | self.distancia_rival1['lejos']) &
-        #      (self.distancia_rival2['media'] | self.distancia_rival2['media'])),
-        #     self.rol_atacante['robot1']
-        # )
-        #
-        # regla_rol4 = ctrl.Rule(
-        #     # Si robot 1 está más cerca de la pelota que robot 2 y rivales
-        #     (self.distancia_aliado2['cerca'] &
-        #      (self.distancia_aliado1['media'] | self.distancia_aliado1['lejos']) &
-        #      (self.distancia_rival1['media'] | self.distancia_rival1['lejos']) &
-        #      (self.distancia_rival2['media'] | self.distancia_rival2['media'])),
-        #     self.rol_atacante['robot2']
-        # )
-        #
-        # regla_rol5 = ctrl.Rule(
-        #     (self.distancia_aliado1['cerca']) &
-        #     (self.distancia_rival1['lejos'] | self.distancia_rival1['media']) &
-        #     (self.distancia_rival2['lejos'] | self.distancia_rival2['media']),
-        #     self.rol_atacante['robot1']
-        # )
-        #
-        # regla_rol6 = ctrl.Rule(
-        #     (self.distancia_aliado2['cerca']) &
-        #     (self.distancia_rival1['lejos'] | self.distancia_rival1['media']) &
-        #     (self.distancia_rival2['lejos'] | self.distancia_rival2['media']),
-        #     self.rol_atacante['robot2']
+        # regla_rol9 = ctrl.Rule(
+        #     self.distancia_aliado2['cerca'] & self.distancia_rival1['cerca'] &
+        #     self.posicion_estrategica1['favorable'],
+        #     self.rol_atacante['robot1_moderado']
         # )
 
-        self.reglas_rol = [regla_rol1, regla_rol2, regla_rol3, regla_rol4]  # , regla_rol5, regla_rol6
+        self.reglas_rol = [regla_rol1, regla_rol2, regla_rol3, regla_rol4,
+                           regla_rol5, regla_rol6, regla_rol7]
 
     def evaluar_msLogicDifusse(self):
         """
@@ -466,19 +494,41 @@ class FuzzyRobotTeamManager:
                 - 'zona_pelota': Zona del campo donde se encuentra la pelota (defensiva, media u ofensiva) (0; 1; 2).
         """
 
-        distancia_aliado1 = self.aliado_1.distance_to_ball(self.ball)
-        orientacion_aliado1 = self.aliado_1.angle_difference_ball(self.ball)
+        # Calcular las distancias de cada jugador a la pelota
+        distancia_aliado1 = min(1500, self.aliado_1.distance_to_ball(self.ball))
+        distancia_aliado2 = min(1500, self.aliado_2.distance_to_ball(self.ball))
+        distancia_rival1 = min(1500, self.rival_1.distance_to_ball(self.ball))
+        distancia_rival2 = min(1500, self.rival_2.distance_to_ball(self.ball))
 
-        distancia_aliado2 = self.aliado_2.distance_to_ball(self.ball)
-        orientacion_aliado2 = self.aliado_2.angle_difference_ball(self.ball)
+        # Calcular las orientaciones
+        orientacion_aliado1 = min(np.pi, self.aliado_1.angle_difference_ball(self.ball))
+        orientacion_aliado2 = min(np.pi, self.aliado_2.angle_difference_ball(self.ball))
+        orientacion_rival1 = min(np.pi, self.rival_1.angle_difference_ball(self.ball))
+        orientacion_rival2 = min(np.pi, self.rival_2.angle_difference_ball(self.ball))
 
-        distancia_rival1 = self.rival_1.distance_to_ball(self.ball)
-        orientacion_rival1 = self.rival_1.angle_difference_ball(self.ball)
+        # Calcular distancias medias por equipo (ponderadas por la orientación)
+        # Una mejor orientación da más peso al jugador más orientado
+        peso_orientacion1 = max(0.1, 1 - orientacion_aliado1 / np.pi)  # 0 a 1, 1 es mejor orientación
+        peso_orientacion2 = max(0.1, 1 - orientacion_aliado2 / np.pi)
 
-        distancia_rival2 = self.rival_2.distance_to_ball(self.ball)
-        orientacion_rival2 = self.rival_2.angle_difference_ball(self.ball)
+        distancia_media_aliada = ((distancia_aliado1 * peso_orientacion1 + distancia_aliado2 * peso_orientacion2)
+                                  / (peso_orientacion1 + peso_orientacion2))
 
-        print(distancia_rival1)
+        peso_orientacion_r1 = max(0.1, 1 - orientacion_rival1 / np.pi)
+        peso_orientacion_r2 = max(0.1, 1 - orientacion_rival2 / np.pi)
+
+        distancia_media_rival = ((distancia_rival1 * peso_orientacion_r1 + distancia_rival2 * peso_orientacion_r2)
+                                 / (peso_orientacion_r1 + peso_orientacion_r2))
+
+        # Calcular ventaja de proximidad (negativo = ventaja aliada, positivo = ventaja rival)
+        ventaja_proximidad_valor = int(distancia_media_aliada - distancia_media_rival)
+
+        # Imprimir información de diagnóstico
+        logger.debug("Distancia media aliada: %.2f, Distancia media rival: %.2f, Ventaja: %d",
+                     distancia_media_aliada, distancia_media_rival, ventaja_proximidad_valor)
+
+        # ==================== POSESION ====================
+
         # Input para la posesión de la pelota
         self.sim_posesion.input['distancia_aliado1'] = distancia_aliado1
         self.sim_posesion.input['distancia_aliado2'] = distancia_aliado2
@@ -491,70 +541,125 @@ class FuzzyRobotTeamManager:
         self.sim_posesion.input['orientacion_rival2'] = orientacion_rival2
 
         try:
-            self.sim_posesion.compute()
+            posesion_resultado = self.sim_posesion.compute()
+            logger.debug("POSESION completado %.2f", self.sim_posesion.output['posesion_pelota'])
         except Exception as e:
-            logging.error(f"Error en sim_posesion: {e}")
-            logging.debug(
-                f"Entradas: \n"
-                f"distancia_aliado1={distancia_aliado1}, orientacion_aliado1={orientacion_aliado1}\n"
-                f"distancia_aliado2={distancia_aliado2}, orientacion_aliado2={orientacion_aliado2}")
-            posesion_resultado = 'libre'
-        else:
-            posesion_resultado = self.sim_posesion.output['posesion_pelota']
+            logger.error("Error en sim_posesion: %s", e)
+
+            # Fallback basado en distancia y orientación
+            if (distancia_aliado1 < 150 and orientacion_aliado1 < 0.4) or (
+                    distancia_aliado2 < 150 and orientacion_aliado2 < 0.4):
+                posesion_resultado = 0.2  # Posesión aliada
+            elif (distancia_rival1 < 150 and orientacion_rival1 < 0.4) or (
+                    distancia_rival2 < 150 and orientacion_rival2 < 0.4):
+                posesion_resultado = 0.8  # Posesión rival
+            else:
+                posesion_resultado = 0.5  # Libre
+
+            # Actualizar manualmente el output del simulador para que esté disponible
+            if not hasattr(self.sim_posesion, 'output'):
+                self.sim_posesion.output = {}
+            self.sim_posesion.output['posesion_pelota'] = posesion_resultado
+
+        # ==================== PROXIMIDAD ====================
 
         # Inputs para determinar la proximidad de la pelota
-        self.sim_proximidad.input['posesion_pelota_result'] = posesion_resultado
-        self.sim_proximidad.input['distancia_aliado1'] = distancia_aliado1
-        self.sim_proximidad.input['distancia_aliado2'] = distancia_aliado2
-        self.sim_proximidad.input['distancia_rival1'] = distancia_rival1
-        self.sim_proximidad.input['distancia_rival2'] = distancia_rival2
+        self.sim_proximidad.input['posesion_pelota_result'] = self.sim_posesion.output['posesion_pelota']
+        self.sim_proximidad.input['ventaja_proximidad'] = ventaja_proximidad_valor
 
         try:
             self.sim_proximidad.compute()
+            logger.debug("PROXIMIDAD completado")
         except Exception as e:
-            logging.error(f"Error en sim_posesion: {e}")
-            logging.debug(
-                f"Entradas: \n"
-                f"posesion_result: {posesion_resultado}"
-                f"distancia_aliado1={distancia_aliado1}, orientacion_aliado1={orientacion_aliado1}\n"
-                f"distancia_aliado2={distancia_aliado2}, orientacion_aliado2={orientacion_aliado2}")
+            logger.error("Error en sim_posesion: %s", e)
+            # Fallback para proximidad basado en simple comparación
+            if ventaja_proximidad_valor < -50:  # Ventaja aliada
+                proximidad_resultado = 0.3
+            elif ventaja_proximidad_valor > 50:  # Ventaja rival
+                proximidad_resultado = 1.7
+            else:  # Equilibrado
+                proximidad_resultado = 1.0
+            self.sim_proximidad.output = {'proximidad_equipo': proximidad_resultado}
+            logger.debug("Asignando proximidad de la pelota por defecto basando")
+
+        # ==================== ZONA ====================
 
         # Inputs para determinar la zona de la pelota
         self.sim_zona.input['posicion_x'] = self.ball.get_position()[0]
 
         try:
             self.sim_zona.compute()
+            logger.debug("ZONA completado")
         except Exception as e:
-            logging.error(f"Error en sim_posesion: {e}")
-            logging.debug(
-                f"Entradas: \n"
-                f"posición x de la pelota. {self.ball.get_position()[0]}")
+            logger.error("Error en sim_posesion: %s", e)
+            logger.debug("Entradas: \n"
+                         "posición x de la pelota: %d", self.ball.get_position()[0])
+
+        # ==================== ROL ====================
+
+        # Calcular posición estratégica
+        player1_pos = self.aliado_1.get_position()
+        player2_pos = self.aliado_2.get_position()
+        ball_pos = self.ball.get_position()
+        goal_pos = [ANCHO_CAMPO, ALTO_CAMPO / 2] if self.team == 'red' else [0, ALTO_CAMPO / 2]
+
+        pos_estrategica1 = calcular_posicion_estrategica(player1_pos, ball_pos, goal_pos)
+        pos_estrategica2 = calcular_posicion_estrategica(player2_pos, ball_pos, goal_pos)
+
+        # Añadir inputs para posición estratégica
+        self.sim_rol.input['posicion_estrategica1'] = pos_estrategica1
+        self.sim_rol.input['posicion_estrategica2'] = pos_estrategica2
 
         # Inputs para determinar el robot atacante
         self.sim_rol.input['distancia_aliado1'] = distancia_aliado1
         self.sim_rol.input['distancia_aliado2'] = distancia_aliado2
-        self.sim_rol.input['distancia_rival1'] = distancia_rival1
-        self.sim_rol.input['distancia_rival2'] = distancia_rival2
+        self.sim_rol.input['orientacion_aliado1'] = orientacion_aliado1
+        self.sim_rol.input['orientacion_aliado2'] = orientacion_aliado2
 
-        # self.sim_rol.input['orientacion_aliado1'] = orientacion_aliado1
-        # self.sim_rol.input['orientacion_aliado2'] = orientacion_aliado2
+        # self.sim_rol.input['distancia_rival1'] = distancia_rival1
+        # self.sim_rol.input['distancia_rival2'] = distancia_rival2
         # self.sim_rol.input['orientacion_rival1'] = orientacion_rival1
         # self.sim_rol.input['orientacion_rival2'] = orientacion_rival2
 
         try:
             self.sim_rol.compute()
             robot_ataque = self.sim_rol.output['rol_atacante']
-            # En tu método evaluar(), después de obtener robot_ataque:
-            if robot_ataque <= 0.5:  # Margen de ±0.05
-                self.aliado_1.set_rol("atacante")
-                self.aliado_2.set_rol("defensa")
-            else:
-                self.aliado_1.set_rol("defensa")
-                self.aliado_1.set_rol("atacante")
+
+            # Interpretación más matizada del valor de salida
+            if robot_ataque <= 0.3:  # Robot 1 fuerte
+                self.aliado_1.set_rol(ROL_ATACANTE)
+                self.aliado_2.set_rol(ROL_DEFENSIVO)
+            elif 0.3 < robot_ataque <= 0.4:  # Robot 1 moderado
+                self.aliado_1.set_rol(ROL_ATACANTE)
+                self.aliado_2.set_rol(ROL_DEFENSIVO)
+            elif 0.4 < robot_ataque <= 0.6:  # Indeciso - usar criterio de distancia simple
+                if self.aliado_1.distance_to_ball(self.ball) <= self.aliado_2.distance_to_ball(self.ball):
+                    self.aliado_1.set_rol(ROL_ATACANTE)
+                    self.aliado_2.set_rol(ROL_DEFENSIVO)
+                else:
+                    self.aliado_1.set_rol(ROL_DEFENSIVO)
+                    self.aliado_2.set_rol(ROL_ATACANTE)
+            elif 0.6 < robot_ataque <= 0.7:  # Robot 2 moderado
+                self.aliado_1.set_rol(ROL_DEFENSIVO)
+                self.aliado_2.set_rol(ROL_ATACANTE)
+            else:  # Robot 2 fuerte
+                self.aliado_1.set_rol(ROL_DEFENSIVO)
+                self.aliado_2.set_rol(ROL_ATACANTE)
+
+            logger.debug("Rol asignado - Robot 1: %s, Robot 2: %s",
+                         "Atacante" if self.aliado_1.rol == ROL_ATACANTE else "Defensor",
+                         "Atacante" if self.aliado_2.rol == ROL_ATACANTE else "Defensor")
         except Exception as e:
-            logging.error(f"Error en sim_rol: {e}")
-            # Valor por defecto si el cálculo falla
-            logging.debug("Asignando valor por defecto para robot_ataque")
+            logger.error("Error en sim_rol: %s", e)
+            # Valor por defecto basado en distancia simple
+            if self.aliado_1.distance_to_ball(self.ball) <= self.aliado_2.distance_to_ball(self.ball):
+                self.aliado_1.set_rol(ROL_ATACANTE)
+                self.aliado_2.set_rol(ROL_DEFENSIVO)
+            else:
+                self.aliado_1.set_rol(ROL_DEFENSIVO)
+                self.aliado_2.set_rol(ROL_ATACANTE)
+            logger.debug("Asignando roles por defecto basado en distancia")
+
         # if self.side == "LEFT":
             # self.rol_atacante.view(sim=self.sim_rol)
         #     self.proximidad_equipo.view(sim=self.sim_proximidad)
@@ -570,12 +675,5 @@ class FuzzyRobotTeamManager:
         proximidad = round(self.sim_proximidad.output['proximidad_equipo'], 1)
         zona = round(self.sim_zona.output['zona_pelota'], 1)
 
-        # Ejecutar las acciones a través del controlador
-        self.robot_controller.execute_team_strategy(estado_robot_ataque, estado_robot_defensa)
-
         # Retornar resultados
-        return {
-            'estado_pelota': self.sim_posesion.output['posesion_pelota'],
-            'equipo_cercano': self.sim_proximidad.output['proximidad_equipo'],
-            'zona_pelota': self.sim_zona.output['zona_pelota']
-        }
+        return posesion, proximidad, zona

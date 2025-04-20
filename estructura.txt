@@ -32,12 +32,11 @@ robot_soccer/                      # Directorio raíz del proyecto
 │   ├── __init__.py
 │   ├── controllers/               # Controladores específicos
 │   │    ├── __init__.py
-│   │    ├── robot_controller.py    # Controlador de robot
-│   │    └── tools_controller.py    # Controlador de herramientas
+│   │    └── robot_controller.py    # Controlador de robot
 │   │
-│   ├── fuzzy_logic  			# Sistema lódigo difuso
+│   ├── fuzzy_logic  			# Sistema lógico difuso
 │   │    ├── __init__.py
-│   │    └── game_context.py       	# Entrega el contexto del juego, donde está la pelota, equipo cercano, 
+│   │    └── game_context.py       # Entrega el contexto del juego, donde está la pelota, equipo cercano, 
 │   │
 │   ├── path_planning/             # Algoritmos de planificación
 │   │    ├── __init__.py
@@ -46,13 +45,9 @@ robot_soccer/                      # Directorio raíz del proyecto
 │   │
 │   └── state_machine/             # Máquina de estados
 │       ├── __init__.py
-│       ├── state_manager.py       # Gestor de estados (AdministradorEstados.py)
-│       └── logic_diffuse.py       # Lógica difusa (MS_logicDifusse.py)
+│       └── state_manager.py       # Gestor de estados (AdministradorEstados.py)       
 │
 └── utils/                         # Utilidades
     ├── __init__.py
-    ├── geometry.py                # Funciones geométricas
-    ├── tools.py                   # Herramientas generales
-    └── collision.py               # Detección de colisiones
-
+    └── tools.py                   # Herramientas generales
 

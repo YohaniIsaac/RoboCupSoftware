@@ -1,7 +1,14 @@
 import numpy as np
 import skfuzzy as fuzz
 from skfuzzy import control as ctrl
-import logging
+# ============== LOG ==============
+from robot_soccer.utils.logger import get_logger
+from robot_soccer.utils.logger import set_level, disable_module, enable_module
+module_name = "ai.state_machine"
+
+logger = get_logger(module_name)
+set_level(module_name, "WARNING")  # DEBUG, INFO, WARNING, ERROR, CRITICAL, DISABLED
+# ==========================================
 
 
 class StateManager:
@@ -111,16 +118,14 @@ class StateManager:
 
         try:
             self.simulation.compute()
-            # print(f"estado robot cercano/Ataque: {self.simulation.output['estado_robot_cercano']}\n"
-            #       f"estado robot lejano/Defensa: {self.simulation.output['estado_robot_lejano']}")
+            logger.debug("estado robot cercano/Ataque: %d \n estado robot lejano/Defensa: %d",
+                         self.simulation.output['estado_robot_cercano'],
+                         self.simulation.output['estado_robot_lejano'])
         except Exception as e:
-            logging.error(f"Error en sim_posesion: {e}")
-            logging.debug(
+            logger.error(f"Error en sim_posesion: {e}")
+            logger.debug(
                 f"Entradas: \n"
                 f"posición: {posesion}\n"
                 f"proximida: {proximidad}\n"
                 f"zona. \t{zona}")
-        return {
-            'estado robot cercano/Ataque': self.simulation.output['estado_robot_cercano'],
-            'estado robot lejano/Defensa': self.simulation.output['estado_robot_lejano']
-        }
+        return self.simulation.output['estado_robot_cercano'], self.simulation.output['estado_robot_lejano']

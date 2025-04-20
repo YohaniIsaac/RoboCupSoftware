@@ -4,8 +4,20 @@ import numpy as np
 from robot_soccer.entities.player import Player
 from robot_soccer.entities.ball import Ball
 from robot_soccer.ai.fuzzy_logic.game_context import FuzzyRobotTeamManager
+from robot_soccer.ai.state_machine.state_manager import StateManager
 
 from config import *
+
+# ==========================================
+# LOG
+# ==========================================
+from robot_soccer.utils.logger import get_logger
+from robot_soccer.utils.logger import set_level, disable_module, enable_module
+module_name = "."
+logger = get_logger(module_name)
+
+set_level(module_name, "DEBUG")  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+# ==========================================
 
 
 # Posiciones iniciales de jugadores y pelota
@@ -29,9 +41,10 @@ player_4 = Player(4, 1200, 700, 0, 'blue')
 
 ball = Ball(750, 450)
 
-team_red = FuzzyRobotTeamManager(player_1, player_2, player_3, player_4, ball)
-team_blue = FuzzyRobotTeamManager(player_1, player_2, player_3, player_4, ball, team='blue')
-
+game_context_team_red = FuzzyRobotTeamManager(player_1, player_2, player_3, player_4, ball)
+game_context_team_blue = FuzzyRobotTeamManager(player_1, player_2, player_3, player_4, ball, team='blue')
+state_manager_team_red = StateManager()
+state_manager_team_blue = StateManager()
 
 # Figuras y ejes
 fig, ax = plt.subplots(figsize=(10, 6))
@@ -141,6 +154,10 @@ def guardar_cambios(_=None):
     """
     global selected_id
 
+    logger.debug(" ====================================================== \n"
+                 "\t\t ================== INTENTO NUEVO ================== \n")
+
+
     try:
         x = float(textboxes['X'].text)
         y = float(textboxes['Y'].text)
@@ -155,7 +172,7 @@ def guardar_cambios(_=None):
                 angulo
             ]
     except ValueError:
-        print("Entrada inválida. Por favor, introduce números válidos.")
+        logger.error("Entrada inválida. Por favor, introduce números válidos.")
 
     for player_id, (x, y, angle) in posiciones_jugadores.items():
         if player_id == player_1.id:
@@ -172,18 +189,29 @@ def guardar_cambios(_=None):
             player_4.set_angle(angle)
 
     ball.set_position(posicion_pelota[0], posicion_pelota[1])
-
+    logger.info("pos_player_1: (%d, %d) \t pos_player_2: (%d, %d) \t "
+                "pos_player_3: (%d, %d) \t pos_player_4: (%d, %d) \n"
+                "\t\t angulo_plasyer_1: %d \t angulo_plasyer_2: %d \t angulo_plasyer_3: %d \t angulo_plasyer_4: %d \n"
+                "\t\t posicion de la pelota: (%d, %d)",
+                player_1.x, player_1.y, player_2.x, player_2.y, player_3.x, player_3.y, player_4.x, player_4.y,
+                player_1.angle, player_2.angle, player_3.angle, player_4.angle, ball.x, ball.y)
     # Control del sitema difuso se envia el objeto instanciado
     # _, infor_robots = tools.position_ball(players, ball)
 
-    team_red_info = team_red.evaluar_msLogicDifusse()
-    team_blue_info = team_blue.evaluar_msLogicDifusse()
-    # print("----------- TEAM RED -----------")
-    # for clave, valor in team_red_info.items():
-    #     print(f"{clave}: {valor}")
-    # print("----------- TEAM BLUE -----------")
-    # for clave, valor in team_blue_info.items():
-    #     print(f"{clave}: {valor}")
+    r_posesion, r_proximidad, r_zona = game_context_team_red.evaluar_msLogicDifusse()
+    b_posesion, b_proximidad, b_zona = game_context_team_blue.evaluar_msLogicDifusse()
+
+    # state_manager_team_red.evaluar_admEstados(r_possesion, r_proximidad, r_zona)
+    # state_manager_team_blue.evaluar_admEstados(b_possesion, b_proximidad, b_zona)
+
+    # robot_controller.execute_team_strategy(estado_robot_ataque, estado_robot_defensa)
+    # robot_controller.execute_team_strategy(estado_robot_ataque, estado_robot_defensa)
+
+    logger.debug("----------- TEAM RED -----------\n"
+                 "\t\tposesion: %.2f \t prxomidad: %.2f \t zona: %.2f", r_posesion, r_proximidad, r_zona)
+    logger.debug("----------- TEAM BLUE -----------\n"
+                 "\t\t posesion: %.2f \t prxomidad: %.2f \t zona: %.2f", b_posesion, b_proximidad, b_zona)
+
 
     actualizar_estado()
 
