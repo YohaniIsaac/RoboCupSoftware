@@ -23,7 +23,7 @@ if not LOG_DIR.exists():
     LOG_DIR.mkdir(parents=True)
 
 # Formato estándar para los mensajes de registro
-DEFAULT_FORMAT = '%(levelname)s - %(message)s'
+DEFAULT_FORMAT = '%(name)s - %(levelname)s - %(message)s'
 
 # Diccionario para almacenar la configuración de los loggers
 _loggers: Dict[str, logging.Logger] = {}

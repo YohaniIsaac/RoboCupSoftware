@@ -406,83 +406,76 @@ class FuzzyRobotTeamManager:
         """
         Define las funciones de membresía para las variables de entrada y salida del sistema de rol.
         """
-        # Posición estratégica (qué tan bien posicionado está respecto a la meta)
-        self.posicion_estrategica1['favorable'] = fuzz.trimf(self.posicion_estrategica1.universe, [0.7, 1, 1])
-        self.posicion_estrategica1['neutral'] = fuzz.trimf(self.posicion_estrategica1.universe, [0.3, 0.5, 0.7])
-        self.posicion_estrategica1['desfavorable'] = fuzz.trimf(self.posicion_estrategica1.universe, [0, 0, 0.3])
+        # Posición estratégica
+        self.posicion_estrategica1['favorable'] = fuzz.trapmf(self.posicion_estrategica1.universe,
+                                                              [0.7, 0.8, 1, 1])
+        self.posicion_estrategica1['neutral'] = fuzz.trapmf(self.posicion_estrategica1.universe,
+                                                            [0.3, 0.4, 0.6, 0.7])
+        self.posicion_estrategica1['desfavorable'] = fuzz.trapmf(self.posicion_estrategica1.universe,
+                                                                 [0, 0, 0.2, 0.3])
 
-        self.posicion_estrategica2['favorable'] = fuzz.trimf(self.posicion_estrategica2.universe, [0.7, 1, 1])
-        self.posicion_estrategica2['neutral'] = fuzz.trimf(self.posicion_estrategica2.universe, [0.3, 0.5, 0.7])
-        self.posicion_estrategica2['desfavorable'] = fuzz.trimf(self.posicion_estrategica2.universe, [0, 0, 0.3])
+        self.posicion_estrategica2['favorable'] = fuzz.trapmf(self.posicion_estrategica2.universe,
+                                                              [0.7, 0.8, 1, 1])
+        self.posicion_estrategica2['neutral'] = fuzz.trapmf(self.posicion_estrategica2.universe,
+                                                            [0.3, 0.4, 0.6, 0.7])
+        self.posicion_estrategica2['desfavorable'] = fuzz.trapmf(self.posicion_estrategica2.universe,
+                                                                 [0, 0, 0.2, 0.3])
 
-        # SALIDAS - más refinadas para considerar una zona intermedia
-        self.rol_atacante['robot1_fuerte'] = fuzz.trimf(self.rol_atacante.universe, [0, 0.1, 0.3])
-        self.rol_atacante['robot1_moderado'] = fuzz.trimf(self.rol_atacante.universe, [0.2, 0.35, 0.5])
-        self.rol_atacante['indeciso'] = fuzz.trimf(self.rol_atacante.universe, [0.4, 0.5, 0.6])
-        self.rol_atacante['robot2_moderado'] = fuzz.trimf(self.rol_atacante.universe, [0.5, 0.65, 0.8])
-        self.rol_atacante['robot2_fuerte'] = fuzz.trimf(self.rol_atacante.universe, [0.7, 0.9, 1])
+        # SALIDAS
+        self.rol_atacante['robot1'] = fuzz.trapmf(self.rol_atacante.universe, [0, 0, 0.3, 0.4])
+        self.rol_atacante['indeciso'] = fuzz.trapmf(self.rol_atacante.universe, [0.3, 0.4, 0.6, 0.7])
+        self.rol_atacante['robot2'] = fuzz.trapmf(self.rol_atacante.universe, [0.6, 0.7, 1, 1])
 
     def _definir_reglas_rol(self):
         """
-        Define las reglas más completas para determinar cuál robot tomará el rol de atacante.
+        Define las reglas simplificadas para determinar cuál robot tomará el rol de atacante.
         """
-        # Reglas basadas en distancia
-        regla_rol1 = ctrl.Rule(
-            self.distancia_aliado1['cerca'] & self.distancia_aliado2['media'] & self.orientacion_aliado1['apuntando'],
-            self.rol_atacante['robot1_fuerte']
+        # Reglas basadas en distancia simple
+        regla1 = ctrl.Rule(
+            self.distancia_aliado1['cerca'] & self.distancia_aliado2['media'] | self.distancia_aliado2['lejos'],
+            self.rol_atacante['robot1']
         )
 
-        regla_rol2 = ctrl.Rule(
-            self.distancia_aliado2['cerca'] & self.distancia_aliado1['media'] & self.orientacion_aliado2['apuntando'],
-            self.rol_atacante['robot2_fuerte']
+        regla2 = ctrl.Rule(
+            self.distancia_aliado2['cerca'] & self.distancia_aliado1['media'] | self.distancia_aliado1['lejos'],
+            self.rol_atacante['robot2']
         )
 
-        # Reglas basadas en la posición en el campo y cercanía a la pelota
-        regla_rol3 = ctrl.Rule(
-            self.distancia_aliado1['cerca'] & self.posicion_estrategica1['favorable'],
-            self.rol_atacante['robot1_fuerte']
-        )
-
-        regla_rol4 = ctrl.Rule(
-            self.distancia_aliado2['cerca'] & self.posicion_estrategica2['favorable'],
-            self.rol_atacante['robot2_fuerte']
-        )
-
-        # Reglas para situaciones de igual cercanía pero diferente orientación
-        regla_rol5 = ctrl.Rule(
+        # Reglas para casos de igual cercanía pero diferente orientación
+        regla3 = ctrl.Rule(
             self.distancia_aliado1['cerca'] & self.distancia_aliado2['cerca'] &
-            self.orientacion_aliado1['apuntando'] & self.orientacion_aliado2['medio_apuntando'],
-            self.rol_atacante['robot1_moderado']
+            self.orientacion_aliado1['apuntando'] & self.orientacion_aliado2['no_apuntando'],
+            self.rol_atacante['robot1']
         )
 
-        regla_rol6 = ctrl.Rule(
+        regla4 = ctrl.Rule(
             self.distancia_aliado1['cerca'] & self.distancia_aliado2['cerca'] &
-            self.orientacion_aliado1['medio_apuntando'] & self.orientacion_aliado2['apuntando'],
-            self.rol_atacante['robot2_moderado']
+            self.orientacion_aliado1['no_apuntando'] & self.orientacion_aliado2['apuntando'],
+            self.rol_atacante['robot2']
         )
 
-        # Regla para situaciones muy igualadas
-        regla_rol7 = ctrl.Rule(
-            self.distancia_aliado1['cerca'] & self.distancia_aliado2['cerca'] &
-            self.orientacion_aliado1['apuntando'] & self.orientacion_aliado2['apuntando'],
+        # Regla para situaciones ambiguas
+        regla5 = ctrl.Rule(
+            self.distancia_aliado1['media'] & self.distancia_aliado2['media'],
             self.rol_atacante['indeciso']
         )
 
-        # Incluir reglas considerando la posición de los rivales
-        # regla_rol8 = ctrl.Rule(
-        #     self.distancia_aliado1['cerca'] & self.distancia_rival1['cerca'] &
-        #     self.posicion_estrategica2['favorable'],
-        #     self.rol_atacante['robot2_moderado']
-        # )
-        #
-        # regla_rol9 = ctrl.Rule(
-        #     self.distancia_aliado2['cerca'] & self.distancia_rival1['cerca'] &
-        #     self.posicion_estrategica1['favorable'],
-        #     self.rol_atacante['robot1_moderado']
-        # )
+        # Reglas basadas en posición estratégica para casos de empate
+        regla6 = ctrl.Rule(
+            self.distancia_aliado1['cerca'] & self.distancia_aliado2['cerca'] &
+            self.posicion_estrategica1['favorable'] & self.posicion_estrategica2['neutral'] |
+            self.posicion_estrategica2['desfavorable'],
+            self.rol_atacante['robot1']
+        )
 
-        self.reglas_rol = [regla_rol1, regla_rol2, regla_rol3, regla_rol4,
-                           regla_rol5, regla_rol6, regla_rol7]
+        regla7 = ctrl.Rule(
+            self.distancia_aliado1['cerca'] & self.distancia_aliado2['cerca'] &
+            self.posicion_estrategica2['favorable'] & self.posicion_estrategica1['neutral'] |
+            self.posicion_estrategica1['desfavorable'],
+            self.rol_atacante['robot2']
+        )
+
+        self.reglas_rol = [regla1, regla2, regla3, regla4, regla5, regla6, regla7]
 
     def evaluar_msLogicDifusse(self):
         """
@@ -598,13 +591,11 @@ class FuzzyRobotTeamManager:
         # ==================== ROL ====================
 
         # Calcular posición estratégica
-        player1_pos = self.aliado_1.get_position()
-        player2_pos = self.aliado_2.get_position()
         ball_pos = self.ball.get_position()
         goal_pos = [ANCHO_CAMPO, ALTO_CAMPO / 2] if self.team == 'red' else [0, ALTO_CAMPO / 2]
 
-        pos_estrategica1 = calcular_posicion_estrategica(player1_pos, ball_pos, goal_pos)
-        pos_estrategica2 = calcular_posicion_estrategica(player2_pos, ball_pos, goal_pos)
+        pos_estrategica1 = calcular_posicion_estrategica(self.aliado_1.get_position(), ball_pos, goal_pos)
+        pos_estrategica2 = calcular_posicion_estrategica(self.aliado_2.get_position(), ball_pos, goal_pos)
 
         # Añadir inputs para posición estratégica
         self.sim_rol.input['posicion_estrategica1'] = pos_estrategica1
@@ -616,43 +607,47 @@ class FuzzyRobotTeamManager:
         self.sim_rol.input['orientacion_aliado1'] = orientacion_aliado1
         self.sim_rol.input['orientacion_aliado2'] = orientacion_aliado2
 
-        # self.sim_rol.input['distancia_rival1'] = distancia_rival1
-        # self.sim_rol.input['distancia_rival2'] = distancia_rival2
-        # self.sim_rol.input['orientacion_rival1'] = orientacion_rival1
-        # self.sim_rol.input['orientacion_rival2'] = orientacion_rival2
-
+        # Calcular rol con manejo de errores robusto
         try:
             self.sim_rol.compute()
-            robot_ataque = self.sim_rol.output['rol_atacante']
+            logger.debug("ROL completado")
 
-            # Interpretación más matizada del valor de salida
-            if robot_ataque <= 0.3:  # Robot 1 fuerte
-                self.aliado_1.set_rol(ROL_ATACANTE)
-                self.aliado_2.set_rol(ROL_DEFENSIVO)
-            elif 0.3 < robot_ataque <= 0.4:  # Robot 1 moderado
-                self.aliado_1.set_rol(ROL_ATACANTE)
-                self.aliado_2.set_rol(ROL_DEFENSIVO)
-            elif 0.4 < robot_ataque <= 0.6:  # Indeciso - usar criterio de distancia simple
-                if self.aliado_1.distance_to_ball(self.ball) <= self.aliado_2.distance_to_ball(self.ball):
+            # Verificar que el output existe
+            if hasattr(self.sim_rol, 'output') and 'rol_atacante' in self.sim_rol.output:
+                rol_resultado = self.sim_rol.output['rol_atacante']
+
+                # Asignar roles basado en el resultado
+                if rol_resultado < 0.4:  # Robot 1
+                    self.aliado_1.set_rol(ROL_ATACANTE)
+                    self.aliado_2.set_rol(ROL_DEFENSIVO)
+                    logger.debug("Robot 1 asignado como atacante")
+                elif rol_resultado > 0.6:  # Robot 2
+                    self.aliado_1.set_rol(ROL_DEFENSIVO)
+                    self.aliado_2.set_rol(ROL_ATACANTE)
+                    logger.debug("Robot 2 asignado como atacante")
+                else:  # Indeciso - usar criterio simple de distancia
+                    if distancia_aliado1 <= distancia_aliado2:
+                        self.aliado_1.set_rol(ROL_ATACANTE)
+                        self.aliado_2.set_rol(ROL_DEFENSIVO)
+                        logger.debug("Indeciso: Robot 1 asignado como atacante por distancia")
+                    else:
+                        self.aliado_1.set_rol(ROL_DEFENSIVO)
+                        self.aliado_2.set_rol(ROL_ATACANTE)
+                        logger.debug("Indeciso: Robot 2 asignado como atacante por distancia")
+            else:
+                logger.error("Error en sim_rol: 'rol_atacante'")
+                # Fallback basado en distancia simple
+                if distancia_aliado1 <= distancia_aliado2:
                     self.aliado_1.set_rol(ROL_ATACANTE)
                     self.aliado_2.set_rol(ROL_DEFENSIVO)
                 else:
                     self.aliado_1.set_rol(ROL_DEFENSIVO)
                     self.aliado_2.set_rol(ROL_ATACANTE)
-            elif 0.6 < robot_ataque <= 0.7:  # Robot 2 moderado
-                self.aliado_1.set_rol(ROL_DEFENSIVO)
-                self.aliado_2.set_rol(ROL_ATACANTE)
-            else:  # Robot 2 fuerte
-                self.aliado_1.set_rol(ROL_DEFENSIVO)
-                self.aliado_2.set_rol(ROL_ATACANTE)
-
-            logger.debug("Rol asignado - Robot 1: %s, Robot 2: %s",
-                         "Atacante" if self.aliado_1.rol == ROL_ATACANTE else "Defensor",
-                         "Atacante" if self.aliado_2.rol == ROL_ATACANTE else "Defensor")
+                logger.debug("Asignando roles por defecto basado en distancia")
         except Exception as e:
             logger.error("Error en sim_rol: %s", e)
-            # Valor por defecto basado en distancia simple
-            if self.aliado_1.distance_to_ball(self.ball) <= self.aliado_2.distance_to_ball(self.ball):
+            # Fallback basado en distancia simple
+            if distancia_aliado1 <= distancia_aliado2:
                 self.aliado_1.set_rol(ROL_ATACANTE)
                 self.aliado_2.set_rol(ROL_DEFENSIVO)
             else:

@@ -13,7 +13,7 @@ from config import *
 # ==========================================
 from robot_soccer.utils.logger import get_logger
 from robot_soccer.utils.logger import set_level, disable_module, enable_module
-module_name = "."
+module_name = "raiz"
 logger = get_logger(module_name)
 
 set_level(module_name, "DEBUG")  # DEBUG, INFO, WARNING, ERROR, CRITICAL
@@ -198,7 +198,7 @@ def guardar_cambios(_=None):
     # Control del sitema difuso se envia el objeto instanciado
     # _, infor_robots = tools.position_ball(players, ball)
 
-    r_posesion, r_proximidad, r_zona = game_context_team_red.evaluar_msLogicDifusse()
+    r_posesion, r_proximidad, r_zona = game_context_team_red.evaluar_msLogicDifusse()  # Determina rol de jugadores
     b_posesion, b_proximidad, b_zona = game_context_team_blue.evaluar_msLogicDifusse()
 
     # state_manager_team_red.evaluar_admEstados(r_possesion, r_proximidad, r_zona)
@@ -213,7 +213,7 @@ def guardar_cambios(_=None):
                  "\t\t posesion: %.2f \t prxomidad: %.2f \t zona: %.2f", b_posesion, b_proximidad, b_zona)
 
 
-    actualizar_estado()
+    # actualizar_estado()
 
 
 
