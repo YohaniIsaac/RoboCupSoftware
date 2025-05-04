@@ -4,7 +4,7 @@
         ".": "DEBUG",
         "ai": "WARNING",
         "ai.controllers": "WARNING",
-        "ai.fuzzy_logic": "INFO",
+        "ai.fuzzy_logic": "DEBUG",
         "ai.path_planning": "DEBUG",
         "ai.state_machine": "WARNING",
         "core": "WARNING",
@@ -12,7 +12,8 @@
         "entities": "WARNING",
         "entities.simulation": "WARNING",
         "perception": "WARNING",
-        "utils": "WARNING"
+        "utils": "WARNING",
+        "raiz": "DEBUG"
     },
     "log_to_file": false,
     "log_to_console": true,

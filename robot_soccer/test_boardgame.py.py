@@ -4,8 +4,7 @@ import numpy as np
 from robot_soccer.entities.player import Player
 from robot_soccer.entities.ball import Ball
 from robot_soccer.ai.fuzzy_logic.game_context import FuzzyRobotTeamManager
-from robot_soccer.ai.state_machine.state_manager import StateManager
-
+from robot_soccer.ai.behavior_tree.manager import BehaviorManager
 from config import *
 
 # ==========================================
@@ -34,17 +33,21 @@ posicion_pelota = [750, 450]  # Coordenadas de la pelota [x, y]
 #     3: tools.Player(3, 1200, 200, 270),
 #     4: tools.Player(4, 1200, 700, 0),
 # }
+ball = Ball(750, 450)
 player_1 = Player(1, 200, 200, 90, 'red')
 player_2 = Player(2, 200, 700, 180, 'red')
-player_3 = Player(3, 1200, 200, 270, 'blue')
+player_3 = Player(3, 1200, 200, 270,  'blue')
 player_4 = Player(4, 1200, 700, 0, 'blue')
 
-ball = Ball(750, 450)
 
-game_context_team_red = FuzzyRobotTeamManager(player_1, player_2, player_3, player_4, ball)
-game_context_team_blue = FuzzyRobotTeamManager(player_1, player_2, player_3, player_4, ball, team='blue')
-state_manager_team_red = StateManager()
-state_manager_team_blue = StateManager()
+game_context_team_red = FuzzyRobotTeamManager([player_1, player_2, player_3, player_4], ball, team='red')
+game_context_team_blue = FuzzyRobotTeamManager([player_1, player_2, player_3, player_4], ball, team='blue')
+
+# Inicializar los gestores de comportamiento
+behavior_manager_red = BehaviorManager([player_1, player_2, player_3, player_4], ball, team='red')
+behavior_manager_blue = BehaviorManager([player_1, player_2, player_3, player_4], ball, team='blue')
+
+
 
 # Figuras y ejes
 fig, ax = plt.subplots(figsize=(10, 6))
@@ -154,8 +157,7 @@ def guardar_cambios(_=None):
     """
     global selected_id
 
-    logger.debug(" ====================================================== \n"
-                 "\t\t ================== INTENTO NUEVO ================== \n")
+    logger.debug(" ================== INTENTO NUEVO ================== \n")
 
 
     try:
@@ -189,17 +191,26 @@ def guardar_cambios(_=None):
             player_4.set_angle(angle)
 
     ball.set_position(posicion_pelota[0], posicion_pelota[1])
-    logger.info("pos_player_1: (%d, %d) \t pos_player_2: (%d, %d) \t "
+    logger.info("\n pos_player_1: (%d, %d) \t pos_player_2: (%d, %d) \t "
                 "pos_player_3: (%d, %d) \t pos_player_4: (%d, %d) \n"
-                "\t\t angulo_plasyer_1: %d \t angulo_plasyer_2: %d \t angulo_plasyer_3: %d \t angulo_plasyer_4: %d \n"
-                "\t\t posicion de la pelota: (%d, %d)",
+                " angulo_plasyer_1: %d \t\t angulo_plasyer_2: %d \t\t angulo_plasyer_3: %d \t\t angulo_plasyer_4: %d \n"
+                " posicion de la pelota: (%d, %d)",
                 player_1.x, player_1.y, player_2.x, player_2.y, player_3.x, player_3.y, player_4.x, player_4.y,
                 player_1.angle, player_2.angle, player_3.angle, player_4.angle, ball.x, ball.y)
     # Control del sitema difuso se envia el objeto instanciado
     # _, infor_robots = tools.position_ball(players, ball)
+    red_context = game_context_team_red.evaluar_msLogicDifusse()
+    blue_context = game_context_team_blue.evaluar_msLogicDifusse()
 
     r_posesion, r_proximidad, r_zona = game_context_team_red.evaluar_msLogicDifusse()  # Determina rol de jugadores
     b_posesion, b_proximidad, b_zona = game_context_team_blue.evaluar_msLogicDifusse()
+
+    # 2. Actualizar contexto en los gestores de comportamiento
+    behavior_manager_red.update_game_context(red_context)
+    behavior_manager_blue.update_game_context(blue_context)
+    # 3. Ejecutar árboles de comportamiento
+    behavior_manager_red.update()
+    behavior_manager_blue.update()
 
     # state_manager_team_red.evaluar_admEstados(r_possesion, r_proximidad, r_zona)
     # state_manager_team_blue.evaluar_admEstados(b_possesion, b_proximidad, b_zona)
@@ -207,13 +218,17 @@ def guardar_cambios(_=None):
     # robot_controller.execute_team_strategy(estado_robot_ataque, estado_robot_defensa)
     # robot_controller.execute_team_strategy(estado_robot_ataque, estado_robot_defensa)
 
-    logger.debug("----------- TEAM RED -----------\n"
-                 "\t\tposesion: %.2f \t prxomidad: %.2f \t zona: %.2f", r_posesion, r_proximidad, r_zona)
-    logger.debug("----------- TEAM BLUE -----------\n"
-                 "\t\t posesion: %.2f \t prxomidad: %.2f \t zona: %.2f", b_posesion, b_proximidad, b_zona)
+    logger.debug("\t\t\t\t --------------------------------- TEAM RED --------------------------------- \n"
+                 "\t\t\t\t\t\t posesion: %.2f  prxomidad: %.2f   zona: %.2f  rol_player1: %d  rol_player2: %d",
+                 r_posesion, r_proximidad, r_zona, player_1.rol, player_2.rol,)
+    logger.debug("\t\t\t\t --------------------------------- TEAM BLUE --------------------------------- \n"
+                 "\t\t\t\t\t\t posesion: %.2f  prxomidad: %.2f   zona: %.2f  rol_player3: %d  rol_player4: %d",
+                 b_posesion, b_proximidad, b_zona, player_3.rol, player_4.rol)
 
+    logger.debug(behavior_manager_red.get_current_state(1))
+    logger.debug(behavior_manager_red.get_current_state(2))
 
-    # actualizar_estado()
+    actualizar_estado()
 
 
 

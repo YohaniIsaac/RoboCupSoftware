@@ -8,7 +8,7 @@ import time
 # LOG
 # ==========================================
 from robot_soccer.utils.logger import get_logger
-from robot_soccer.utils.logger import set_level, disable_module, enable_module
+from robot_soccer.utils.logger import set_level  # ,disable_module, enable_module
 module_name = "entities"
 
 logger = get_logger(module_name)
@@ -28,14 +28,13 @@ class Player:
     Implementa la lógica de bajo nivel para movimiento, control de pelota y navegación.
     """
 
-    def __init__(self, player_id, x, y, angle, ball, team='red'):
+    def __init__(self, player_id, x, y, angle, team='red'):
         # Mantener atributos existentes
         self.id = player_id
         self.x = int(x)
         self.y = int(y)
         self.angle = angle  # En grados 0 - 360
         self.team = team
-        self.ball = ball
 
         self.distance2ball = None
         self.anglerobot2ball = None
@@ -174,7 +173,7 @@ class Player:
         # Moverse hacia la pelota
         self.move_to_position(ball_pos, speed_factor=approach_speed)
 
-    def kick_ball(self, target_position, power=1.0):
+    def kick_ball(self, target_position, ball, power=1.0):
         """Patea la pelota hacia un objetivo"""
         if not self._has_ball:
             return False
@@ -190,14 +189,14 @@ class Player:
 
         # Aplicar velocidad a la pelota (comunicación con el sistema físico)
         # [Implementación según tu motor físico]
-        if hasattr(self.ball, 'dx') and hasattr(self.ball, 'dy'):
-            self.ball.dx = kick_direction[0] * kick_speed
-            self.ball.dy = kick_direction[1] * kick_speed
+        if hasattr(ball, 'dx') and hasattr(ball, 'dy'):
+            ball.dx = kick_direction[0] * kick_speed
+            ball.dy = kick_direction[1] * kick_speed
 
         self._has_ball = False
         return True
 
-    def move_with_ball(self, path_points, speed_factor=0.7):
+    def move_with_ball(self, path_points, ball,speed_factor=0.7):
         """Avanza con la pelota en control"""
         if not self._has_ball:
             return False
@@ -209,7 +208,7 @@ class Player:
         self._follow_path()
 
         # Actualizar posición de la pelota
-        if hasattr(self.ball, 'set_position'):
+        if hasattr(ball, 'set_position'):
             # Calcular posición adelante del jugador
             front_offset = 20
             angle_rad = math.radians(self.angle)
@@ -217,7 +216,7 @@ class Player:
             ball_y = self.y + front_offset * math.sin(angle_rad)
 
             # Actualizar pelota
-            self.ball.set_position(ball_x, ball_y)
+            ball.set_position(ball_x, ball_y)
 
         return True
 
