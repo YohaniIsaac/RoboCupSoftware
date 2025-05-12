@@ -1,7 +1,5 @@
 import math
-# import numpy as np
 from robot_soccer.utils.logger import get_logger
-# from robot_soccer.communication.rf_controller import RFController
 
 
 def _normalize_angle(angle):

@@ -1,7 +1,22 @@
 from robot_soccer.utils.logger import get_logger
 from robot_soccer.controllers.differential_drive import DifferentialDriveController
-from robot_soccer.communication.rf_controller import RFController
-import numpy as np
+from robot_soccer.controllers.robot_action_executor import RobotActionExecutor
+
+
+def _normalize_angle_deg(angle):
+    """
+    Normaliza un ángulo en grados entre -180 y 180.
+
+    Args:
+        angle: Ángulo en grados
+
+    Returns:
+        float: Ángulo normalizado
+    """
+    angle = angle % 360
+    if angle > 180:
+        angle -= 360
+    return angle
 
 
 class RobotCommandManager:
@@ -39,9 +54,11 @@ class RobotCommandManager:
 
         # Crear un controlador para cada robot
         self.controllers = {}
+        self.action_executors = {}
         for player in team_players:
-            from robot_soccer.controllers.differential_drive import DifferentialDriveController
-            self.controllers[player.id] = DifferentialDriveController(rf_controller=self.rf_controller)
+            controller = DifferentialDriveController(rf_controller=self.rf_controller)
+            self.controllers[player.id] = controller
+            self.action_executors[player.id] = RobotActionExecutor(controller, self.rf_controller)
 
         # Memoria de acciones en curso
         self.actions_in_progress = {}
@@ -94,7 +111,9 @@ class RobotCommandManager:
 
                 elif action['type'] == 'capture_ball':
                     # Movimiento para capturar la pelota
-                    is_completed = self._execute_capture_ball(player)
+                    is_completed = self.action_executors[player.id].execute_capture_ball(
+                        player, self.ball
+                    )
 
                     if is_completed:
                         del self.actions_in_progress[player.id]
@@ -102,7 +121,7 @@ class RobotCommandManager:
 
                 elif action['type'] == 'kick_ball':
                     # Patear la pelota
-                    is_completed = self._execute_kick_ball(
+                    is_completed = self.action_executors[player.id].execute_kick_ball(
                         player,
                         action['target_pos'],
                         action['ball'],
@@ -115,7 +134,7 @@ class RobotCommandManager:
 
                 elif action['type'] == 'move_with_ball':
                     # Mover con la pelota
-                    is_completed = self._execute_move_with_ball(
+                    is_completed = self.action_executors[player.id].execute_move_with_ball(
                         player,
                         action['target_pos'],
                         action['ball'],
@@ -206,166 +225,3 @@ class RobotCommandManager:
             'ball': ball
         }
         self.logger.info(f"Robot {player_id}: Ordenado moverse con pelota hacia {target_pos}")
-
-    def _execute_capture_ball(self, player):
-        """
-        Ejecuta la acción de capturar la pelota.
-
-        Args:
-            player: Objeto jugador
-
-        Returns:
-            bool: True si la captura se completó
-        """
-        # Obtener posición de la pelota
-        ball_pos = self.ball.get_position()
-
-        # Calcular distancia a la pelota
-        dist_to_ball = player.distance_to_ball(self.ball)
-
-        if dist_to_ball < 30:
-            # Estamos lo suficientemente cerca, activar mecanismo de captura
-            if self.rf_controller:
-                # Activar dribbler
-                self.rf_controller.set_dribbler(player.id, 1.0)
-
-            # Marcar como capturada en el modelo
-            player.ball_hold = True
-            return True
-
-        # Calcular ángulo hacia la pelota
-        dx = ball_pos[0] - player.x
-        dy = ball_pos[1] - player.y
-        angle_to_ball = np.degrees(np.arctan2(dy, dx))
-
-        # Primero orientar el robot hacia la pelota
-        current_angle = player.angle
-        angle_diff = self._normalize_angle_deg(angle_to_ball - current_angle)
-
-        if abs(angle_diff) > 10:
-            # Primero girar hacia la pelota
-            self.controllers[player.id].rotate_to_angle(player, angle_to_ball)
-            return False
-
-        # Moverse hacia la pelota
-        self.controllers[player.id].move_to_position(player, ball_pos)
-        return False
-
-    def _execute_kick_ball(self, player, target_pos, ball, power):
-        """
-        Ejecuta la acción de patear la pelota.
-
-        Args:
-            player: Objeto jugador
-            target_pos: Posición objetivo
-            ball: Objeto pelota
-            power: Potencia del tiro
-
-        Returns:
-            bool: True si el tiro se completó
-        """
-        if not player.ball_hold:
-            # No tenemos la pelota, fallo
-            return True
-
-        # Calcular ángulo hacia el objetivo
-        dx = target_pos[0] - player.x
-        dy = target_pos[1] - player.y
-        angle_to_target = np.degrees(np.arctan2(dy, dx))
-
-        # Primero orientar el robot hacia el objetivo
-        current_angle = player.angle
-        angle_diff = self._normalize_angle_deg(angle_to_target - current_angle)
-
-        if abs(angle_diff) > 5:
-            # Primero girar hacia el objetivo
-            self.controllers[player.id].rotate_to_angle(player, angle_to_target)
-            return False
-
-        # Calcular velocidades para la pelota
-        kick_speed = 15 * power  # Ajustar según necesidades
-        kick_angle_rad = np.radians(angle_to_target)
-
-        # Enviar comando de pateo si hay controlador RF
-        if self.rf_controller:
-            # Desactivar dribbler
-            self.rf_controller.set_dribbler(player.id, 0)
-            # Activar mecanismo de pateo
-            self.rf_controller.kick(player.id, power)
-
-        # Aplicar velocidad a la pelota en la simulación
-        if hasattr(ball, 'dx') and hasattr(ball, 'dy'):
-            ball.dx = kick_speed * np.cos(kick_angle_rad)
-            ball.dy = kick_speed * np.sin(kick_angle_rad)
-
-        # Desactivar la posesión
-        player.ball_hold = False
-
-        return True
-
-    def _execute_kick_ball(self, player, target_pos, ball, power):
-        """
-        Ejecuta la acción de patear la pelota.
-
-        Args:
-            player: Objeto jugador
-            target_pos: Posición objetivo
-            ball: Objeto pelota
-            power: Potencia del tiro
-
-        Returns:
-            bool: True si el tiro se completó
-        """
-        if not player.ball_hold:
-            # No tenemos la pelota, fallo
-            return True
-
-        # Calcular ángulo hacia el objetivo
-        dx = target_pos[0] - player.x
-        dy = target_pos[1] - player.y
-        angle_to_target = np.degrees(np.arctan2(dy, dx))
-
-        # Primero orientar el robot hacia el objetivo
-        current_angle = player.angle
-        angle_diff = self._normalize_angle_deg(angle_to_target - current_angle)
-
-        if abs(angle_diff) > 5:
-            # Primero girar hacia el objetivo
-            self.controllers[player.id].rotate_to_angle(player, angle_to_target)
-            return False
-
-        # Calcular velocidades para la pelota
-        kick_speed = 15 * power  # Ajustar según necesidades
-        kick_angle_rad = np.radians(angle_to_target)
-
-        # Enviar comando de pateo si hay controlador RF
-        if self.rf_controller:
-            # Desactivar dribbler
-            self.rf_controller.set_dribbler(player.id, 0)
-            # Activar mecanismo de pateo
-            self.rf_controller.kick(player.id, power)
-
-        # Aplicar velocidad a la pelota en la simulación
-        if hasattr(ball, 'dx') and hasattr(ball, 'dy'):
-            ball.dx = kick_speed * np.cos(kick_angle_rad)
-            ball.dy = kick_speed * np.sin(kick_angle_rad)
-
-        # Desactivar la posesión
-        player.ball_hold = False
-
-        return True
-
-    def _normalize_angle_deg(self, angle):
-        """
-        Normaliza un ángulo en grados entre -180 y 180.
-
-        Args:
-            angle: Ángulo en grados
-
-        Returns:
-            float: Ángulo normalizado
-        """
-        angle = angle % 360
-        if angle > 180:
-            angle -= 360
-        return angle

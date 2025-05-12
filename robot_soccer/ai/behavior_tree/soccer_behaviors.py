@@ -38,6 +38,17 @@ class Blackboard:
         self.action_start_time = None
         self.current_path = None
 
+        # Variables para determinar orientación del campo según equipo
+        self.own_goal_pos = None
+        self.opponent_goal_pos = None
+        self.defensive_zone_center = None
+        self.neutral_zone_center = None
+        self.offensive_zone_center = None
+
+        # Variables de posicion
+        self.defensive_positions = None
+        self.offensive_positions = None
+
         # Posiciones estratégicas
         self.update_strategic_positions()
 
