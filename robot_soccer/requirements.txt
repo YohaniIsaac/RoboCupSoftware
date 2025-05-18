@@ -1,0 +1,22 @@
+# Robot Soccer - Dependencias del proyecto
+# Simulación gráfica y juego
+pygame==2.5.2
+
+# Procesamiento de imágenes y visión computacional
+opencv-python==4.9.0.80
+
+# Visualización y gráficos interactivos
+matplotlib==3.8.3
+
+# Computación numérica
+numpy==1.26.4
+
+# Comunicación serial con Arduino
+pyserial==3.5
+
+# Dependencias adicionales para funcionalidades específicas
+# (estas pueden ser requeridas por las librerías principales)
+pillow>=10.0.0  # Para manejo de imágenes (requerido por pygame/opencv)
+
+# Lógica difusa
+scikit-fuzzy==0.5.0

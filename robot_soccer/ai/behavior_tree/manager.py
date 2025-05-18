@@ -6,7 +6,7 @@ con el sistema de lógica difusa para proporcionar un control completo de los ro
 """
 
 import logging
-from .base import NodeStatus
+# from .base import NodeStatus
 from .soccer_behaviors import (Blackboard, create_attacker_tree, create_defender_tree)
 from robot_soccer.config import *
 

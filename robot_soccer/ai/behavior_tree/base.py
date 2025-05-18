@@ -17,6 +17,48 @@ class NodeStatus(Enum):
     INVALID = 3  # Estado no válido
 
 
+# Clase para rastrear la ejecución del árbol
+class BehaviorTreeTracer:
+    """
+    Rastreador de ejecución de árboles de comportamiento.
+    Captura los nodos visitados y sus resultados.
+    """
+
+    def __init__(self):
+        self.trace = []
+        self.next_action = None
+        self.conditions_met = []
+
+    def clear(self):
+        self.trace = []
+        self.next_action = None
+        self.conditions_met = []
+
+    def add_node_result(self, node_name, node_type, status):
+        """Registra el resultado de un nodo"""
+        self.trace.append({
+            'name': node_name,
+            'type': node_type,
+            'status': status
+        })
+
+    def set_next_action(self, action_name, priority=None):
+        """Establece la próxima acción a ejecutar"""
+        self.next_action = {
+            'name': action_name,
+            'priority': priority
+        }
+
+    def add_condition_met(self, condition_name, result):
+        """Registra una condición evaluada"""
+        self.conditions_met.append({
+            'name': condition_name,
+            'result': result
+        })
+
+global_tracer = BehaviorTreeTracer()
+
+
 class BehaviorNode:
     """Clase base para todos los nodos del árbol de comportamiento."""
 
@@ -39,6 +81,11 @@ class BehaviorNode:
         self.logger.debug(f"Ticking node {self.name}")
         self.status = self._process(blackboard)
         self.logger.debug(f"Node {self.name} returned {self.status}")
+
+        # Registrar en el tracer
+        node_type = self.__class__.__name__
+        global_tracer.add_node_result(self.name, node_type, self.status)
+
         return self.status
 
     def _process(self, blackboard):
@@ -284,6 +331,10 @@ class ConditionNode(BehaviorNode):
         self.condition_func = condition_func
 
     def _process(self, blackboard):
+        # Evaluar la condición y registrarla
+        result = self.condition_func(blackboard)
+        global_tracer.add_condition_met(self.name, result)
+
         if self.condition_func(blackboard):
             return NodeStatus.SUCCESS
         return NodeStatus.FAILURE
@@ -304,4 +355,16 @@ class ActionNode(BehaviorNode):
         self.action_func = action_func
 
     def _process(self, blackboard):
-        return self.action_func(blackboard)
+        # Ejecutar la acción
+        status = self.action_func(blackboard)
+
+        # Si la acción está en ejecución o tuvo éxito, registrarla como próxima acción (NUEVO)
+        if status != NodeStatus.FAILURE:
+            global_tracer.set_next_action(self.name)
+
+        return status
+
+
+def get_global_tracer():
+    """Retorna el tracer global para usarlo en herramientas de depuración"""
+    return global_tracer

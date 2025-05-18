@@ -2,6 +2,7 @@
 Protocolo específico para comunicarse con los robots
 """
 
+
 class RobotCommandProtocol:
     """
     Define el protocolo de comandos para comunicarse con los robots.
@@ -83,3 +84,4 @@ class RobotCommandProtocol:
         # Ejemplo: S,1\n
 
         return f"S,{robot_id}"
+    

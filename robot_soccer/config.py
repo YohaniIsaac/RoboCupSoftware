@@ -5,6 +5,9 @@ from pathlib import Path
 Archivo de configuración centralizado para el proyecto de fútbol de robots
 Contiene constantes y variables compartidas entre diferentes módulos
 """
+
+BALL_CAPTURE_DISTANCE = 25
+
 # ==========================================
 # Configuraciones de rutas
 # ==========================================

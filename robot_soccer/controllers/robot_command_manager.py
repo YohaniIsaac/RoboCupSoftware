@@ -1,3 +1,4 @@
+import time
 from robot_soccer.utils.logger import get_logger
 from robot_soccer.controllers.differential_drive import DifferentialDriveController
 from robot_soccer.controllers.robot_action_executor import RobotActionExecutor
@@ -180,15 +181,28 @@ class RobotCommandManager:
 
     def capture_ball(self, player_id):
         """
-        Ordena a un robot capturar la pelota.
+        Ordena a un robot capturar la pelota ACTIVANDO EL MOTOR físicamente.
 
         Args:
             player_id: ID del jugador
         """
+        # ACTIVAR MOTOR DE CAPTURA EN ROBOTS REALES
+        if self.rf_controller:
+            # Activar dribbler con potencia alta para capturar
+            success = self.rf_controller.set_dribbler(player_id, 1.0)
+            if success:
+                self.logger.info(f"Robot {player_id}: Motor de captura ACTIVADO vía RF")
+            else:
+                self.logger.error(f"Robot {player_id}: Error al activar motor de captura")
+
+        # Registrar acción en progreso
         self.actions_in_progress[player_id] = {
-            'type': 'capture_ball'
+            'type': 'capture_ball',
+            'motor_activated': True,
+            'start_time': time.time()
         }
-        self.logger.info(f"Robot {player_id}: Ordenado capturar pelota")
+
+        self.logger.info(f"Robot {player_id}: Ordenado capturar pelota con motor")
 
     def kick_ball(self, player_id, target_pos, ball, power=1.0):
         """

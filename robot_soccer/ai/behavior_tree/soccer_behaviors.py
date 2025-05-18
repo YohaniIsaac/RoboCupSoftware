@@ -4,14 +4,15 @@ Comportamientos específicos de fútbol para el sistema de árboles de comportam
 Este módulo implementa nodos específicos y árboles predefinidos para las
 estrategias y tácticas de los robots en el juego de fútbol.
 """
-
-import numpy as np
 from .base import (
-    BehaviorNode, NodeStatus, SequenceNode, SelectorNode,
-    ParallelNode, ConditionNode, ActionNode, InverterNode
+    NodeStatus, SequenceNode, SelectorNode,
+    ConditionNode, ActionNode, InverterNode
 )
-from robot_soccer.config import *
-from robot_soccer.controllers.robot_command_manager import RobotCommandManager
+# BehaviorNode, ParallelNode
+# from robot_soccer.config import *
+from .utils import *
+# from robot_soccer.controllers.robot_command_manager import RobotCommandManager
+from robot_soccer.ai.behavior_tree.utils import calculate_ball_approach_position
 
 
 class Blackboard:
@@ -249,47 +250,118 @@ def is_pass_possible(blackboard):
 # ACCIONES ESPECÍFICAS PARA FÚTBOL
 
 def move_to_ball(blackboard):
-    """Mover el jugador hacia la pelota."""
-    # Obtener posición de la pelota
-    ball_pos = blackboard.ball.get_position()
-
+    """
+    Mover el jugador hacia una posición estratégica INDIVIDUALIZADA cerca de la pelota.
+    Cada robot calcula su punto óptimo considerando el arco enemigo y su posición actual.
+    """
     # Verificar que existe el gestor de comandos
     if not hasattr(blackboard, 'command_manager'):
         blackboard.logger.warning("No command manager found in blackboard. Action may not work properly.")
         return NodeStatus.FAILURE
 
-    # Ordenar movimiento al gestor de comandos
-    blackboard.command_manager.move_robot_to(blackboard.player.id, ball_pos)
+    # Obtener posiciones
+    player_pos = blackboard.player.get_position()
+    ball_pos = blackboard.ball.get_position()
 
-    # Verificar si hemos llegado lo suficientemente cerca
-    distance = blackboard.player.distance_to_ball(blackboard.ball)
-    if distance < 50:
-        return NodeStatus.SUCCESS
+    # CLAVE: Obtener arco enemigo según el equipo del robot
+    opponent_goal_pos = blackboard.opponent_goal_pos
+
+    # CÁLCULO INDIVIDUALIZADO: Cada robot calcula SU punto óptimo
+    approach_distance = 45
+    target_pos = calculate_ball_approach_position(
+        player_pos,  # Posición ACTUAL del robot
+        ball_pos,
+        opponent_goal_pos,  # Arco enemigo para alineación
+        approach_distance,
+        blackboard.team  # Equipo del robot
+    )
+
+    # Registrar movimiento planificado para debugging
+    if hasattr(blackboard, 'tracer') and hasattr(blackboard.tracer, 'set_planned_movement'):
+        blackboard.tracer.set_planned_movement(
+            blackboard.player.id,
+            target_pos,
+            "move_to_ball_individualized",
+            {
+                'player_pos': player_pos,
+                'opponent_goal': opponent_goal_pos,
+                'approach_distance': approach_distance,
+                'ball_position': ball_pos,
+                'team': blackboard.team
+            }
+        )
+
+    # Ordenar movimiento al gestor de comandos
+    blackboard.command_manager.move_robot_to(blackboard.player.id, target_pos)
+
+    # Verificar si hemos llegado lo suficientemente cerca del objetivo
+    distance_to_target = np.linalg.norm(np.array(player_pos) - np.array(target_pos))
+    if distance_to_target < 25:
+        # Si llegamos al punto objetivo, verificar distancia a la pelota
+        distance_to_ball = blackboard.player.distance_to_ball(blackboard.ball)
+        if distance_to_ball < 60:  # Rango para capturar la pelota
+            return NodeStatus.SUCCESS
 
     # Continuar ejecutando la acción
     return NodeStatus.RUNNING
 
 
 def capture_ball(blackboard):
-    """Capturar la pelota."""
+    """
+    Capturar la pelota ACTIVANDO EL MOTOR de captura.
+    Versión mejorada que activa físicamente el dribbler/motor.
+    """
     # Verificar que existe el gestor de comandos
     if not hasattr(blackboard, 'command_manager'):
         blackboard.logger.warning("No command manager found in blackboard. Action may not work properly.")
         return NodeStatus.FAILURE
 
-    # Ordenar captura al gestor de comandos
-    blackboard.command_manager.capture_ball(blackboard.player.id)
+    player_pos = blackboard.player.get_position()
+    ball_pos = blackboard.ball.get_position()
 
-    # Verificar si se tiene control de la pelota
+    # Verificar si ya tenemos la pelota
     if blackboard.player.has_ball():
         return NodeStatus.SUCCESS
 
-    # Continuar ejecutando la acción
+    # Calcular distancia a la pelota
+    distance_to_ball = blackboard.player.distance_to_ball(blackboard.ball)
+
+    if distance_to_ball < 50:  # Rango de captura
+        # PASO 1: Orientarse hacia la pelota
+        angle_to_ball = np.degrees(np.arctan2(
+            ball_pos[1] - player_pos[1],
+            ball_pos[0] - player_pos[0]
+        ))
+
+        current_angle = blackboard.player.angle
+        angle_diff = abs((angle_to_ball - current_angle + 180) % 360 - 180)
+
+        if angle_diff > 10:  # Necesita orientarse mejor
+            blackboard.command_manager.rotate_robot_to(blackboard.player.id, angle_to_ball)
+            return NodeStatus.RUNNING
+
+        # PASO 2: ACTIVAR MOTOR DE CAPTURA
+        # Activar dribbler/motor para "agarrar" la pelota
+        blackboard.command_manager.capture_ball(blackboard.player.id)
+
+        # PASO 3: Verificar captura exitosa
+        if distance_to_ball < 35:
+            # Marcar como capturada en el modelo
+            blackboard.player._has_ball = True
+
+            # Registrar acción exitosa
+            blackboard.last_action = "ball_captured_with_motor"
+
+            return NodeStatus.SUCCESS
+
+    # Aún no estamos en rango, continuar acercándose
     return NodeStatus.RUNNING
 
 
 def dribble_forward(blackboard):
-    """Avanzar con la pelota hacia la portería rival."""
+    """
+    Avanzar con la pelota hacia la portería rival usando waypoints estratégicos.
+    """
     if not blackboard.player.has_ball():
         return NodeStatus.FAILURE
 
@@ -298,38 +370,56 @@ def dribble_forward(blackboard):
         blackboard.logger.warning("No command manager found in blackboard. Action may not work properly.")
         return NodeStatus.FAILURE
 
-    # Calcular punto objetivo (hacia la portería rival)
     player_pos = blackboard.player.get_position()
+    ball_pos = blackboard.ball.get_position()
     goal_pos = blackboard.opponent_goal_pos
 
-    # Vector hacia la portería
-    to_goal = np.array(goal_pos) - np.array(player_pos)
-    distance_to_goal = np.linalg.norm(to_goal)
-
-    # Normalizar y escalar (no ir directamente a la portería, sino avanzar en esa dirección)
-    if distance_to_goal > 0:
-        to_goal = to_goal / distance_to_goal * min(distance_to_goal, 200)
-
-    # Punto objetivo
-    target_pos = tuple(player_pos + to_goal)
-
-    # Ordenar movimiento con la pelota
-    blackboard.command_manager.move_with_ball(
-        blackboard.player.id,
-        target_pos,
-        blackboard.ball
+    # Calcular waypoints para el dribbling
+    waypoints = calculate_dribbling_path_positions(
+        ball_pos,
+        goal_pos,
+        num_waypoints=2,
+        spacing=120
     )
 
-    # Si estamos cerca de la portería, consideramos exitoso el dribbling
-    if distance_to_goal < 200:
-        return NodeStatus.SUCCESS
+    if waypoints:
+        # Usar el primer waypoint como objetivo inmediato
+        target_pos = waypoints[0]
 
-    # Continuar ejecutando la acción
-    return NodeStatus.RUNNING
+        # Registrar para debugging
+        if hasattr(blackboard, 'tracer') and hasattr(blackboard.tracer, 'set_planned_movement'):
+            blackboard.tracer.set_planned_movement(
+                blackboard.player.id,
+                target_pos,
+                "dribble_forward",
+                {
+                    'waypoints': waypoints,
+                    'goal_direction': goal_pos
+                }
+            )
+
+        # Moverse con la pelota
+        blackboard.command_manager.move_with_ball(
+            blackboard.player.id,
+            target_pos,
+            blackboard.ball,
+            speed_factor=0.7
+        )
+
+        # Verificar progreso
+        distance_to_goal = np.linalg.norm(np.array(player_pos) - np.array(goal_pos))
+        if distance_to_goal < 200:
+            return NodeStatus.SUCCESS
+
+        return NodeStatus.RUNNING
+
+    return NodeStatus.FAILURE
 
 
 def shoot_to_goal(blackboard):
-    """Disparar a portería."""
+    """
+    Disparar a portería desde una posición estratégica óptima.
+    """
     if not blackboard.player.has_ball():
         return NodeStatus.FAILURE
 
@@ -338,15 +428,52 @@ def shoot_to_goal(blackboard):
         blackboard.logger.warning("No command manager found in blackboard. Action may not work properly.")
         return NodeStatus.FAILURE
 
-    # Calcular el mejor punto para disparar (no siempre al centro)
+    player_pos = blackboard.player.get_position()
+    ball_pos = blackboard.ball.get_position()
     goal_pos = blackboard.opponent_goal_pos
-    goal_width = 200  # Ancho de la portería
 
-    # Añadir algo de variación para no disparar siempre al centro
-    offset = goal_width * 0.4 * (1 if np.random.random() > 0.5 else -1)
+    # Calcular posición óptima para disparar
+    shooting_pos = calculate_shooting_position(
+        player_pos,
+        ball_pos,
+        goal_pos,
+        approach_distance=50
+    )
+
+    # Verificar si estamos en buena posición para disparar
+    distance_to_shooting_pos = np.linalg.norm(np.array(player_pos) - np.array(shooting_pos))
+
+    if distance_to_shooting_pos > 25:
+        # Moverse a mejor posición de disparo
+        blackboard.command_manager.move_with_ball(
+            blackboard.player.id,
+            shooting_pos,
+            blackboard.ball,
+            speed_factor=0.8
+        )
+        return NodeStatus.RUNNING
+
+    # Calcular mejor punto de la portería para disparar
+    goal_width = 200
+    # Añadir variación para no disparar siempre al centro
+    offset = goal_width * 0.3 * (1 if np.random.random() > 0.5 else -1)
     target = [goal_pos[0], goal_pos[1] + offset]
 
-    # Ordenar pateo
+    # Verificar orientación hacia la portería
+    angle_to_goal = np.degrees(np.arctan2(
+        target[1] - player_pos[1],
+        target[0] - player_pos[0]
+    ))
+
+    current_angle = blackboard.player.angle
+    angle_diff = abs((angle_to_goal - current_angle + 180) % 360 - 180)
+
+    if angle_diff > 10:
+        # Orientarse mejor antes de disparar
+        blackboard.command_manager.rotate_robot_to(blackboard.player.id, angle_to_goal)
+        return NodeStatus.RUNNING
+
+    # Disparar
     blackboard.command_manager.kick_ball(
         blackboard.player.id,
         target,
@@ -357,12 +484,13 @@ def shoot_to_goal(blackboard):
     # Registrar la acción
     blackboard.last_action = "shoot_to_goal"
 
-    # Esta acción se completa inmediatamente
     return NodeStatus.SUCCESS
 
 
 def pass_to_teammate(blackboard):
-    """Realizar un pase a un compañero."""
+    """
+    Realizar un pase a un compañero desde una posición estratégica.
+    """
     if not blackboard.player.has_ball() or not hasattr(blackboard, 'pass_target'):
         return NodeStatus.FAILURE
 
@@ -371,18 +499,54 @@ def pass_to_teammate(blackboard):
         blackboard.logger.warning("No command manager found in blackboard. Action may not work properly.")
         return NodeStatus.FAILURE
 
-    # Obtener posición del compañero
+    player_pos = blackboard.player.get_position()
+    ball_pos = blackboard.ball.get_position()
     teammate_pos = blackboard.pass_target.get_position()
 
-    # Ajustar punto de pase (liderar al compañero)
+    # Calcular posición óptima para el pase
+    pass_pos = calculate_pass_position(
+        player_pos,
+        ball_pos,
+        teammate_pos,
+        approach_distance=40
+    )
+
+    # Verificar si estamos en buena posición para pasar
+    distance_to_pass_pos = np.linalg.norm(np.array(player_pos) - np.array(pass_pos))
+
+    if distance_to_pass_pos > 25:
+        # Moverse a mejor posición de pase
+        blackboard.command_manager.move_with_ball(
+            blackboard.player.id,
+            pass_pos,
+            blackboard.ball,
+            speed_factor=0.6
+        )
+        return NodeStatus.RUNNING
+
+    # Calcular punto de pase (liderar al compañero)
     teammate_angle = np.radians(blackboard.pass_target.angle)
-    lead_distance = 100  # Distancia de adelanto
+    lead_distance = 80
     lead_pos = [
         teammate_pos[0] + lead_distance * np.cos(teammate_angle),
         teammate_pos[1] + lead_distance * np.sin(teammate_angle)
     ]
 
-    # Ordenar pateo
+    # Verificar orientación hacia el pase
+    angle_to_pass = np.degrees(np.arctan2(
+        lead_pos[1] - player_pos[1],
+        lead_pos[0] - player_pos[0]
+    ))
+
+    current_angle = blackboard.player.angle
+    angle_diff = abs((angle_to_pass - current_angle + 180) % 360 - 180)
+
+    if angle_diff > 15:
+        # Orientarse mejor antes de pasar
+        blackboard.command_manager.rotate_robot_to(blackboard.player.id, angle_to_pass)
+        return NodeStatus.RUNNING
+
+    # Realizar el pase
     blackboard.command_manager.kick_ball(
         blackboard.player.id,
         lead_pos,
@@ -393,45 +557,71 @@ def pass_to_teammate(blackboard):
     # Registrar la acción
     blackboard.last_action = "pass_to_teammate"
 
-    # Esta acción se completa inmediatamente
     return NodeStatus.SUCCESS
 
 
 def intercept_ball(blackboard):
-    """Interceptar la trayectoria de la pelota."""
+    """
+    Interceptar la trayectoria de la pelota usando predicción mejorada.
+    """
     # Verificar que existe el gestor de comandos
     if not hasattr(blackboard, 'command_manager'):
         blackboard.logger.warning("No command manager found in blackboard. Action may not work properly.")
         return NodeStatus.FAILURE
 
-    # Determinar tiempo de predicción según velocidad de la pelota
-    prediction_time = 1.0  # segundos
-    if hasattr(blackboard.ball, 'dx') and hasattr(blackboard.ball, 'dy'):
-        ball_speed = np.linalg.norm([blackboard.ball.dx, blackboard.ball.dy])
-        prediction_time = max(0.3, min(1.5, 0.3 + ball_speed * 0.05))
-
-    # Calcular posición futura de la pelota
+    player_pos = blackboard.player.get_position()
     ball_pos = blackboard.ball.get_position()
-    future_pos = ball_pos
+
+    # Obtener velocidad de la pelota si está disponible
+    ball_velocity = [0, 0]
     if hasattr(blackboard.ball, 'dx') and hasattr(blackboard.ball, 'dy'):
-        future_pos = (
-            ball_pos[0] + blackboard.ball.dx * prediction_time,
-            ball_pos[1] + blackboard.ball.dy * prediction_time
+        ball_velocity = [blackboard.ball.dx, blackboard.ball.dy]
+        ball_speed = np.linalg.norm(ball_velocity)
+
+        # Ajustar tiempo de predicción basado en la velocidad
+        if ball_speed > 5:
+            prediction_time = 1.5  # Más tiempo para pelotas rápidas
+        elif ball_speed > 2:
+            prediction_time = 1.0
+        else:
+            prediction_time = 0.5  # Menos tiempo para pelotas lentas
+    else:
+        prediction_time = 0.8
+
+    # Calcular posición de intercepción
+    target_pos = calculate_interception_position(
+        player_pos,
+        ball_pos,
+        ball_velocity,
+        prediction_time,
+        approach_distance=40
+    )
+
+    # Registrar para debugging
+    if hasattr(blackboard, 'tracer') and hasattr(blackboard.tracer, 'set_planned_movement'):
+        blackboard.tracer.set_planned_movement(
+            blackboard.player.id,
+            target_pos,
+            "intercept_ball",
+            {
+                'ball_velocity': ball_velocity,
+                'prediction_time': prediction_time,
+                'predicted_ball_pos': tuple(np.array(ball_pos) + np.array(ball_velocity) * prediction_time)
+            }
         )
 
-    # Ordenar movimiento al punto de intercepción
+    # Ordenar movimiento con velocidad alta
     blackboard.command_manager.move_robot_to(
         blackboard.player.id,
-        future_pos,
+        target_pos,
         speed_factor=1.5
     )
 
     # Verificar si estamos cerca de la pelota
     distance = blackboard.player.distance_to_ball(blackboard.ball)
-    if distance < 30:
+    if distance < 50:
         return NodeStatus.SUCCESS
 
-    # Continuar ejecutando la acción
     return NodeStatus.RUNNING
 
 
