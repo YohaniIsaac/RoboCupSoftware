@@ -1,0 +1,47 @@
+[MASTER]
+# Agregar el directorio actual al path de Python
+init-hook=import sys; sys.path.append(".")
+
+# Buscar módulos en estos directorios
+source-roots=.
+
+# Extensiones para cargar, separadas por comas
+extension-pkg-whitelist=cv2
+
+[TYPECHECK]
+# Lista de módulos para los cuales no se realizará verificación de miembros
+ignored-modules=cv2
+
+# Lista de clases para las cuales no se realizará verificación de miembros
+ignored-classes=cv2
+
+# Lista de nombres que no deben activar advertencias de no-member
+generated-members=cv2.*
+
+[MESSAGES CONTROL]
+# Desabilitar advertencias específicas
+disable=missing-module-docstring,
+        wildcard-import,
+        unused-wildcard-import,
+        redefined-outer-name,
+        too-few-public-methods,
+        too-many-positional-arguments,
+        too-many-instance-attributes,
+        too-many-arguments,
+        too-many-locals,
+        protected-access,
+        broad-exception-caught,
+        too-many-statements,
+        missing-class-docstring,
+        missing-function-docstring,
+        too-many-return-statements,
+        too-many-public-methods
+
+[FORMAT]
+# Consistente con black formatter
+max-line-length=120
+max-module-lines=1500
+
+[BASIC]
+# Permitir nombres de constantes en minúsculas para casos específicos
+const-rgx=^([A-Z_][A-Z0-9_]*|__.*__|module_name|logger)$

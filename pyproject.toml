@@ -3,12 +3,42 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "robocup-software"
+name = "robot_soccer"
 version = "0.1.0"
-dependencies = [
-    # desde robot_soccer/requirements.txt
-]
+requires-python = ">=3.10"
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
+
+[tool.setuptools]
+package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
-where = ["."]
+where = ["src"]
 include = ["robot_soccer*"]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "pytest-cov",
+  "pylint",
+  "black",
+  "isort",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["test"]
+
+norecursedirs = [
+    "other",   # ej. carpeta que no quieres
+]
+# ==========================================
+# PYDOCSTYLE CONFIGURATION
+# ==========================================
+[tool.pydocstyle]
+inherit = false
+convention = "google"
+add-ignore = [
+    "D100",  # missing docstring in public module
+    "D104",  # missing docstring in public package
+]
