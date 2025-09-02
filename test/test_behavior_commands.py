@@ -1,43 +1,49 @@
+import time
+import logging
+import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.patches import Circle, Rectangle, FancyArrowPatch
 from matplotlib.widgets import TextBox, Button, RadioButtons
-import numpy as np
-import time
-import logging
 from robot_soccer.entities.player import Player
 from robot_soccer.entities.ball import Ball
 from robot_soccer.ai.fuzzy_logic.game_context import FuzzyRobotTeamManager
 from robot_soccer.ai.behavior_tree.manager import BehaviorManager
 from robot_soccer.ai.behavior_tree.base import NodeStatus, get_global_tracer
-from robot_soccer.config import *
+from robot_soccer.config import ROL_ATACANTE, ROL_DEFENSIVO, ANCHO_CAMPO, ALTO_CAMPO, LARGO_ARCO
 
-# Configurar logging
+# Configuración global del logging
 logging.basicConfig(
-    level=logging.WARNING,
-    format='%(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler()
-    ]
+    level=logging.INFO,
+    format="%(levelname)-6s - %(filename)-25s - %(message)s"
 )
 
-behavior_logger = logging.getLogger("ai.behavior_tree")
-behavior_logger.setLevel(logging.INFO)
-fuzzy_logic = logging.getLogger("ai.fuzzy_logic")
-fuzzy_logic.setLevel(logging.WARNING)
+# Control de niveles por módulo
+logging.getLogger("robot_soccer.core").setLevel(logging.INFO)
+logging.getLogger("robot_soccer.core.process").setLevel(logging.INFO)
+logging.getLogger("robot_soccer.core.physics").setLevel(logging.WARNING)
 
-# Silenciar loggers ruidosos
-for logger_name in [
-    "matplotlib",
-    "core.process",
-    "entities.simulation",
-    "controllers",
-    "perception"
-]:
-    logging.getLogger(logger_name).setLevel(logging.WARNING)
+logging.getLogger("robot_soccer.perception").setLevel(logging.INFO)
 
-logger = logging.getLogger("behavior_debugger")
+logging.getLogger("robot_soccer.entities").setLevel(logging.ERROR)
 
+logging.getLogger("robot_soccer.ai.behavior_tree").setLevel(logging.INFO)
+logging.getLogger("robot_soccer.ai.fuzzy_logic").setLevel(logging.DEBUG)
+logging.getLogger("robot_soccer.ai.path_planning").setLevel(logging.WARNING)
+logging.getLogger("robot_soccer.ai.role_assignment").setLevel(logging.DEBUG)
 
+logging.getLogger("robot_soccer.controllers.robot_command_manager").setLevel(
+    logging.DEBUG
+)
+
+logging.getLogger("robot_soccer.utils").setLevel(logging.INFO)
+
+# Librerías externas
+logging.getLogger("pygame").setLevel(logging.WARNING)
+logging.getLogger("opencv").setLevel(logging.ERROR)
+logging.getLogger("numpy").setLevel(logging.ERROR)
+
+log = logging.getLogger(__name__)
+log.setLevel(logging.DEBUG)
 # Extender el tracer global existente con funcionalidades adicionales
 class TracerExtension:
     """
@@ -54,20 +60,19 @@ class TracerExtension:
         self.action_details = {}
         self.robot_actions = {}
 
-    def set_planned_movement(self, robot_id, target_pos, action_type="move", additional_info=None):
+    def set_planned_movement(
+        self, robot_id, target_pos, action_type="move", additional_info=None
+    ):
         """Registra un movimiento planificado para un robot"""
         self.planned_movements[robot_id] = {
-            'target_pos': target_pos,
-            'action_type': action_type,
-            'additional_info': additional_info or {}
+            "target_pos": target_pos,
+            "action_type": action_type,
+            "additional_info": additional_info or {},
         }
 
     def set_action_details(self, robot_id, action_name, details):
         """Registra detalles adicionales de una acción"""
-        self.action_details[robot_id] = {
-            'action': action_name,
-            'details': details
-        }
+        self.action_details[robot_id] = {"action": action_name, "details": details}
 
     def set_robot_action(self, robot_id, action_name):
         """Registra la acción actual de un robot específico"""
@@ -159,7 +164,7 @@ class ImprovedBehaviorDebugger:
     def setup_entities(self):
         """Inicializa jugadores y pelota"""
         self.positions = {
-            'ball': [750, 450],
+            "ball": [750, 450],
             1: [200, 200, 0],
             2: [200, 700, 0],
             3: [1200, 200, 0],
@@ -167,17 +172,25 @@ class ImprovedBehaviorDebugger:
         }
 
         # Crear objetos
-        self.ball = Ball(self.positions['ball'][0], self.positions['ball'][1])
-        self.player_1 = Player(1, self.positions[1][0], self.positions[1][1], self.positions[1][2], 'red')
-        self.player_2 = Player(2, self.positions[2][0], self.positions[2][1], self.positions[2][2], 'red')
-        self.player_3 = Player(3, self.positions[3][0], self.positions[3][1], self.positions[3][2], 'blue')
-        self.player_4 = Player(4, self.positions[4][0], self.positions[4][1], self.positions[4][2], 'blue')
+        self.ball = Ball(self.positions["ball"][0], self.positions["ball"][1])
+        self.player_1 = Player(
+            1, self.positions[1][0], self.positions[1][1], self.positions[1][2], "red"
+        )
+        self.player_2 = Player(
+            2, self.positions[2][0], self.positions[2][1], self.positions[2][2], "red"
+        )
+        self.player_3 = Player(
+            3, self.positions[3][0], self.positions[3][1], self.positions[3][2], "blue"
+        )
+        self.player_4 = Player(
+            4, self.positions[4][0], self.positions[4][1], self.positions[4][2], "blue"
+        )
 
         self.players = {
             1: self.player_1,
             2: self.player_2,
             3: self.player_3,
-            4: self.player_4
+            4: self.player_4,
         }
 
         # Asignar roles iniciales
@@ -191,27 +204,25 @@ class ImprovedBehaviorDebugger:
         all_players = [self.player_1, self.player_2, self.player_3, self.player_4]
 
         # Crear gestores de contexto
-        self.context_red = FuzzyRobotTeamManager(all_players, self.ball, team='red')
-        self.context_blue = FuzzyRobotTeamManager(all_players, self.ball, team='blue')
+        self.context_red = FuzzyRobotTeamManager(all_players, self.ball, team="red")
+        self.context_blue = FuzzyRobotTeamManager(all_players, self.ball, team="blue")
 
         # Crear gestores de comportamiento
-        self.behavior_red = BehaviorManager(all_players, self.ball, team='red', use_real_robots=False)
-        self.behavior_blue = BehaviorManager(all_players, self.ball, team='blue', use_real_robots=False)
+        self.behavior_red = BehaviorManager(
+            all_players, self.ball, team="red", use_real_robots=False
+        )
+        self.behavior_blue = BehaviorManager(
+            all_players, self.ball, team="blue", use_real_robots=False
+        )
 
-        self.team_managers = {
-            'red': self.behavior_red,
-            'blue': self.behavior_blue
-        }
+        self.team_managers = {"red": self.behavior_red, "blue": self.behavior_blue}
 
-        self.context_managers = {
-            'red': self.context_red,
-            'blue': self.context_blue
-        }
+        self.context_managers = {"red": self.context_red, "blue": self.context_blue}
 
         # Obtener estados iniciales
         self.current_states = {}
         for player_id in range(1, 5):
-            team = 'red' if player_id <= 2 else 'blue'
+            team = "red" if player_id <= 2 else "blue"
             manager = self.team_managers[team]
             self.current_states[player_id] = manager.get_current_state(player_id)
 
@@ -219,10 +230,14 @@ class ImprovedBehaviorDebugger:
         """Configura la interfaz gráfica mejorada"""
         # Crear figura principal con mejor distribución
         self.fig = plt.figure(figsize=(16, 8))
-        self.gs = self.fig.add_gridspec(4, 3,
-                                        width_ratios=[2, 1, 1],
-                                        height_ratios=[2, 1, 1, 0.8],
-                                        hspace=0.3, wspace=0.3)
+        self.gs = self.fig.add_gridspec(
+            4,
+            3,
+            width_ratios=[2, 1, 1],
+            height_ratios=[2, 1, 1, 0.8],
+            hspace=0.3,
+            wspace=0.3,
+        )
 
         # Panel del campo (más grande)
         self.field_ax = self.fig.add_subplot(self.gs[0:3, 0:2])
@@ -231,22 +246,22 @@ class ImprovedBehaviorDebugger:
         # Panel de acciones planificadas (nuevo)
         self.actions_ax = self.fig.add_subplot(self.gs[0, 2])
         self.actions_ax.set_title("Secuencia de Acciones Planificadas")
-        self.actions_ax.axis('off')
+        self.actions_ax.axis("off")
 
         # Panel de comportamiento actual
         self.behavior_ax = self.fig.add_subplot(self.gs[3, 0:2])
         self.behavior_ax.set_title("Estado Actual")
-        self.behavior_ax.axis('off')
+        self.behavior_ax.axis("off")
 
         # Panel de edición de posiciones
         self.edit_ax = self.fig.add_subplot(self.gs[1, 2])
         self.edit_ax.set_title("Edición Manual")
-        self.edit_ax.axis('off')
+        self.edit_ax.axis("off")
 
         # Panel de detalles del árbol
         self.details_ax = self.fig.add_subplot(self.gs[3, 2])
         self.details_ax.set_title("Detalles del Árbol de Comportamiento")
-        self.details_ax.axis('off')
+        self.details_ax.axis("off")
 
         # Añadir controles
         self.add_controls()
@@ -255,9 +270,15 @@ class ImprovedBehaviorDebugger:
         self.add_position_editors()
 
         # Conectar eventos
-        self.fig.canvas.mpl_connect('button_press_event', lambda event: self.on_mouse_press(event))
-        self.fig.canvas.mpl_connect('button_release_event', lambda event: self.on_mouse_release(event))
-        self.fig.canvas.mpl_connect('motion_notify_event', lambda event: self.on_mouse_motion(event))
+        self.fig.canvas.mpl_connect(
+            "button_press_event", lambda event: self.on_mouse_press(event)
+        )
+        self.fig.canvas.mpl_connect(
+            "button_release_event", lambda event: self.on_mouse_release(event)
+        )
+        self.fig.canvas.mpl_connect(
+            "motion_notify_event", lambda event: self.on_mouse_motion(event)
+        )
 
         # Actualizar visualizaciones
         self.update_all_views()
@@ -266,32 +287,74 @@ class ImprovedBehaviorDebugger:
         """Configura la vista del campo de juego"""
         self.field_ax.set_xlim(-50, ANCHO_CAMPO + 50)
         self.field_ax.set_ylim(-50, ALTO_CAMPO + 50)
-        self.field_ax.set_title("Campo de Juego - Click para seleccionar, arrastra para mover")
-        self.field_ax.set_aspect('equal')
+        self.field_ax.set_title(
+            "Campo de Juego - Click para seleccionar, arrastra para mover"
+        )
+        self.field_ax.set_aspect("equal")
         self.field_ax.grid(True, alpha=0.3)
 
         # Dibujar campo
-        field_rect = Rectangle((0, 0), ANCHO_CAMPO, ALTO_CAMPO,
-                               fill=False, edgecolor='black', linewidth=2)
+        field_rect = Rectangle(
+            (0, 0), ANCHO_CAMPO, ALTO_CAMPO, fill=False, edgecolor="black", linewidth=2
+        )
         self.field_ax.add_patch(field_rect)
 
         # Líneas de zona
-        self.field_ax.axvline(ANCHO_CAMPO * 0.3, color='gray', linestyle='--', alpha=0.5)
-        self.field_ax.axvline(ANCHO_CAMPO * 0.7, color='gray', linestyle='--', alpha=0.5)
+        self.field_ax.axvline(
+            ANCHO_CAMPO * 0.3, color="gray", linestyle="--", alpha=0.5
+        )
+        self.field_ax.axvline(
+            ANCHO_CAMPO * 0.7, color="gray", linestyle="--", alpha=0.5
+        )
 
         # Etiquetas de zona
-        self.field_ax.text(ANCHO_CAMPO * 0.15, ALTO_CAMPO + 20, "Zona Defensiva",
-                           ha='center', fontsize=10, color='red', alpha=0.7)
-        self.field_ax.text(ANCHO_CAMPO * 0.5, ALTO_CAMPO + 20, "Zona Neutral",
-                           ha='center', fontsize=10, color='gray', alpha=0.7)
-        self.field_ax.text(ANCHO_CAMPO * 0.85, ALTO_CAMPO + 20, "Zona Ofensiva",
-                           ha='center', fontsize=10, color='blue', alpha=0.7)
+        self.field_ax.text(
+            ANCHO_CAMPO * 0.15,
+            ALTO_CAMPO + 20,
+            "Zona Defensiva",
+            ha="center",
+            fontsize=10,
+            color="red",
+            alpha=0.7,
+        )
+        self.field_ax.text(
+            ANCHO_CAMPO * 0.5,
+            ALTO_CAMPO + 20,
+            "Zona Neutral",
+            ha="center",
+            fontsize=10,
+            color="gray",
+            alpha=0.7,
+        )
+        self.field_ax.text(
+            ANCHO_CAMPO * 0.85,
+            ALTO_CAMPO + 20,
+            "Zona Ofensiva",
+            ha="center",
+            fontsize=10,
+            color="blue",
+            alpha=0.7,
+        )
 
         # Porterías
-        self.field_ax.add_patch(Rectangle((0, (ALTO_CAMPO / 2) - (LARGO_ARCO / 2)),
-                                          10, LARGO_ARCO, color='red', alpha=0.3))
-        self.field_ax.add_patch(Rectangle((ANCHO_CAMPO - 10, (ALTO_CAMPO / 2) - (LARGO_ARCO / 2)),
-                                          10, LARGO_ARCO, color='blue', alpha=0.3))
+        self.field_ax.add_patch(
+            Rectangle(
+                (0, (ALTO_CAMPO / 2) - (LARGO_ARCO / 2)),
+                10,
+                LARGO_ARCO,
+                color="red",
+                alpha=0.3,
+            )
+        )
+        self.field_ax.add_patch(
+            Rectangle(
+                (ANCHO_CAMPO - 10, (ALTO_CAMPO / 2) - (LARGO_ARCO / 2)),
+                10,
+                LARGO_ARCO,
+                color="blue",
+                alpha=0.3,
+            )
+        )
 
         # Crear elementos visuales
         self.create_field_elements()
@@ -299,11 +362,18 @@ class ImprovedBehaviorDebugger:
     def create_field_elements(self):
         """Crea los elementos visuales del campo"""
         # Pelota
-        self.ball_circle = Circle((self.ball.x, self.ball.y), 30,
-                                  color='orange', alpha=0.8, picker=True)
+        self.ball_circle = Circle(
+            (self.ball.x, self.ball.y), 30, color="orange", alpha=0.8, picker=True
+        )
         self.field_ax.add_patch(self.ball_circle)
-        self.ball_label = self.field_ax.text(self.ball.x, self.ball.y - 45, "Pelota",
-                                             ha='center', fontsize=9, color='darkorange')
+        self.ball_label = self.field_ax.text(
+            self.ball.x,
+            self.ball.y - 45,
+            "Pelota",
+            ha="center",
+            fontsize=9,
+            color="darkorange",
+        )
 
         # Jugadores
         self.player_circles = {}
@@ -312,11 +382,12 @@ class ImprovedBehaviorDebugger:
         self.player_info_texts = {}
 
         for player_id, player in self.players.items():
-            color = 'red' if player.team == 'red' else 'blue'
+            color = "red" if player.team == "red" else "blue"
 
             # Círculo del jugador
-            circle = Circle((player.x, player.y), 40, color=color,
-                            alpha=0.7, picker=True)
+            circle = Circle(
+                (player.x, player.y), 40, color=color, alpha=0.7, picker=True
+            )
             self.field_ax.add_patch(circle)
             self.player_circles[player_id] = circle
 
@@ -324,37 +395,68 @@ class ImprovedBehaviorDebugger:
             angle_rad = np.radians(player.angle)
             dx = 60 * np.cos(angle_rad)
             dy = 60 * np.sin(angle_rad)
-            arrow = FancyArrowPatch((player.x, player.y),
-                                    (player.x + dx, player.y + dy),
-                                    arrowstyle='->', color='black', linewidth=2,
-                                    mutation_scale=20)
+            arrow = FancyArrowPatch(
+                (player.x, player.y),
+                (player.x + dx, player.y + dy),
+                arrowstyle="->",
+                color="black",
+                linewidth=2,
+                mutation_scale=20,
+            )
             self.field_ax.add_patch(arrow)
             self.player_directions[player_id] = arrow
 
             # Etiqueta
-            text = self.field_ax.text(player.x, player.y, f"{player_id}",
-                                      ha='center', va='center', color='white',
-                                      fontsize=14, fontweight='bold')
+            text = self.field_ax.text(
+                player.x,
+                player.y,
+                f"{player_id}",
+                ha="center",
+                va="center",
+                color="white",
+                fontsize=14,
+                fontweight="bold",
+            )
             self.player_labels[player_id] = text
 
             # Información adicional
             rol_text = "ATK" if player.rol == ROL_ATACANTE else "DEF"
-            info = self.field_ax.text(player.x, player.y - 55, rol_text,
-                                      ha='center', fontsize=9, color=color,
-                                      fontweight='bold')
+            info = self.field_ax.text(
+                player.x,
+                player.y - 55,
+                rol_text,
+                ha="center",
+                fontsize=9,
+                color=color,
+                fontweight="bold",
+            )
             self.player_info_texts[player_id] = info
 
             # Inicializar marcadores de destino (ocultos inicialmente)
-            target_marker = Circle((0, 0), 25, color=color, alpha=0.3,
-                                   linestyle='--', fill=False, linewidth=2, visible=False)
+            target_marker = Circle(
+                (0, 0),
+                25,
+                color=color,
+                alpha=0.3,
+                linestyle="--",
+                fill=False,
+                linewidth=2,
+                visible=False,
+            )
             self.field_ax.add_patch(target_marker)
             self.target_markers[player_id] = target_marker
 
             # Inicializar flechas de movimiento (ocultas inicialmente)
-            movement_arrow = FancyArrowPatch((0, 0), (0, 0),
-                                             arrowstyle='->', color=color,
-                                             alpha=0.6, linewidth=2,
-                                             linestyle=':', visible=False)
+            movement_arrow = FancyArrowPatch(
+                (0, 0),
+                (0, 0),
+                arrowstyle="->",
+                color=color,
+                alpha=0.6,
+                linewidth=2,
+                linestyle=":",
+                visible=False,
+            )
             self.field_ax.add_patch(movement_arrow)
             self.movement_arrows[player_id] = movement_arrow
 
@@ -364,10 +466,15 @@ class ImprovedBehaviorDebugger:
     def create_highlight(self):
         """Crea el resaltado para el robot enfocado"""
         player = self.players[self.focused_robot_id]
-        self.highlight_circle = Circle((player.x, player.y), 55,
-                                       color='yellow', alpha=0.3,
-                                       fill=False, linewidth=3,
-                                       linestyle='--')
+        self.highlight_circle = Circle(
+            (player.x, player.y),
+            55,
+            color="yellow",
+            alpha=0.3,
+            fill=False,
+            linewidth=3,
+            linestyle="--",
+        )
         self.field_ax.add_patch(self.highlight_circle)
 
     def add_controls(self):
@@ -376,30 +483,28 @@ class ImprovedBehaviorDebugger:
         robot_selector_ax = plt.axes((0.02, 0.73, 0.08, 0.15))
         self.robot_selector = RadioButtons(
             robot_selector_ax,
-            ['Robot 1', 'Robot 2', 'Robot 3', 'Robot 4'],
-            active=self.focused_robot_id - 1
+            ["Robot 1", "Robot 2", "Robot 3", "Robot 4"],
+            active=self.focused_robot_id - 1,
         )
         self.robot_selector.on_clicked(self.on_robot_selected)
 
         # Botones de acción
         analyze_button_ax = plt.axes((0.02, 0.55, 0.08, 0.04))
-        self.analyze_button = Button(analyze_button_ax, 'Analizar')
+        self.analyze_button = Button(analyze_button_ax, "Analizar")
         self.analyze_button.on_clicked(self.analyze_behaviors)
 
         roles_button_ax = plt.axes((0.02, 0.60, 0.08, 0.04))
-        self.roles_button = Button(roles_button_ax, 'Actualizar Roles')
+        self.roles_button = Button(roles_button_ax, "Actualizar Roles")
         self.roles_button.on_clicked(self.update_roles)
 
         reset_button_ax = plt.axes((0.02, 0.65, 0.08, 0.04))
-        self.reset_button = Button(reset_button_ax, 'Reset Posiciones')
+        self.reset_button = Button(reset_button_ax, "Reset Posiciones")
         self.reset_button.on_clicked(self.reset_positions)
 
         # Niveles de depuración
         debug_level_ax = plt.axes((0.02, 0.35, 0.08, 0.15))
         self.debug_level = RadioButtons(
-            debug_level_ax,
-            ['Básico', 'Detallado', 'Completo'],
-            active=0
+            debug_level_ax, ["Básico", "Detallado", "Completo"], active=0
         )
         self.debug_level.on_clicked(self.on_debug_level_changed)
 
@@ -407,20 +512,30 @@ class ImprovedBehaviorDebugger:
         """Añade widgets para editar posiciones manualmente"""
         # Limpiar panel de edición
         self.edit_ax.clear()
-        self.edit_ax.set_title("Edición Manual de Posiciones", y=0.55, x=0.4, fontsize=12, fontweight='bold')
-        self.edit_ax.axis('off')
+        self.edit_ax.set_title(
+            "Edición Manual de Posiciones",
+            y=0.55,
+            x=0.4,
+            fontsize=12,
+            fontweight="bold",
+        )
+        self.edit_ax.axis("off")
 
         # Crear tabla de edición
         y_start = 0.22
         y_spacing = 0.25
 
-        x_offset = .12
+        x_offset = 0.12
 
         # Encabezados
-        self.edit_ax.text(-0.1, y_start + 0.05, "Objeto", fontsize=10, fontweight='bold')
-        self.edit_ax.text(0.2, y_start + 0.05, "X", fontsize=10, fontweight='bold')
-        self.edit_ax.text(0.5, y_start + 0.05, "Y", fontsize=10, fontweight='bold')
-        self.edit_ax.text(.78, y_start + 0.05, "Ángulo", fontsize=10, fontweight='bold')
+        self.edit_ax.text(
+            -0.1, y_start + 0.05, "Objeto", fontsize=10, fontweight="bold"
+        )
+        self.edit_ax.text(0.2, y_start + 0.05, "X", fontsize=10, fontweight="bold")
+        self.edit_ax.text(0.5, y_start + 0.05, "Y", fontsize=10, fontweight="bold")
+        self.edit_ax.text(
+            0.78, y_start + 0.05, "Ángulo", fontsize=10, fontweight="bold"
+        )
 
         # Editor para la pelota
         y_pos = y_start - y_spacing
@@ -430,49 +545,59 @@ class ImprovedBehaviorDebugger:
         ball_x_ax = self.fig.add_axes([0.69 + x_offset, 0.44, 0.04, 0.025])
         ball_y_ax = self.fig.add_axes([0.74 + x_offset, 0.44, 0.04, 0.025])
 
-        self.ball_widgets['x'] = TextBox(ball_x_ax, '', initial=f"{self.ball.x:.0f}")
-        self.ball_widgets['y'] = TextBox(ball_y_ax, '', initial=f"{self.ball.y:.0f}")
+        self.ball_widgets["x"] = TextBox(ball_x_ax, "", initial=f"{self.ball.x:.0f}")
+        self.ball_widgets["y"] = TextBox(ball_y_ax, "", initial=f"{self.ball.y:.0f}")
 
         # Conectar eventos con funciones lambda correctas
-        self.ball_widgets['x'].on_submit(lambda text: self.update_ball_position())
-        self.ball_widgets['y'].on_submit(lambda text: self.update_ball_position())
+        self.ball_widgets["x"].on_submit(lambda text: self.update_ball_position())
+        self.ball_widgets["y"].on_submit(lambda text: self.update_ball_position())
 
         # Editores para cada robot
         for i, player_id in enumerate([1, 2, 3, 4]):
             y_pos = y_start - (i + 2) * y_spacing
             player = self.players[player_id]
-            color = 'red' if player.team == 'red' else 'blue'
+            color = "red" if player.team == "red" else "blue"
 
             # Etiqueta
-            self.edit_ax.text(-0.1, y_pos + 0.1, f"Robot {player_id}", fontsize=11, color=color)
+            self.edit_ax.text(
+                -0.1, y_pos + 0.1, f"Robot {player_id}", fontsize=11, color=color
+            )
 
             # Crear TextBoxes
-            x_ax = self.fig.add_axes([0.69 + x_offset, 0.44 - (i + 1) * 0.035, 0.04, 0.025])
-            y_ax = self.fig.add_axes([0.74 + x_offset, 0.44 - (i + 1) * 0.035, 0.04, 0.025])
-            angle_ax = self.fig.add_axes([0.79 + x_offset, 0.44 - (i + 1) * 0.035, 0.04, 0.025])
+            x_ax = self.fig.add_axes(
+                [0.69 + x_offset, 0.44 - (i + 1) * 0.035, 0.04, 0.025]
+            )
+            y_ax = self.fig.add_axes(
+                [0.74 + x_offset, 0.44 - (i + 1) * 0.035, 0.04, 0.025]
+            )
+            angle_ax = self.fig.add_axes(
+                [0.79 + x_offset, 0.44 - (i + 1) * 0.035, 0.04, 0.025]
+            )
 
-            x_box = TextBox(x_ax, '', initial=f"{player.x:.0f}")
-            y_box = TextBox(y_ax, '', initial=f"{player.y:.0f}")
-            angle_box = TextBox(angle_ax, '', initial=f"{player.angle:.0f}")
+            x_box = TextBox(x_ax, "", initial=f"{player.x:.0f}")
+            y_box = TextBox(y_ax, "", initial=f"{player.y:.0f}")
+            angle_box = TextBox(angle_ax, "", initial=f"{player.angle:.0f}")
 
             # Conectar eventos usando closures correctos
             x_box.on_submit(lambda text, pid=player_id: self.update_robot_position(pid))
             y_box.on_submit(lambda text, pid=player_id: self.update_robot_position(pid))
-            angle_box.on_submit(lambda text, pid=player_id: self.update_robot_position(pid))
+            angle_box.on_submit(
+                lambda text, pid=player_id: self.update_robot_position(pid)
+            )
 
             # Guardar referencias
             self.position_widgets[player_id] = {
-                'x': x_box,
-                'y': y_box,
-                'angle': angle_box,
-                'axes': [x_ax, y_ax, angle_ax]
+                "x": x_box,
+                "y": y_box,
+                "angle": angle_box,
+                "axes": [x_ax, y_ax, angle_ax],
             }
 
     def update_ball_position(self):
         """Actualiza la posición de la pelota desde los TextBoxes"""
         try:
-            x = float(self.ball_widgets['x'].text)
-            y = float(self.ball_widgets['y'].text)
+            x = float(self.ball_widgets["x"].text)
+            y = float(self.ball_widgets["y"].text)
 
             # Limitar dentro del campo
             x = max(0, min(ANCHO_CAMPO, x))
@@ -480,7 +605,7 @@ class ImprovedBehaviorDebugger:
 
             # Actualizar
             self.ball.set_position(x, y)
-            self.positions['ball'] = [x, y]
+            self.positions["ball"] = [x, y]
 
             # Actualizar visuales
             self.ball_circle.center = (x, y)
@@ -497,9 +622,9 @@ class ImprovedBehaviorDebugger:
         """Actualiza la posición de un robot desde los TextBoxes"""
         try:
             widgets = self.position_widgets[player_id]
-            x = float(widgets['x'].text)
-            y = float(widgets['y'].text)
-            angle = float(widgets['angle'].text) % 360
+            x = float(widgets["x"].text)
+            y = float(widgets["y"].text)
+            angle = float(widgets["angle"].text) % 360
 
             # Limitar dentro del campo
             x = max(0, min(ANCHO_CAMPO, x))
@@ -533,8 +658,7 @@ class ImprovedBehaviorDebugger:
         dx = 60 * np.cos(angle_rad)
         dy = 60 * np.sin(angle_rad)
         self.player_directions[player_id].set_positions(
-            (player.x, player.y),
-            (player.x + dx, player.y + dy)
+            (player.x, player.y), (player.x + dx, player.y + dy)
         )
 
         # Etiquetas
@@ -554,8 +678,8 @@ class ImprovedBehaviorDebugger:
 
         # Mostrar movimientos planificados desde la extensión del tracer
         for player_id, movement in self.tracer_ext.planned_movements.items():
-            if 'target_pos' in movement:
-                target_x, target_y = movement['target_pos']
+            if "target_pos" in movement:
+                target_x, target_y = movement["target_pos"]
                 player = self.players[player_id]
 
                 # Mostrar marcador de destino
@@ -564,16 +688,17 @@ class ImprovedBehaviorDebugger:
 
                 # Mostrar flecha de movimiento
                 self.movement_arrows[player_id].set_positions(
-                    (player.x, player.y),
-                    (target_x, target_y)
+                    (player.x, player.y), (target_x, target_y)
                 )
                 self.movement_arrows[player_id].set_visible(True)
 
     def update_actions_view(self):
         """Actualiza la visualización de acciones planificadas con coordenadas"""
         self.actions_ax.clear()
-        self.actions_ax.set_title("Secuencia de Acciones Planificadas", y=1.05, fontsize=12, fontweight='bold')
-        self.actions_ax.axis('off')
+        self.actions_ax.set_title(
+            "Secuencia de Acciones Planificadas", y=1.05, fontsize=12, fontweight="bold"
+        )
+        self.actions_ax.axis("off")
 
         # Mostrar acciones para cada robot
         y_start = 1.0
@@ -581,13 +706,19 @@ class ImprovedBehaviorDebugger:
 
         for i, player_id in enumerate([1, 2, 3, 4]):
             player = self.players[player_id]
-            team_color = 'red' if player.team == 'red' else 'blue'
+            team_color = "red" if player.team == "red" else "blue"
             y_pos = y_start - i * y_spacing
 
             # Título del robot
             rol_text = "ATACANTE" if player.rol == ROL_ATACANTE else "DEFENSOR"
-            self.actions_ax.text(0.02, y_pos, f"Robot {player_id} ({rol_text}):",
-                                 fontsize=11, fontweight='bold', color=team_color)
+            self.actions_ax.text(
+                0.02,
+                y_pos,
+                f"Robot {player_id} ({rol_text}):",
+                fontsize=11,
+                fontweight="bold",
+                color=team_color,
+            )
 
             # Buscar si hay una acción registrada para este robot específico
             action_found = False
@@ -600,59 +731,85 @@ class ImprovedBehaviorDebugger:
 
             # Si no hay acción específica, usar la acción general del tracer si es el robot enfocado
             elif self.tracer.next_action and self.focused_robot_id == player_id:
-                action_name = self.tracer.next_action['name']
+                action_name = self.tracer.next_action["name"]
                 action_found = True
 
             # Si encontramos una acción, mostrarla
             if action_found and action_name:
                 # Formatear nombre de acción
-                formatted_action = ' '.join(word.capitalize() for word in action_name.split('_'))
+                formatted_action = " ".join(
+                    word.capitalize() for word in action_name.split("_")
+                )
 
                 # Crear descripción detallada según la acción
-                action_desc = self.get_action_description_with_coords(player_id, action_name)
+                action_desc = self.get_action_description_with_coords(
+                    player_id, action_name
+                )
 
                 # Mostrar secuencia
-                self.actions_ax.text(0.02, y_pos - 0.1, f"➜ {formatted_action}",
-                                     fontsize=10, color='darkgreen', fontweight='bold')
-                self.actions_ax.text(0.02, y_pos - 0.17, f"   {action_desc}",
-                                     fontsize=9, color='gray')
+                self.actions_ax.text(
+                    0.02,
+                    y_pos - 0.1,
+                    f"➜ {formatted_action}",
+                    fontsize=10,
+                    color="darkgreen",
+                    fontweight="bold",
+                )
+                self.actions_ax.text(
+                    0.02, y_pos - 0.17, f"   {action_desc}", fontsize=9, color="gray"
+                )
 
                 # Añadir coordenadas específicas si están disponibles
                 coord_info = self.get_coordinate_info(player_id)
                 if coord_info:
-                    self.actions_ax.text(0.02, y_pos - 0.22, f"{coord_info}",
-                                         fontsize=8, color='blue')
+                    self.actions_ax.text(
+                        0.02, y_pos - 0.22, f"{coord_info}", fontsize=8, color="blue"
+                    )
 
                 # Añadir al historial
-                if len(self.action_history[player_id]) == 0 or \
-                        self.action_history[player_id][-1] != formatted_action:
+                if (
+                    len(self.action_history[player_id]) == 0
+                    or self.action_history[player_id][-1] != formatted_action
+                ):
                     self.action_history[player_id].append(formatted_action)
                     if len(self.action_history[player_id]) > self.max_history_length:
                         self.action_history[player_id].pop(0)
             else:
                 # Si no hay acción, mostrar estado de espera
-                self.actions_ax.text(0.02, y_pos - 0.1, "➜ En espera...",
-                                     fontsize=10, color='gray', style='italic')
+                self.actions_ax.text(
+                    0.02,
+                    y_pos - 0.1,
+                    "➜ En espera...",
+                    fontsize=10,
+                    color="gray",
+                    style="italic",
+                )
 
             # Mostrar historial reciente
             if self.action_history[player_id]:
                 history_text = " → ".join(self.action_history[player_id][-2:])
-                self.actions_ax.text(0.02, y_pos - 0.31, f"Historial: {history_text}",
-                                     fontsize=8, color='lightgray', style='italic')
+                self.actions_ax.text(
+                    0.02,
+                    y_pos - 0.31,
+                    f"Historial: {history_text}",
+                    fontsize=8,
+                    color="lightgray",
+                    style="italic",
+                )
 
     def get_action_description_with_coords(self, player_id, action):
         """Genera una descripción detallada de la acción incluyendo coordenadas"""
         descriptions = {
-            'move_to_ball': f"Moverse a pelota en ({self.ball.x:.0f}, {self.ball.y:.0f})",
-            'capture_ball': "Capturar la pelota con el dribbler",
-            'dribble_forward': f"Avanzar con pelota hacia portería rival",
-            'shoot_to_goal': "Disparar a portería con potencia máxima",
-            'pass_to_teammate': "Pasar la pelota a compañero mejor posicionado",
-            'intercept_ball': "Interceptar trayectoria de la pelota",
-            'block_opponent': "Bloquear al rival más peligroso",
-            'move_to_defensive_position': "Posicionarse defensivamente",
-            'move_to_support_position': "Buscar posición de apoyo ofensivo",
-            'position_to_defend_goal': "Defender la portería propia"
+            "move_to_ball": f"Robot {player_id} Moverse a pelota en ({self.ball.x:.0f}, {self.ball.y:.0f})",
+            "capture_ball": "Capturar la pelota con el dribbler",
+            "dribble_forward": "Avanzar con pelota hacia portería rival",
+            "shoot_to_goal": "Disparar a portería con potencia máxima",
+            "pass_to_teammate": "Pasar la pelota a compañero mejor posicionado",
+            "intercept_ball": "Interceptar trayectoria de la pelota",
+            "block_opponent": "Bloquear al rival más peligroso",
+            "move_to_defensive_position": "Posicionarse defensivamente",
+            "move_to_support_position": "Buscar posición de apoyo ofensivo",
+            "position_to_defend_goal": "Defender la portería propia",
         }
 
         return descriptions.get(action, "Ejecutar acción")
@@ -661,27 +818,29 @@ class ImprovedBehaviorDebugger:
         """Obtiene información de coordenadas para un robot específico"""
         if player_id in self.tracer_ext.planned_movements:
             movement = self.tracer_ext.planned_movements[player_id]
-            target_pos = movement['target_pos']
+            target_pos = movement["target_pos"]
             # action_type = movement.get('action_type', 'move')
 
             # Calcular distancia
             player = self.players[player_id]
-            distance = np.sqrt((target_pos[0] - player.x) ** 2 + (target_pos[1] - player.y) ** 2)
+            distance = np.sqrt(
+                (target_pos[0] - player.x) ** 2 + (target_pos[1] - player.y) ** 2
+            )
 
             coord_text = f"Destino: ({target_pos[0]:.0f}, {target_pos[1]:.0f})"
             coord_text += f" | Distancia: {distance:.0f} px"
 
             # Añadir información adicional si está disponible
-            if 'additional_info' in movement and movement['additional_info']:
-                for key, value in movement['additional_info'].items():
+            if "additional_info" in movement and movement["additional_info"]:
+                for key, value in movement["additional_info"].items():
                     coord_text += f" | {key}: {value}"
 
             return coord_text
 
         if player_id in self.tracer_ext.action_details:
-            details = self.tracer_ext.action_details[player_id]['details']
-            if 'target_pos' in details:
-                target_pos = details['target_pos']
+            details = self.tracer_ext.action_details[player_id]["details"]
+            if "target_pos" in details:
+                target_pos = details["target_pos"]
                 return f"Objetivo: ({target_pos[0]:.0f}, {target_pos[1]:.0f})"
 
         return None
@@ -695,18 +854,22 @@ class ImprovedBehaviorDebugger:
             return
 
         # Buscar objeto bajo el cursor
-        min_dist = float('inf')
+        min_dist = float("inf")
         selected_obj = None
 
         # Comprobar pelota
-        dist_to_ball = np.sqrt((event.xdata - self.ball.x) ** 2 + (event.ydata - self.ball.y) ** 2)
+        dist_to_ball = np.sqrt(
+            (event.xdata - self.ball.x) ** 2 + (event.ydata - self.ball.y) ** 2
+        )
         if dist_to_ball < 30:
             min_dist = dist_to_ball
-            selected_obj = 'ball'
+            selected_obj = "ball"
 
         # Comprobar robots
         for player_id, player in self.players.items():
-            dist = np.sqrt((event.xdata - player.x) ** 2 + (event.ydata - player.y) ** 2)
+            dist = np.sqrt(
+                (event.xdata - player.x) ** 2 + (event.ydata - player.y) ** 2
+            )
             if dist < 40 and dist < min_dist:
                 min_dist = dist
                 selected_obj = player_id
@@ -717,7 +880,7 @@ class ImprovedBehaviorDebugger:
             self.drag_object = selected_obj
 
             # Si es un robot, actualizarlo como enfocado
-            if selected_obj != 'ball':
+            if selected_obj != "ball":
                 self.focused_robot_id = selected_obj
                 self.robot_selector.set_active(int(selected_obj) - 1)
                 self.update_focus()
@@ -751,11 +914,11 @@ class ImprovedBehaviorDebugger:
         new_y = max(0, min(ALTO_CAMPO, new_y))
 
         # Actualizar posición
-        if self.drag_object == 'ball':
+        if self.drag_object == "ball":
             self.ball.set_position(new_x, new_y)
             self.ball_circle.center = (new_x, new_y)
             self.ball_label.set_position((new_x, new_y - 45))
-            self.positions['ball'] = [new_x, new_y]
+            self.positions["ball"] = [new_x, new_y]
         else:
             player_id = self.drag_object
             player = self.players[player_id]
@@ -769,15 +932,15 @@ class ImprovedBehaviorDebugger:
     def update_textboxes(self):
         """Actualiza los valores en los TextBoxes después de arrastrar"""
         # Actualizar pelota
-        self.ball_widgets['x'].set_val(f"{self.ball.x:.0f}")
-        self.ball_widgets['y'].set_val(f"{self.ball.y:.0f}")
+        self.ball_widgets["x"].set_val(f"{self.ball.x:.0f}")
+        self.ball_widgets["y"].set_val(f"{self.ball.y:.0f}")
 
         # Actualizar robots
         for player_id, widgets in self.position_widgets.items():
             player = self.players[player_id]
-            widgets['x'].set_val(f"{player.x:.0f}")
-            widgets['y'].set_val(f"{player.y:.0f}")
-            widgets['angle'].set_val(f"{player.angle:.0f}")
+            widgets["x"].set_val(f"{player.x:.0f}")
+            widgets["y"].set_val(f"{player.y:.0f}")
+            widgets["angle"].set_val(f"{player.angle:.0f}")
 
     def on_robot_selected(self, label):
         """Maneja la selección de robot"""
@@ -794,9 +957,9 @@ class ImprovedBehaviorDebugger:
 
     def on_debug_level_changed(self, label):
         """Maneja el cambio de nivel de depuración"""
-        if label == 'Básico':
+        if label == "Básico":
             self.execution_depth = 1
-        elif label == 'Detallado':
+        elif label == "Detallado":
             self.execution_depth = 3
         else:
             self.execution_depth = 10
@@ -807,7 +970,7 @@ class ImprovedBehaviorDebugger:
         """Resetea las posiciones a los valores iniciales"""
         # Resetear posiciones
         self.positions = {
-            'ball': [750, 450],
+            "ball": [750, 450],
             1: [200, 200, 0],
             2: [200, 700, 0],
             3: [1200, 200, 0],
@@ -815,7 +978,7 @@ class ImprovedBehaviorDebugger:
         }
 
         # Actualizar objetos
-        self.ball.set_position(self.positions['ball'][0], self.positions['ball'][1])
+        self.ball.set_position(self.positions["ball"][0], self.positions["ball"][1])
 
         for player_id, (x, y, angle) in list(self.positions.items())[1:]:
             self.players[player_id].set_position(x, y)
@@ -838,8 +1001,8 @@ class ImprovedBehaviorDebugger:
         self.tracer_ext.clear()
 
         # Debug: Verificar que los tracers están limpios
-        print(f"Debug: Tracer limpiado. Trace items: {len(self.tracer.trace)}")
-        print(f"Debug: Extension limpiada. Robot actions: {len(self.tracer_ext.robot_actions)}")
+        log.debug("Tracer limpiado. Trace items: %i", len(self.tracer.trace))
+        log.debug("Extension limpiada. Robot actions: %i", len(self.tracer_ext.robot_actions))
 
         # Actualizar lógica difusa
         red_context = self.context_red.evaluar_ms_logic_difusse()
@@ -853,13 +1016,13 @@ class ImprovedBehaviorDebugger:
         self._tick_behaviors_without_movement()
 
         # Debug: Verificar que se generaron acciones
-        print(f"Debug: Después de tick. Trace items: {len(self.tracer.trace)}")
-        print(f"Debug: Robot actions generadas: {self.tracer_ext.robot_actions}")
-        print(f"Debug: Planned movements: {list(self.tracer_ext.planned_movements.keys())}")
+        log.debug("Después de tick. Trace items: %i", len(self.tracer.trace))
+        log.debug("Robot actions generadas: %s", self.tracer_ext.robot_actions)
+        log.debug("Planned movements: %s", list(self.tracer_ext.planned_movements.keys()))
 
         # Obtener estados
         for player_id in range(1, 5):
-            team = 'red' if player_id <= 2 else 'blue'
+            team = "red" if player_id <= 2 else "blue"
             manager = self.team_managers[team]
             self.current_states[player_id] = manager.get_current_state(player_id)
 
@@ -888,75 +1051,89 @@ class ImprovedBehaviorDebugger:
                 self.ball = ball
                 self.team_players = team_players
 
-            def move_robot_to(self, player_id, target_pos, target_angle=None, speed_factor=1.0):
-                print(f"Debug: Mock move_robot_to called for robot {player_id} to {target_pos}")
-                self.last_command = {'type': 'move', 'player_id': player_id, 'target_pos': target_pos}
+            def move_robot_to(
+                self, player_id, target_pos, target_angle=None, speed_factor=1.0
+            ):
+                log.debug("Mock move_robot_to called for robot %s to %s", player_id, target_pos)
+                self.last_command = {
+                    "type": "move",
+                    "player_id": player_id,
+                    "target_pos": target_pos,
+                }
                 # Registrar movimiento planificado
                 additional_info = {}
                 if target_angle is not None:
-                    additional_info['target_angle'] = target_angle
+                    additional_info["target_angle"] = target_angle
                 if speed_factor != 1.0:
-                    additional_info['speed_factor'] = speed_factor
+                    additional_info["speed_factor"] = speed_factor
 
                 self.tracer_ext.set_planned_movement(
-                    player_id,
-                    target_pos,
-                    "move_to_position",
-                    additional_info
+                    player_id, target_pos, "move_to_position", additional_info
                 )
 
                 # Registrar la acción específica para este robot
                 self.tracer_ext.set_robot_action(player_id, "move_to_ball")
-                print(f"Debug: Registered action 'move_to_ball' for robot {player_id}")
+                log.debug("Registered action 'move_to_ball' for robot %i", player_id)
                 return False
 
             def rotate_robot_to(self, player_id, target_angle):
-                print(f"Debug: Mock rotate_robot_to called for robot {player_id} to angle {target_angle}")
-                self.last_command = {'type': 'rotate', 'player_id': player_id, 'target_angle': target_angle}
+                log.debug(
+                    "Mock rotate_robot_to called for robot %i to angle %s", player_id, target_angle
+                )
+                self.last_command = {
+                    "type": "rotate",
+                    "player_id": player_id,
+                    "target_angle": target_angle,
+                }
                 player = self.players[player_id]
                 self.tracer_ext.set_action_details(
                     player_id,
                     "rotate_to_angle",
-                    {'target_angle': target_angle, 'current_angle': player.angle}
+                    {"target_angle": target_angle, "current_angle": player.angle},
                 )
                 self.tracer_ext.set_robot_action(player_id, "rotate_to_angle")
                 return False
 
             def capture_ball(self, player_id):
-                print(f"Debug: Mock capture_ball called for robot {player_id}")
-                self.last_command = {'type': 'capture', 'player_id': player_id}
+                log.debug("Mock capture_ball called for robot %i", player_id)
+                self.last_command = {"type": "capture", "player_id": player_id}
                 # Para capturar, el destino es la posición de la pelota
                 ball_pos = (self.ball.x, self.ball.y)
                 self.tracer_ext.set_planned_movement(
-                    player_id,
-                    ball_pos,
-                    "capture_ball",
-                    {'action': 'capture_ball'}
+                    player_id, ball_pos, "capture_ball", {"action": "capture_ball"}
                 )
                 self.tracer_ext.set_robot_action(player_id, "capture_ball")
                 return False
 
             def kick_ball(self, player_id, target_pos, ball, power=1.0):
-                self.last_command = {'type': 'kick', 'player_id': player_id, 'target_pos': target_pos}
+                self.last_command = {
+                    "type": "kick",
+                    "player_id": player_id,
+                    "target_pos": target_pos,
+                }
                 self.tracer_ext.set_action_details(
                     player_id,
                     "kick_ball",
                     {
-                        'target_pos': target_pos,
-                        'power': power,
-                        'ball_pos': (ball.x, ball.y)
-                    }
+                        "target_pos": target_pos,
+                        "power": power,
+                        "ball_pos": (ball.x, ball.y),
+                    },
                 )
                 self.tracer_ext.set_robot_action(player_id, "kick_ball")
                 return True
 
             def move_with_ball(self, player_id, target_pos, ball, speed_factor=0.7):
-                self.last_command = {'type': 'move_with_ball', 'player_id': player_id, 'target_pos': target_pos}
+                self.last_command = {
+                    "type": "move_with_ball",
+                    "player_id": player_id,
+                    "target_pos": target_pos,
+                }
                 self.tracer_ext.set_planned_movement(
                     player_id,
                     target_pos,
                     "move_with_ball",
-                    {'speed_factor': speed_factor, 'has_ball': True}
+                    {"speed_factor": speed_factor, "has_ball": True},
                 )
                 self.tracer_ext.set_robot_action(player_id, "move_with_ball")
                 return False
@@ -968,12 +1145,10 @@ class ImprovedBehaviorDebugger:
         try:
             # Reemplazar con mocks mejorados
             mock_red = EnhancedMockCommandManager(
-                self.tracer_ext, self.players, self.ball,
-                [self.player_1, self.player_2]
+                self.tracer_ext, self.players, self.ball, [self.player_1, self.player_2]
             )
             mock_blue = EnhancedMockCommandManager(
-                self.tracer_ext, self.players, self.ball,
-                [self.player_3, self.player_4]
+                self.tracer_ext, self.players, self.ball, [self.player_3, self.player_4]
             )
 
             self.behavior_red.command_manager = mock_red
@@ -998,7 +1173,9 @@ class ImprovedBehaviorDebugger:
 
                 # Registrar que se ejecutó una acción para este robot
                 if self.tracer.next_action:
-                    self.tracer_ext.set_robot_action(player_id, self.tracer.next_action['name'])
+                    self.tracer_ext.set_robot_action(
+                        player_id, self.tracer.next_action["name"]
+                    )
 
             for player_id in [3, 4]:  # Equipo azul
                 player = self.players[player_id]
@@ -1012,7 +1189,9 @@ class ImprovedBehaviorDebugger:
 
                 # Registrar que se ejecutó una acción para este robot
                 if self.tracer.next_action:
-                    self.tracer_ext.set_robot_action(player_id, self.tracer.next_action['name'])
+                    self.tracer_ext.set_robot_action(
+                        player_id, self.tracer.next_action["name"]
+                    )
 
         finally:
             # Restaurar
@@ -1046,9 +1225,14 @@ class ImprovedBehaviorDebugger:
     def update_behavior_view(self):
         """Actualiza la vista de comportamiento actual"""
         self.behavior_ax.clear()
-        self.behavior_ax.set_title(f"Estado Robot {self.focused_robot_id}", y=0.7, x=0.42,
-                                   fontweight='bold', fontsize=14)
-        self.behavior_ax.axis('off')
+        self.behavior_ax.set_title(
+            f"Estado Robot {self.focused_robot_id}",
+            y=0.7,
+            x=0.42,
+            fontweight="bold",
+            fontsize=14,
+        )
+        self.behavior_ax.axis("off")
 
         if self.focused_robot_id not in self.current_states:
             return
@@ -1061,29 +1245,59 @@ class ImprovedBehaviorDebugger:
 
         # Estado de la pelota
         info_estado_pelota = f"Pelota: {state.get('posesion_pelota', 'Desconocido')}\n"
-        info_estado_pelota += f"Proximidad: {state.get('proximidad_equipo', 'Desconocido')}\n"
+        info_estado_pelota += (
+            f"Proximidad: {state.get('proximidad_equipo', 'Desconocido')}\n"
+        )
         info_estado_pelota += f"Zona: {state.get('zona_pelota', 'Desconocido')}\n\n"
 
         # Métricas
         info_metricas = f"Dist. pelota: {state.get('distancia_pelota', 0):.1f} px\n"
-        info_metricas += f"Tiene pelota: {'SÍ' if state.get('tiene_pelota', False) else 'NO'}\n"
+        info_metricas += (
+            f"Tiene pelota: {'SÍ' if state.get('tiene_pelota', False) else 'NO'}\n"
+        )
 
-        self.behavior_ax.text(0.05, 0.5, info_text,
-                              ha='left', va='top', transform=self.behavior_ax.transAxes,
-                              fontsize=10, linespacing=1.5)
-        self.behavior_ax.text(0.35, 0.5, info_estado_pelota,
-                              ha='left', va='top', transform=self.behavior_ax.transAxes,
-                              fontsize=10, linespacing=1.5)
-        self.behavior_ax.text(0.65, 0.5, info_metricas,
-                              ha='left', va='top', transform=self.behavior_ax.transAxes,
-                              fontsize=10, linespacing=1.5)
+        self.behavior_ax.text(
+            0.05,
+            0.5,
+            info_text,
+            ha="left",
+            va="top",
+            transform=self.behavior_ax.transAxes,
+            fontsize=10,
+            linespacing=1.5,
+        )
+        self.behavior_ax.text(
+            0.35,
+            0.5,
+            info_estado_pelota,
+            ha="left",
+            va="top",
+            transform=self.behavior_ax.transAxes,
+            fontsize=10,
+            linespacing=1.5,
+        )
+        self.behavior_ax.text(
+            0.65,
+            0.5,
+            info_metricas,
+            ha="left",
+            va="top",
+            transform=self.behavior_ax.transAxes,
+            fontsize=10,
+            linespacing=1.5,
+        )
 
     def update_details_view(self):
         """Actualiza la vista de detalles del árbol"""
         self.details_ax.clear()
-        self.details_ax.set_title("Detalles del Árbol de Comportamiento", y=1.5, x=0.42,
-                                  fontweight='bold', fontsize=12)
-        self.details_ax.axis('off')
+        self.details_ax.set_title(
+            "Detalles del Árbol de Comportamiento",
+            y=1.5,
+            x=0.42,
+            fontweight="bold",
+            fontsize=12,
+        )
+        self.details_ax.axis("off")
 
         # Información de debug
         debug_text = f"Robot enfocado: {self.focused_robot_id}\n"
@@ -1095,25 +1309,35 @@ class ImprovedBehaviorDebugger:
         if self.tracer.trace:
             debug_text += "TRAZA DE EJECUCIÓN:\n"
 
-            for i, node in enumerate(self.tracer.trace[:self.execution_depth * 5]):
-                node_name = ' '.join(word.capitalize() for word in node['name'].split('_'))
+            for _, node in enumerate(self.tracer.trace[: self.execution_depth * 5]):
+                node_name = " ".join(
+                    word.capitalize() for word in node["name"].split("_")
+                )
                 # Cambiar símbolos por caracteres más compatibles
                 status_symbols = {
                     NodeStatus.SUCCESS: "[OK]",
                     NodeStatus.FAILURE: "[X]",
                     NodeStatus.RUNNING: "[>>]",
-                    NodeStatus.INVALID: "[?]"
+                    NodeStatus.INVALID: "[?]",
                 }
-                symbol = status_symbols.get(node['status'], "[?]")
+                symbol = status_symbols.get(node["status"], "[?]")
 
                 debug_text += f"{symbol} {node_name}\n"
         else:
             debug_text += "No hay traza disponible.\n"
             debug_text += "Presiona 'Analizar' para generar traza.\n"
 
-        self.details_ax.text(-0.23, 1.5, debug_text,
-                             ha='left', va='top', transform=self.details_ax.transAxes,
-                             fontsize=9, linespacing=1.2, family='monospace')
+        self.details_ax.text(
+            -0.23,
+            1.5,
+            debug_text,
+            ha="left",
+            va="top",
+            transform=self.details_ax.transAxes,
+            fontsize=9,
+            linespacing=1.2,
+            family="monospace",
+        )
 
     @staticmethod
     def run():

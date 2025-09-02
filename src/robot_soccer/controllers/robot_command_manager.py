@@ -2,6 +2,7 @@ import time
 import logging
 from robot_soccer.controllers.differential_drive import DifferentialDriveController
 from robot_soccer.controllers.robot_action_executor import RobotActionExecutor
+from robot_soccer.communication.rf_controller import RFController
 
 log = logging.getLogger(__name__)
 
@@ -62,7 +63,6 @@ class RobotCommandManager:
         # Inicializar controlador RF si se utilizan robots reales
         self.rf_controller = None
         if use_real_robots:
-            from robot_soccer.communication.rf_controller import RFController
             self.rf_controller = RFController(port=port)
             success = self.rf_controller.initialize()
             if not success:
@@ -202,7 +202,7 @@ class RobotCommandManager:
             'target_angle': target_angle,
             'speed_factor': speed_factor
         }
-        log.info("Robot %i: Ordenado movimiento a %.2f", player_id, target_pos)
+        log.info("Robot %i: Ordenado movimiento a %s", player_id, target_pos)
 
     def rotate_robot_to(self, player_id, target_angle):
         """Ordena a un robot girar a un ángulo específico.
@@ -282,7 +282,7 @@ class RobotCommandManager:
             'power': power,
             'ball': ball
         }
-        log.info("Robot %i: Ordenado patear pelota hacia %.2f con potencia %.2f",
+        log.info("Robot %i: Ordenado patear pelota hacia %s con potencia %.2f",
                  player_id, target_pos, power)
 
     def move_with_ball(self, player_id, target_pos, ball, speed_factor=0.7):
@@ -311,5 +311,5 @@ class RobotCommandManager:
             'speed_factor': speed_factor,
             'ball': ball
         }
-        log.info("Robot %i: Ordenado moverse con pelota hacia %.2f",
+        log.info("Robot %i: Ordenado moverse con pelota hacia %s",
                  player_id, target_pos)
