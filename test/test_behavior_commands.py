@@ -155,6 +155,20 @@ class ImprovedBehaviorDebugger:
         self.action_history = {i: [] for i in range(1, 5)}
         self.max_history_length = 5
 
+
+        self.simulation_active = False
+        self.physics_timer = None
+        self.ball_physics = {
+            'velocity_x': 0.0,
+            'velocity_y': 0.0,
+            'friction': 0.95,  # Factor de fricción (0.95 = pierde 5% velocidad por frame)
+            'min_speed': 2.0   # Velocidad mínima antes de detenerse
+        }
+    
+        # Estado de simulación
+        self.simulation_active = False
+        self.physics_timer = None
+        self.ball_velocity_arrow = None  # Para mostrar vector de velocidad
         # Crear gestores de comportamiento
         self.setup_managers()
 
@@ -508,6 +522,10 @@ class ImprovedBehaviorDebugger:
         )
         self.debug_level.on_clicked(self.on_debug_level_changed)
 
+        sim_button_ax = plt.axes((0.02, 0.25, 0.08, 0.04))
+        self.sim_button = Button(sim_button_ax, "▶ Simular")
+        self.sim_button.on_clicked(self.toggle_simulation)
+
     def add_position_editors(self):
         """Añade widgets para editar posiciones manualmente"""
         # Limpiar panel de edición
@@ -521,69 +539,120 @@ class ImprovedBehaviorDebugger:
         )
         self.edit_ax.axis("off")
 
-        # Crear tabla de edición
-        y_start = 0.22
-        y_spacing = 0.25
+        # ============= VARIABLES DE LAYOUT =============
+        # Posiciones de texto (coordenadas del subplot)
+        text_x_start = -0.35
+        text_x_spacing = 0.235  # Espaciado uniforme entre columnas de texto
+        text_y_start = 0.22
+        text_y_spacing = 0.25  # Espaciado entre filas
 
-        x_offset = 0.12
+        # Posiciones de widgets (coordenadas de figura)
+        widget_base_x = 0.638  # Posición inicial de widgets
+        widget_base_y = 0.44  # Posición Y base de widgets
+        widget_x_spacing = 0.04  # Espaciado horizontal entre widgets
+        widget_y_spacing = 0.0365  # Espaciado vertical entre filas
+        widget_width = 0.035  # Ancho de cada TextBox
+        widget_height = 0.025  # Alto de cada TextBox
 
-        # Encabezados
+        x_offset = 0.12  # Offset general (mantener por compatibilidad)
+
+        # ============= ENCABEZADOS =============
+        headers = ["Objeto", "X", "Y", "VX", "VY", "Ángulo"]
+        header_x_positions = [
+            text_x_start,                           # "Objeto"
+            text_x_start + text_x_spacing,         # "X" 
+            text_x_start + text_x_spacing * 2,     # "Y"
+            text_x_start + text_x_spacing * 3,     # "VX"
+            text_x_start + text_x_spacing * 4,     # "VY"
+            text_x_start + text_x_spacing * 5      # "Ángulo"
+        ]
+
+        for i, (header, x_pos) in enumerate(zip(headers, header_x_positions)):
+            color = "red" if header in ["VX", "VY"] else "black"
+            self.edit_ax.text(
+                x_pos, 
+                text_y_start + 0.05, 
+                header, 
+                fontsize=10, 
+                fontweight="bold",
+                color=color
+            )
+
+        # ============= EDITOR PARA LA PELOTA =============
+        pelota_y_pos = text_y_start - text_y_spacing
+        
+        # Texto "Pelota"
         self.edit_ax.text(
-            -0.1, y_start + 0.05, "Objeto", fontsize=10, fontweight="bold"
-        )
-        self.edit_ax.text(0.2, y_start + 0.05, "X", fontsize=10, fontweight="bold")
-        self.edit_ax.text(0.5, y_start + 0.05, "Y", fontsize=10, fontweight="bold")
-        self.edit_ax.text(
-            0.78, y_start + 0.05, "Ángulo", fontsize=10, fontweight="bold"
+            text_x_start, 
+            pelota_y_pos + 0.1, 
+            "Pelota", 
+            fontsize=11
         )
 
-        # Editor para la pelota
-        y_pos = y_start - y_spacing
-        self.edit_ax.text(-0.1, y_pos + 0.1, "Pelota", fontsize=11)
+        # Posiciones de widgets para la pelota
+        pelota_widget_positions = [
+            widget_base_x + x_offset,                      # X
+            widget_base_x + x_offset + widget_x_spacing,   # Y  
+            widget_base_x + x_offset + widget_x_spacing * 2, # VX
+            widget_base_x + x_offset + widget_x_spacing * 3, # VY
+        ]
 
         # Crear TextBoxes para la pelota
-        ball_x_ax = self.fig.add_axes([0.69 + x_offset, 0.44, 0.04, 0.025])
-        ball_y_ax = self.fig.add_axes([0.74 + x_offset, 0.44, 0.04, 0.025])
+        ball_x_ax = self.fig.add_axes([pelota_widget_positions[0], widget_base_y, widget_width, widget_height])
+        ball_y_ax = self.fig.add_axes([pelota_widget_positions[1], widget_base_y, widget_width, widget_height])
+        ball_vx_ax = self.fig.add_axes([pelota_widget_positions[2], widget_base_y, widget_width, widget_height])
+        ball_vy_ax = self.fig.add_axes([pelota_widget_positions[3], widget_base_y, widget_width, widget_height])
 
+        # Inicializar TextBoxes
         self.ball_widgets["x"] = TextBox(ball_x_ax, "", initial=f"{self.ball.x:.0f}")
         self.ball_widgets["y"] = TextBox(ball_y_ax, "", initial=f"{self.ball.y:.0f}")
+        self.ball_widgets["vx"] = TextBox(ball_vx_ax, "", initial=f"{self.ball_physics['velocity_x']:.1f}")
+        self.ball_widgets["vy"] = TextBox(ball_vy_ax, "", initial=f"{self.ball_physics['velocity_y']:.1f}")
 
-        # Conectar eventos con funciones lambda correctas
+        # Conectar eventos
         self.ball_widgets["x"].on_submit(lambda text: self.update_ball_position())
         self.ball_widgets["y"].on_submit(lambda text: self.update_ball_position())
+        self.ball_widgets["vx"].on_submit(lambda text: self.update_ball_velocity())
+        self.ball_widgets["vy"].on_submit(lambda text: self.update_ball_velocity())
 
-        # Editores para cada robot
+        # ============= EDITORES PARA ROBOTS =============
         for i, player_id in enumerate([1, 2, 3, 4]):
-            y_pos = y_start - (i + 2) * y_spacing
+            # Posición Y para esta fila
+            robot_y_pos = text_y_start - (i + 2) * text_y_spacing
+            widget_y_pos = widget_base_y - (i + 1) * widget_y_spacing
+            
             player = self.players[player_id]
             color = "red" if player.team == "red" else "blue"
 
-            # Etiqueta
+            # Texto del robot
             self.edit_ax.text(
-                -0.1, y_pos + 0.1, f"Robot {player_id}", fontsize=11, color=color
+                text_x_start, 
+                robot_y_pos + 0.1, 
+                f"Robot {player_id}", 
+                fontsize=11, 
+                color=color
             )
 
-            # Crear TextBoxes
-            x_ax = self.fig.add_axes(
-                [0.69 + x_offset, 0.44 - (i + 1) * 0.035, 0.04, 0.025]
-            )
-            y_ax = self.fig.add_axes(
-                [0.74 + x_offset, 0.44 - (i + 1) * 0.035, 0.04, 0.025]
-            )
-            angle_ax = self.fig.add_axes(
-                [0.79 + x_offset, 0.44 - (i + 1) * 0.035, 0.04, 0.025]
-            )
+            # Posiciones de widgets para este robot
+            robot_widget_positions = [
+                widget_base_x + x_offset,                        # X
+                widget_base_x + x_offset + widget_x_spacing,     # Y
+                widget_base_x + x_offset + widget_x_spacing * 4, # Ángulo (saltamos VX, VY)
+            ]
+
+            # Crear TextBoxes para este robot
+            x_ax = self.fig.add_axes([robot_widget_positions[0], widget_y_pos, widget_width, widget_height])
+            y_ax = self.fig.add_axes([robot_widget_positions[1], widget_y_pos, widget_width, widget_height])
+            angle_ax = self.fig.add_axes([robot_widget_positions[2], widget_y_pos, widget_width, widget_height])
 
             x_box = TextBox(x_ax, "", initial=f"{player.x:.0f}")
             y_box = TextBox(y_ax, "", initial=f"{player.y:.0f}")
             angle_box = TextBox(angle_ax, "", initial=f"{player.angle:.0f}")
 
-            # Conectar eventos usando closures correctos
+            # Conectar eventos
             x_box.on_submit(lambda text, pid=player_id: self.update_robot_position(pid))
             y_box.on_submit(lambda text, pid=player_id: self.update_robot_position(pid))
-            angle_box.on_submit(
-                lambda text, pid=player_id: self.update_robot_position(pid)
-            )
+            angle_box.on_submit(lambda text, pid=player_id: self.update_robot_position(pid))
 
             # Guardar referencias
             self.position_widgets[player_id] = {
@@ -618,33 +687,57 @@ class ImprovedBehaviorDebugger:
         except ValueError:
             pass
 
-    def update_robot_position(self, player_id):
-        """Actualiza la posición de un robot desde los TextBoxes"""
+    def update_ball_velocity(self):
+        """Actualiza la velocidad de la pelota desde los TextBoxes."""
         try:
-            widgets = self.position_widgets[player_id]
-            x = float(widgets["x"].text)
-            y = float(widgets["y"].text)
-            angle = float(widgets["angle"].text) % 360
+            vx = float(self.ball_widgets["vx"].text)
+            vy = float(self.ball_widgets["vy"].text)
 
-            # Limitar dentro del campo
-            x = max(0, min(ANCHO_CAMPO, x))
-            y = max(0, min(ALTO_CAMPO, y))
+            # Limitar valores razonables
+            vx = max(-50, min(50, vx))
+            vy = max(-50, min(50, vy))
 
-            # Actualizar
-            player = self.players[player_id]
-            player.set_position(x, y)
-            player.set_angle(angle)
-            self.positions[player_id] = [x, y, angle]
+            # Actualizar parámetros de física
+            self.ball_physics['velocity_x'] = vx
+            self.ball_physics['velocity_y'] = vy
 
-            # Actualizar visuales
-            self.update_player_visual(player_id)
+            log.info(f"⚡ Velocidad actualizada: vx={vx:.1f}, vy={vy:.1f}")
 
-            # Analizar
-            self.analyze_behaviors()
-            self.fig.canvas.draw_idle()
+            # Actualizar TextBoxes si los valores fueron limitados
+            self.ball_widgets["vx"].set_val(f"{vx:.1f}")
+            self.ball_widgets["vy"].set_val(f"{vy:.1f}")
 
         except ValueError:
-            pass
+            # Restaurar valores anteriores en caso de error
+            self.ball_widgets["vx"].set_val(f"{self.ball_physics['velocity_x']:.1f}")
+            self.ball_widgets["vy"].set_val(f"{self.ball_physics['velocity_y']:.1f}")
+        def update_robot_position(self, player_id):
+            """Actualiza la posición de un robot desde los TextBoxes"""
+            try:
+                widgets = self.position_widgets[player_id]
+                x = float(widgets["x"].text)
+                y = float(widgets["y"].text)
+                angle = float(widgets["angle"].text) % 360
+
+                # Limitar dentro del campo
+                x = max(0, min(ANCHO_CAMPO, x))
+                y = max(0, min(ALTO_CAMPO, y))
+
+                # Actualizar
+                player = self.players[player_id]
+                player.set_position(x, y)
+                player.set_angle(angle)
+                self.positions[player_id] = [x, y, angle]
+
+                # Actualizar visuales
+                self.update_player_visual(player_id)
+
+                # Analizar
+                self.analyze_behaviors()
+                self.fig.canvas.draw_idle()
+
+            except ValueError:
+                pass
 
     def update_player_visual(self, player_id):
         """Actualiza los elementos visuales de un jugador"""
@@ -1239,6 +1332,11 @@ class ImprovedBehaviorDebugger:
 
         state = self.current_states[self.focused_robot_id]
 
+        speed = getattr(self.ball, 'speed', 0)
+        velocity_info = f"VELOCIDAD PELOTA\n"
+        velocity_info += f"Velocidad: {speed:.1f} px/s\n"
+        # velocity_info += f"Simulación: {'🔄 ON' if self.simulation_active else '⏹ OFF'}\n"
+
         # Información del estado
         info_text = f"Equipo: {'Rojo' if self.focused_robot_id <= 2 else 'Azul'}\n"
         info_text += f"Rol: {state.get('rol', 'Desconocido')}\n\n"
@@ -1256,6 +1354,16 @@ class ImprovedBehaviorDebugger:
             f"Tiene pelota: {'SÍ' if state.get('tiene_pelota', False) else 'NO'}\n"
         )
 
+        self.behavior_ax.text(
+            -0.15,
+            0.5,
+            velocity_info,
+            ha="left",
+            va="top",
+            transform=self.behavior_ax.transAxes,
+            fontsize=10,
+            linespacing=1.5,
+        )
         self.behavior_ax.text(
             0.05,
             0.5,
@@ -1344,6 +1452,197 @@ class ImprovedBehaviorDebugger:
         """Inicia la herramienta de depuración"""
         plt.subplots_adjust(left=0.12, right=0.95, top=0.95, bottom=0.05)
         plt.show()
+
+    # NUEVOS métodos para agregar:
+    def toggle_simulation(self, event):
+        """Activa/desactiva simulación de física"""
+        if self.simulation_active:
+            self.stop_simulation()
+        else:
+            self.start_simulation()
+
+    def start_simulation(self):
+        """Inicia la simulación continua"""
+        self.simulation_active = True
+        self.sim_button.label.set_text("⏸ Parar")
+        
+        # Timer que actualiza cada 50ms (20 FPS)
+        self.physics_timer = self.fig.canvas.new_timer(interval=50)
+        self.physics_timer.add_callback(self.update_physics)
+        self.physics_timer.start()
+        
+        log.info("🔄 Simulación iniciada")
+
+    def stop_simulation(self):
+        """Para la simulación"""
+        self.simulation_active = False
+        self.sim_button.label.set_text("▶ Simular") 
+        
+        if self.physics_timer:
+            self.physics_timer.stop()
+            self.physics_timer = None
+        
+        log.info("⏹ Simulación detenida")
+
+    def update_physics(self):
+        """Actualiza solo la posición de la pelota existente"""
+        if not self.simulation_active:
+            return
+        
+        # Aplicar movimiento simple
+        if abs(self.ball_physics['velocity_x']) > self.ball_physics['min_speed'] or \
+           abs(self.ball_physics['velocity_y']) > self.ball_physics['min_speed']:
+            
+            # Calcular nueva posición
+            new_x = self.ball.x + self.ball_physics['velocity_x'] 
+            new_y = self.ball.y + self.ball_physics['velocity_y']
+            
+            # Mantener dentro del campo
+            new_x = max(30, min(ANCHO_CAMPO - 30, new_x))
+            new_y = max(30, min(ALTO_CAMPO - 30, new_y))
+            
+            # Actualizar la pelota (esto actualiza automáticamente ball.speed por tu nueva clase)
+            self.ball.set_position(new_x, new_y)
+            
+            # Actualizar SOLO los elementos visuales existentes
+            self.ball_circle.center = (new_x, new_y)  # Mover círculo existente
+            self.ball_label.set_position((new_x, new_y - 45))  # Mover etiqueta existente
+            
+            # Aplicar fricción simple
+            self.ball_physics['velocity_x'] *= self.ball_physics['friction']
+            self.ball_physics['velocity_y'] *= self.ball_physics['friction']
+            
+            # Refrescar SOLO el gráfico (sin crear nada nuevo)
+            self.fig.canvas.draw_idle()
+            
+            # Analizar comportamientos (opcional, cada ciertos frames)
+            if hasattr(self, '_physics_counter'):
+                self._physics_counter += 1
+            else:
+                self._physics_counter = 0
+                
+            # Solo analizar cada 5 frames para no saturar
+            if self._physics_counter % 5 == 0:
+                self.analyze_behaviors()
+        else:
+            # Pelota se detuvo
+            self.stop_simulation()
+            log.info("⏹ Pelota detenida - simulación parada")
+
+    def handle_wall_bounces(self, new_x, new_y):
+        """Maneja rebotes con las paredes del campo"""
+        bounce_factor = 0.8  # La pelota pierde energía al rebotar
+        
+        # Rebote en paredes verticales (izquierda/derecha)
+        if new_x <= 30:  # Borde izquierdo
+            new_x = 30
+            self.ball_physics['velocity_x'] = -self.ball_physics['velocity_x'] * bounce_factor
+        elif new_x >= ANCHO_CAMPO - 30:  # Borde derecho
+            new_x = ANCHO_CAMPO - 30
+            self.ball_physics['velocity_x'] = -self.ball_physics['velocity_x'] * bounce_factor
+        
+        # Rebote en paredes horizontales (arriba/abajo)
+        if new_y <= 30:  # Borde superior
+            new_y = 30
+            self.ball_physics['velocity_y'] = -self.ball_physics['velocity_y'] * bounce_factor
+        elif new_y >= ALTO_CAMPO - 30:  # Borde inferior
+            new_y = ALTO_CAMPO - 30
+            self.ball_physics['velocity_y'] = -self.ball_physics['velocity_y'] * bounce_factor
+        
+        return new_x, new_y
+
+    # def check_robot_kicks(self, ball_x, ball_y):
+    #     """Verifica si algún robot está cerca y puede 'patear' la pelota"""
+    #     kick_distance = 50  # Distancia para que un robot pueda patear
+    #     kick_strength = 40  # Fuerza de la patada
+    #     
+    #     for player_id, player in self.players.items():
+    #         distance = np.sqrt((player.x - ball_x)**2 + (player.y - ball_y)**2)
+    #         
+    #         if distance < kick_distance:
+    #             # Calcular dirección de la patada (robot hacia pelota)
+    #             angle_to_ball = np.arctan2(ball_y - player.y, ball_x - player.x)
+    #             
+    #             # Añadir algo de aleatoriedad a la dirección
+    #             angle_variation = (np.random.random() - 0.5) * 0.3  # ±0.15 radianes
+    #             kick_angle = angle_to_ball + angle_variation
+    #             
+    #             # Aplicar velocidad en esa dirección
+    #             self.ball_physics['velocity_x'] += kick_strength * np.cos(kick_angle)
+    #             self.ball_physics['velocity_y'] += kick_strength * np.sin(kick_angle)
+    #             
+    #             print(f"🦵 Robot {player_id} pateó la pelota!")
+    #             break  # Solo un robot puede patear por frame
+
+    # def simulate_kick(self, event):
+    #     """Simula una patada específica para testing"""
+    #     # Encontrar el robot más cercano a la pelota
+    #     closest_distance = float('inf')
+    #     closest_robot = None
+    #     
+    #     for player_id, player in self.players.items():
+    #         distance = np.sqrt((player.x - self.ball.x)**2 + (player.y - self.ball.y)**2)
+    #         if distance < closest_distance:
+    #             closest_distance = distance
+    #             closest_robot = player
+    #     
+    #     if closest_robot and closest_distance < 100:
+    #         # Calcular dirección hacia la portería rival
+    #         target_goal_x = ANCHO_CAMPO if closest_robot.team == "red" else 0
+    #         angle_to_goal = np.arctan2(ALTO_CAMPO/2 - self.ball.y, target_goal_x - self.ball.x)
+    #         
+    #         # Aplicar patada hacia la portería
+    #         kick_power = 60
+    #         self.ball_physics['velocity_x'] = kick_power * np.cos(angle_to_goal)
+    #         self.ball_physics['velocity_y'] = kick_power * np.sin(angle_to_goal)
+    #         
+    #         print(f"⚽ {closest_robot.team.upper()} pateó hacia portería!")
+    #         
+    #         # Iniciar simulación si no está activa
+    #         if not self.simulation_active:
+    #             self.start_simulation()
+    #     else:
+    #         print("❌ No hay robots cerca de la pelota")
+
+    def update_velocity_arrow(self):
+        """Actualiza la flecha que muestra la velocidad de la pelota"""
+        if self.ball_velocity_arrow is None:
+            # Crear flecha inicial (oculta)
+            self.ball_velocity_arrow = FancyArrowPatch(
+                (0, 0), (0, 0),
+                arrowstyle="->",
+                color="red",
+                linewidth=3,
+                mutation_scale=25,
+                visible=False
+            )
+            self.field_ax.add_patch(self.ball_velocity_arrow)
+    
+        # Mostrar flecha solo si hay velocidad significativa
+        speed = np.sqrt(self.ball_physics['velocity_x']**2 + self.ball_physics['velocity_y']**2)
+
+        if speed > 5:
+            # Escalar la flecha según la velocidad (máximo 100 píxeles)
+            scale_factor = min(speed * 2, 100)
+            arrow_end_x = self.ball.x + (self.ball_physics['velocity_x'] / speed) * scale_factor
+            arrow_end_y = self.ball.y + (self.ball_physics['velocity_y'] / speed) * scale_factor
+
+            self.ball_velocity_arrow.set_positions((self.ball.x, self.ball.y), 
+                                                   (arrow_end_x, arrow_end_y))
+            self.ball_velocity_arrow.set_visible(True)
+
+            # Actualizar label de la pelota con velocidad
+            speed_text = f"Pelota\n{speed:.1f} px/s"
+            self.ball_label.set_text(speed_text)
+        else:
+            self.ball_velocity_arrow.set_visible(False)
+            self.ball_label.set_text("Pelota")
+
+    def update_ball_visuals(self):
+        """Actualiza solo los elementos visuales de la pelota"""
+        self.ball_circle.center = (self.ball.x, self.ball.y)
+        self.ball_label.set_position((self.ball.x, self.ball.y - 45))
+        self.fig.canvas.draw_idle()
 
 
 if __name__ == "__main__":
