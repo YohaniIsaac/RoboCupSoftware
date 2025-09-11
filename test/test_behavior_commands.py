@@ -11,25 +11,63 @@ from robot_soccer.ai.behavior_tree.manager import BehaviorManager
 from robot_soccer.ai.behavior_tree.base import NodeStatus, get_global_tracer
 from robot_soccer.config import ROL_ATACANTE, ROL_DEFENSIVO, ANCHO_CAMPO, ALTO_CAMPO, LARGO_ARCO
 
-# Configuración global del logging
+# Clase para el formatter con colores
+class ColoredFormatter(logging.Formatter):
+    """Formatter que agrega colores a los logs"""
+
+    # Códigos ANSI para colores
+    RESET = '\033[0m'
+    RED = '\033[31m'
+    GREEN = '\033[32m'
+    YELLOW = '\033[33m'
+    BLUE = '\033[34m'
+    MAGENTA = '\033[35m'
+    CYAN = '\033[36m'
+
+    def format(self, record):
+        # Aplicar colores según el nivel
+        if record.levelname == 'ERROR':
+            color = self.RED
+        elif record.levelname == 'WARNING':
+            color = self.YELLOW
+        elif record.levelname == 'INFO':
+            color = self.BLUE
+        elif record.levelname == 'DEBUG':
+            color = self.GREEN
+        else:
+            color = self.RESET  # Sin color para otros niveles
+
+        # Colorear toda la línea
+        formatted_message = super().format(record)
+        record.msg = f"{color}{formatted_message}{self.RESET}"
+
+        # Sobrescribir el mensaje para que se aplique el color a toda la línea
+        return record.msg
+
+# Configuración global del logging (tu configuración original)
 logging.basicConfig(
     level=logging.INFO,
     format="%(levelname)-6s - %(filename)-25s - %(message)s"
 )
+# Aplicar el formatter con colores a todos los handlers existentes
+colored_formatter = ColoredFormatter("%(levelname)-6s - %(filename)-25s - %(message)s")
+for handler in logging.root.handlers:
+    handler.setFormatter(colored_formatter)
 
 # Control de niveles por módulo
-logging.getLogger("robot_soccer.core").setLevel(logging.INFO)
-logging.getLogger("robot_soccer.core.process").setLevel(logging.INFO)
-logging.getLogger("robot_soccer.core.physics").setLevel(logging.WARNING)
-
-logging.getLogger("robot_soccer.perception").setLevel(logging.INFO)
-
-logging.getLogger("robot_soccer.entities").setLevel(logging.ERROR)
-
-logging.getLogger("robot_soccer.ai.behavior_tree").setLevel(logging.INFO)
+logging.getLogger("robot_soccer.ai.behavior_tree").setLevel(logging.WARNING)
 logging.getLogger("robot_soccer.ai.fuzzy_logic").setLevel(logging.DEBUG)
 logging.getLogger("robot_soccer.ai.path_planning").setLevel(logging.WARNING)
-logging.getLogger("robot_soccer.ai.role_assignment").setLevel(logging.DEBUG)
+logging.getLogger("robot_soccer.ai.role_assignment").setLevel(logging.WARNING)
+
+logging.getLogger("robot_soccer.core").setLevel(logging.WARNING)
+logging.getLogger("robot_soccer.core.process").setLevel(logging.WARNING)
+logging.getLogger("robot_soccer.core.physics").setLevel(logging.WARNING)
+
+logging.getLogger("robot_soccer.perception").setLevel(logging.WARNING)
+
+logging.getLogger("robot_soccer.entities").setLevel(logging.WARNING)
+
 
 logging.getLogger("robot_soccer.controllers.robot_command_manager").setLevel(
     logging.DEBUG
@@ -164,7 +202,7 @@ class ImprovedBehaviorDebugger:
             'friction': 0.95,  # Factor de fricción (0.95 = pierde 5% velocidad por frame)
             'min_speed': 2.0   # Velocidad mínima antes de detenerse
         }
-    
+
         # Estado de simulación
         self.simulation_active = False
         self.physics_timer = None
@@ -560,7 +598,7 @@ class ImprovedBehaviorDebugger:
         headers = ["Objeto", "X", "Y", "VX", "VY", "Ángulo"]
         header_x_positions = [
             text_x_start,                           # "Objeto"
-            text_x_start + text_x_spacing,         # "X" 
+            text_x_start + text_x_spacing,         # "X"
             text_x_start + text_x_spacing * 2,     # "Y"
             text_x_start + text_x_spacing * 3,     # "VX"
             text_x_start + text_x_spacing * 4,     # "VY"
@@ -570,29 +608,29 @@ class ImprovedBehaviorDebugger:
         for i, (header, x_pos) in enumerate(zip(headers, header_x_positions)):
             color = "red" if header in ["VX", "VY"] else "black"
             self.edit_ax.text(
-                x_pos, 
-                text_y_start + 0.05, 
-                header, 
-                fontsize=10, 
+                x_pos,
+                text_y_start + 0.05,
+                header,
+                fontsize=10,
                 fontweight="bold",
                 color=color
             )
 
         # ============= EDITOR PARA LA PELOTA =============
         pelota_y_pos = text_y_start - text_y_spacing
-        
+
         # Texto "Pelota"
         self.edit_ax.text(
-            text_x_start, 
-            pelota_y_pos + 0.1, 
-            "Pelota", 
+            text_x_start,
+            pelota_y_pos + 0.1,
+            "Pelota",
             fontsize=11
         )
 
         # Posiciones de widgets para la pelota
         pelota_widget_positions = [
             widget_base_x + x_offset,                      # X
-            widget_base_x + x_offset + widget_x_spacing,   # Y  
+            widget_base_x + x_offset + widget_x_spacing,   # Y
             widget_base_x + x_offset + widget_x_spacing * 2, # VX
             widget_base_x + x_offset + widget_x_spacing * 3, # VY
         ]
@@ -620,16 +658,16 @@ class ImprovedBehaviorDebugger:
             # Posición Y para esta fila
             robot_y_pos = text_y_start - (i + 2) * text_y_spacing
             widget_y_pos = widget_base_y - (i + 1) * widget_y_spacing
-            
+
             player = self.players[player_id]
             color = "red" if player.team == "red" else "blue"
 
             # Texto del robot
             self.edit_ax.text(
-                text_x_start, 
-                robot_y_pos + 0.1, 
-                f"Robot {player_id}", 
-                fontsize=11, 
+                text_x_start,
+                robot_y_pos + 0.1,
+                f"Robot {player_id}",
+                fontsize=11,
                 color=color
             )
 
@@ -701,7 +739,7 @@ class ImprovedBehaviorDebugger:
             self.ball_physics['velocity_x'] = vx
             self.ball_physics['velocity_y'] = vy
 
-            log.info(f"⚡ Velocidad actualizada: vx={vx:.1f}, vy={vy:.1f}")
+            log.info(f" -- Velocidad actualizada: vx={vx:.1f}, vy={vy:.1f}")
 
             # Actualizar TextBoxes si los valores fueron limitados
             self.ball_widgets["vx"].set_val(f"{vx:.1f}")
@@ -793,22 +831,40 @@ class ImprovedBehaviorDebugger:
         )
         self.actions_ax.axis("off")
 
-        # Mostrar acciones para cada robot
-        y_start = 1.0
-        y_spacing = 0.34
+        # ============= VARIABLES DE LAYOUT =============
+        # Posiciones de texto base
+        text_x_start = -0.35        # Alineación izquierda del texto
+        text_y_start = 1.0         # Posición Y inicial
+        text_y_spacing = 0.34      # Espaciado entre robots
 
+        # Offsets internos para diferentes tipos de texto
+        action_y_offset = -0.05     # Offset para línea de acción
+        coord_y_offset = -0.1     # Offset para coordenadas
+        desc_y_offset = -0.15      # Offset para descripción
+        history_y_offset = -0.2   # Offset para historial
+
+        # Configuración de fuentes y colores
+        robot_title_fontsize = 10
+        action_fontsize = 8
+        desc_fontsize = 9
+        coord_fontsize = 8
+        history_fontsize = 8
+
+        # Mostrar acciones para cada robot
         for i, player_id in enumerate([1, 2, 3, 4]):
             player = self.players[player_id]
             team_color = "red" if player.team == "red" else "blue"
-            y_pos = y_start - i * y_spacing
+
+            # Calcular posición Y base para este robot
+            robot_y_base = text_y_start - i * text_y_spacing
 
             # Título del robot
             rol_text = "ATACANTE" if player.rol == ROL_ATACANTE else "DEFENSOR"
             self.actions_ax.text(
-                0.02,
-                y_pos,
+                text_x_start,
+                robot_y_base,
                 f"Robot {player_id} ({rol_text}):",
-                fontsize=11,
+                fontsize=robot_title_fontsize,
                 fontweight="bold",
                 color=team_color,
             )
@@ -841,22 +897,30 @@ class ImprovedBehaviorDebugger:
 
                 # Mostrar secuencia
                 self.actions_ax.text(
-                    0.02,
-                    y_pos - 0.1,
+                    text_x_start,
+                    robot_y_base + action_y_offset,
                     f"➜ {formatted_action}",
-                    fontsize=10,
+                    fontsize=action_fontsize,
                     color="darkgreen",
                     fontweight="bold",
                 )
                 self.actions_ax.text(
-                    0.02, y_pos - 0.17, f"   {action_desc}", fontsize=9, color="gray"
+                    text_x_start,
+                    robot_y_base + desc_y_offset,
+                    f"   {action_desc}",
+                    fontsize=desc_fontsize,
+                    color="gray"
                 )
 
                 # Añadir coordenadas específicas si están disponibles
                 coord_info = self.get_coordinate_info(player_id)
                 if coord_info:
                     self.actions_ax.text(
-                        0.02, y_pos - 0.22, f"{coord_info}", fontsize=8, color="blue"
+                        text_x_start,
+                        robot_y_base + coord_y_offset,
+                        f"{coord_info}",
+                        fontsize=coord_fontsize,
+                        color="blue"
                     )
 
                 # Añadir al historial
@@ -870,10 +934,10 @@ class ImprovedBehaviorDebugger:
             else:
                 # Si no hay acción, mostrar estado de espera
                 self.actions_ax.text(
-                    0.02,
-                    y_pos - 0.1,
+                    text_x_start,
+                    robot_y_base + action_y_offset,
                     "➜ En espera...",
-                    fontsize=10,
+                    fontsize=action_fontsize,
                     color="gray",
                     style="italic",
                 )
@@ -882,10 +946,10 @@ class ImprovedBehaviorDebugger:
             if self.action_history[player_id]:
                 history_text = " → ".join(self.action_history[player_id][-2:])
                 self.actions_ax.text(
-                    0.02,
-                    y_pos - 0.31,
+                    text_x_start,
+                    robot_y_base + history_y_offset,
                     f"Historial: {history_text}",
-                    fontsize=8,
+                    fontsize=history_fontsize,
                     color="lightgray",
                     style="italic",
                 )
@@ -1302,7 +1366,7 @@ class ImprovedBehaviorDebugger:
         self.update_behavior_view()
         self.update_actions_view()
         self.update_details_view()
-        self.update_movement_visualization()  # Nueva función
+        self.update_movement_visualization()
         self.fig.canvas.draw_idle()
 
     def update_field_view(self):
@@ -1333,9 +1397,9 @@ class ImprovedBehaviorDebugger:
         state = self.current_states[self.focused_robot_id]
 
         speed = getattr(self.ball, 'speed', 0)
-        velocity_info = f"VELOCIDAD PELOTA\n"
-        velocity_info += f"Velocidad: {speed:.1f} px/s\n"
-        # velocity_info += f"Simulación: {'🔄 ON' if self.simulation_active else '⏹ OFF'}\n"
+        velocity_info = "VELOCIDAD PELOTA\n"
+        velocity_info += f"Velocidad: {speed:.2f} px/s\n"
+        # velocity_info += f"Simulación: {'ON' if self.simulation_active else '⏹ OFF'}\n"
 
         # Información del estado
         info_text = f"Equipo: {'Rojo' if self.focused_robot_id <= 2 else 'Azul'}\n"
@@ -1407,6 +1471,20 @@ class ImprovedBehaviorDebugger:
         )
         self.details_ax.axis("off")
 
+        # ============= VARIABLES DE LAYOUT =============
+        # Posición del texto principal
+        text_x_position = -0.35     # Posición X del texto (alineación izquierda)
+        text_y_position = 1.5       # Posición Y del texto (altura)
+
+        # Configuración de fuente y espaciado
+        text_fontsize = 9           # Tamaño de fuente
+        text_linespacing = 1.2      # Espaciado entre líneas
+        text_family = "monospace"   # Familia de fuente
+
+        # Límite de elementos de traza a mostrar
+        max_trace_items = self.execution_depth * 5
+
+        # ============= GENERACIÓN DE CONTENIDO =============
         # Información de debug
         debug_text = f"Robot enfocado: {self.focused_robot_id}\n"
         debug_text += f"Trace items: {len(self.tracer.trace)}\n"
@@ -1417,7 +1495,7 @@ class ImprovedBehaviorDebugger:
         if self.tracer.trace:
             debug_text += "TRAZA DE EJECUCIÓN:\n"
 
-            for _, node in enumerate(self.tracer.trace[: self.execution_depth * 5]):
+            for _, node in enumerate(self.tracer.trace[:max_trace_items]):
                 node_name = " ".join(
                     word.capitalize() for word in node["name"].split("_")
                 )
@@ -1436,15 +1514,15 @@ class ImprovedBehaviorDebugger:
             debug_text += "Presiona 'Analizar' para generar traza.\n"
 
         self.details_ax.text(
-            -0.23,
-            1.5,
+            text_x_position,
+            text_y_position,
             debug_text,
             ha="left",
             va="top",
             transform=self.details_ax.transAxes,
-            fontsize=9,
-            linespacing=1.2,
-            family="monospace",
+            fontsize=text_fontsize,
+            linespacing=text_linespacing,
+            family=text_family,
         )
 
     @staticmethod
@@ -1464,63 +1542,63 @@ class ImprovedBehaviorDebugger:
     def start_simulation(self):
         """Inicia la simulación continua"""
         self.simulation_active = True
-        self.sim_button.label.set_text("⏸ Parar")
-        
+        self.sim_button.label.set_text("|| Parar")
+
         # Timer que actualiza cada 50ms (20 FPS)
         self.physics_timer = self.fig.canvas.new_timer(interval=50)
         self.physics_timer.add_callback(self.update_physics)
         self.physics_timer.start()
-        
-        log.info("🔄 Simulación iniciada")
+
+        log.info("Simulación iniciada")
 
     def stop_simulation(self):
         """Para la simulación"""
         self.simulation_active = False
-        self.sim_button.label.set_text("▶ Simular") 
-        
+        self.sim_button.label.set_text("▶ Simular")
+
         if self.physics_timer:
             self.physics_timer.stop()
             self.physics_timer = None
-        
+
         log.info("⏹ Simulación detenida")
 
     def update_physics(self):
         """Actualiza solo la posición de la pelota existente"""
         if not self.simulation_active:
             return
-        
+
         # Aplicar movimiento simple
         if abs(self.ball_physics['velocity_x']) > self.ball_physics['min_speed'] or \
            abs(self.ball_physics['velocity_y']) > self.ball_physics['min_speed']:
-            
+
             # Calcular nueva posición
-            new_x = self.ball.x + self.ball_physics['velocity_x'] 
+            new_x = self.ball.x + self.ball_physics['velocity_x']
             new_y = self.ball.y + self.ball_physics['velocity_y']
-            
+
             # Mantener dentro del campo
             new_x = max(30, min(ANCHO_CAMPO - 30, new_x))
             new_y = max(30, min(ALTO_CAMPO - 30, new_y))
-            
+
             # Actualizar la pelota (esto actualiza automáticamente ball.speed por tu nueva clase)
             self.ball.set_position(new_x, new_y)
-            
+
             # Actualizar SOLO los elementos visuales existentes
             self.ball_circle.center = (new_x, new_y)  # Mover círculo existente
             self.ball_label.set_position((new_x, new_y - 45))  # Mover etiqueta existente
-            
+
             # Aplicar fricción simple
             self.ball_physics['velocity_x'] *= self.ball_physics['friction']
             self.ball_physics['velocity_y'] *= self.ball_physics['friction']
-            
+
             # Refrescar SOLO el gráfico (sin crear nada nuevo)
             self.fig.canvas.draw_idle()
-            
+
             # Analizar comportamientos (opcional, cada ciertos frames)
             if hasattr(self, '_physics_counter'):
                 self._physics_counter += 1
             else:
                 self._physics_counter = 0
-                
+
             # Solo analizar cada 5 frames para no saturar
             if self._physics_counter % 5 == 0:
                 self.analyze_behaviors()
@@ -1532,7 +1610,7 @@ class ImprovedBehaviorDebugger:
     def handle_wall_bounces(self, new_x, new_y):
         """Maneja rebotes con las paredes del campo"""
         bounce_factor = 0.8  # La pelota pierde energía al rebotar
-        
+
         # Rebote en paredes verticales (izquierda/derecha)
         if new_x <= 30:  # Borde izquierdo
             new_x = 30
@@ -1540,7 +1618,7 @@ class ImprovedBehaviorDebugger:
         elif new_x >= ANCHO_CAMPO - 30:  # Borde derecho
             new_x = ANCHO_CAMPO - 30
             self.ball_physics['velocity_x'] = -self.ball_physics['velocity_x'] * bounce_factor
-        
+
         # Rebote en paredes horizontales (arriba/abajo)
         if new_y <= 30:  # Borde superior
             new_y = 30
@@ -1548,30 +1626,30 @@ class ImprovedBehaviorDebugger:
         elif new_y >= ALTO_CAMPO - 30:  # Borde inferior
             new_y = ALTO_CAMPO - 30
             self.ball_physics['velocity_y'] = -self.ball_physics['velocity_y'] * bounce_factor
-        
+
         return new_x, new_y
 
     # def check_robot_kicks(self, ball_x, ball_y):
     #     """Verifica si algún robot está cerca y puede 'patear' la pelota"""
     #     kick_distance = 50  # Distancia para que un robot pueda patear
     #     kick_strength = 40  # Fuerza de la patada
-    #     
+    #
     #     for player_id, player in self.players.items():
     #         distance = np.sqrt((player.x - ball_x)**2 + (player.y - ball_y)**2)
-    #         
+    #
     #         if distance < kick_distance:
     #             # Calcular dirección de la patada (robot hacia pelota)
     #             angle_to_ball = np.arctan2(ball_y - player.y, ball_x - player.x)
-    #             
+    #
     #             # Añadir algo de aleatoriedad a la dirección
     #             angle_variation = (np.random.random() - 0.5) * 0.3  # ±0.15 radianes
     #             kick_angle = angle_to_ball + angle_variation
-    #             
+    #
     #             # Aplicar velocidad en esa dirección
     #             self.ball_physics['velocity_x'] += kick_strength * np.cos(kick_angle)
     #             self.ball_physics['velocity_y'] += kick_strength * np.sin(kick_angle)
-    #             
-    #             print(f"🦵 Robot {player_id} pateó la pelota!")
+    #
+    #             print(f"Robot {player_id} pateó la pelota!")
     #             break  # Solo un robot puede patear por frame
 
     # def simulate_kick(self, event):
@@ -1579,30 +1657,30 @@ class ImprovedBehaviorDebugger:
     #     # Encontrar el robot más cercano a la pelota
     #     closest_distance = float('inf')
     #     closest_robot = None
-    #     
+    #
     #     for player_id, player in self.players.items():
     #         distance = np.sqrt((player.x - self.ball.x)**2 + (player.y - self.ball.y)**2)
     #         if distance < closest_distance:
     #             closest_distance = distance
     #             closest_robot = player
-    #     
+    #
     #     if closest_robot and closest_distance < 100:
     #         # Calcular dirección hacia la portería rival
     #         target_goal_x = ANCHO_CAMPO if closest_robot.team == "red" else 0
     #         angle_to_goal = np.arctan2(ALTO_CAMPO/2 - self.ball.y, target_goal_x - self.ball.x)
-    #         
+    #
     #         # Aplicar patada hacia la portería
     #         kick_power = 60
     #         self.ball_physics['velocity_x'] = kick_power * np.cos(angle_to_goal)
     #         self.ball_physics['velocity_y'] = kick_power * np.sin(angle_to_goal)
-    #         
-    #         print(f"⚽ {closest_robot.team.upper()} pateó hacia portería!")
-    #         
+    #
+    #         print(f"{closest_robot.team.upper()} pateó hacia portería!")
+    #
     #         # Iniciar simulación si no está activa
     #         if not self.simulation_active:
     #             self.start_simulation()
     #     else:
-    #         print("❌ No hay robots cerca de la pelota")
+    #         print("No hay robots cerca de la pelota")
 
     def update_velocity_arrow(self):
         """Actualiza la flecha que muestra la velocidad de la pelota"""
@@ -1617,7 +1695,7 @@ class ImprovedBehaviorDebugger:
                 visible=False
             )
             self.field_ax.add_patch(self.ball_velocity_arrow)
-    
+
         # Mostrar flecha solo si hay velocidad significativa
         speed = np.sqrt(self.ball_physics['velocity_x']**2 + self.ball_physics['velocity_y']**2)
 
@@ -1627,7 +1705,7 @@ class ImprovedBehaviorDebugger:
             arrow_end_x = self.ball.x + (self.ball_physics['velocity_x'] / speed) * scale_factor
             arrow_end_y = self.ball.y + (self.ball_physics['velocity_y'] / speed) * scale_factor
 
-            self.ball_velocity_arrow.set_positions((self.ball.x, self.ball.y), 
+            self.ball_velocity_arrow.set_positions((self.ball.x, self.ball.y),
                                                    (arrow_end_x, arrow_end_y))
             self.ball_velocity_arrow.set_visible(True)
 
