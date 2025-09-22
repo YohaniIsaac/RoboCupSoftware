@@ -9,7 +9,8 @@ from robot_soccer.entities.ball import Ball
 from robot_soccer.ai.fuzzy_logic.game_context import FuzzyRobotTeamManager
 from robot_soccer.ai.behavior_tree.manager import BehaviorManager
 from robot_soccer.ai.behavior_tree.base import NodeStatus, get_global_tracer
-from robot_soccer.config import ROL_ATACANTE, ROL_DEFENSIVO, ANCHO_CAMPO, ALTO_CAMPO, LARGO_ARCO
+from robot_soccer.config import (ROL_ATACANTE, ROL_DEFENSIVO, ANCHO_CAMPO, ALTO_CAMPO, LARGO_ARCO,
+                                 ZONA_IZQUIERDA, ZONA_DERECHA)
 
 # Clase para el formatter con colores
 class ColoredFormatter(logging.Formatter):
@@ -353,15 +354,15 @@ class ImprovedBehaviorDebugger:
 
         # Líneas de zona
         self.field_ax.axvline(
-            ANCHO_CAMPO * 0.3, color="gray", linestyle="--", alpha=0.5
+            ANCHO_CAMPO * ZONA_IZQUIERDA, color="gray", linestyle="--", alpha=0.5
         )
         self.field_ax.axvline(
-            ANCHO_CAMPO * 0.7, color="gray", linestyle="--", alpha=0.5
+            ANCHO_CAMPO * ZONA_DERECHA, color="gray", linestyle="--", alpha=0.5
         )
 
         # Etiquetas de zona
         self.field_ax.text(
-            ANCHO_CAMPO * 0.15,
+            ANCHO_CAMPO * ZONA_IZQUIERDA / 2,
             ALTO_CAMPO + 20,
             "Zona Defensiva",
             ha="center",
@@ -370,7 +371,7 @@ class ImprovedBehaviorDebugger:
             alpha=0.7,
         )
         self.field_ax.text(
-            ANCHO_CAMPO * 0.5,
+            ANCHO_CAMPO * (ZONA_IZQUIERDA + ZONA_DERECHA) / 2,
             ALTO_CAMPO + 20,
             "Zona Neutral",
             ha="center",
@@ -379,7 +380,7 @@ class ImprovedBehaviorDebugger:
             alpha=0.7,
         )
         self.field_ax.text(
-            ANCHO_CAMPO * 0.85,
+            ANCHO_CAMPO * (ZONA_DERECHA + 1.0) / 2,
             ALTO_CAMPO + 20,
             "Zona Ofensiva",
             ha="center",

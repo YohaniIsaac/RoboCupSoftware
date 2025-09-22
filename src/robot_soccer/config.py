@@ -29,9 +29,10 @@ MARGEN_CANCHA = 50  # Margen alrededor del campo
 ANCHO_TOTAL = ANCHO_CAMPO + MARGEN_CANCHA * 2
 ALTO_TOTAL = ALTO_CAMPO + MARGEN_CANCHA * 2
 
+ZONA_POR_EQUIPO = 0.4
 # Zonas del campo (en porcentaje del ancho)
-ZONA_IZQUIERDA = 0.3  # 30% del ancho desde la izquierda
-ZONA_DERECHA = 0.7    # 70% del ancho desde la izquierda
+ZONA_IZQUIERDA = ZONA_POR_EQUIPO
+ZONA_DERECHA = 1.0 - ZONA_POR_EQUIPO
 
 # Dimensiones de la portería
 LARGO_ARCO = 200
