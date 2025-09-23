@@ -968,6 +968,36 @@ def position_to_defend_goal(blackboard):
     # Este es un comportamiento continuo, siempre está en ejecución
     return NodeStatus.RUNNING
 
+def is_closest_defender_to_ball(blackboard):
+    """Comprueba si este defensor es el más cercano a la pelota entre los defensores."""
+    if blackboard.player.rol != ROL_DEFENSIVO:
+        return False
+
+    my_distance = blackboard.player.distance_to_ball(blackboard.ball)
+
+    # Comparar con otros defensores del equipo
+    for teammate in blackboard.team_players:
+        if teammate.id != blackboard.player.id and teammate.rol == ROL_DEFENSIVO:
+            teammate_distance = teammate.distance_to_ball(blackboard.ball)
+            if teammate_distance < my_distance:
+                return False
+
+    return True
+
+
+def is_no_attacker_closer_to_ball(blackboard):
+    """Comprueba si no hay ningún atacante del equipo más cerca de la pelota."""
+    my_distance = blackboard.player.distance_to_ball(blackboard.ball)
+
+    # Verificar atacantes del equipo
+    for teammate in blackboard.team_players:
+        if teammate.rol == ROL_ATACANTE:
+            teammate_distance = teammate.distance_to_ball(blackboard.ball)
+            # Si hay un atacante significativamente más cerca, el defensor no debería ir
+            if teammate_distance < my_distance - 50:  # Margen de 50px
+                return False
+
+    return True
 
 # CREACIÓN DE ÁRBOLES DE COMPORTAMIENTO COMPLETOS
 
@@ -1081,6 +1111,8 @@ def create_defender_tree():
             SequenceNode("CapturarPelotaNeutral").add_children(
                 ConditionNode(is_ball_in_neutral_zone, "PelotaEnZonaNeutral"),
                 ConditionNode(is_ball_free, "PelotaLibre"),
+                ConditionNode(is_closest_defender_to_ball, "DefensorMasCercano"),
+                ConditionNode(is_no_attacker_closer_to_ball, "NoHayAtacanteMasCerca"),
                 ActionNode(move_to_ball, "MoverHaciaPelota"),
                 ActionNode(capture_ball, "CapturarPelota"),
             ),

@@ -1,0 +1,39 @@
+"""
+Configuración de constantes para la interfaz de test de comportamientos.
+Todas las constantes relacionadas con layout, posicionamiento y estilo visual.
+"""
+# SISTEMA DE DESCRIPCIÓN PARA LÓGICA DIFUSA
+
+TITLE_DIFUSE_LOGIC_X = .25
+TITLE_DIFUSE_LOGIC_Y = 0.9
+TITLE_HEADER_FONTSIZE = 11
+
+# ============= CONFIGURACIÓN DE LAYOUT GENERAL =============
+TEXT_X_POSITION_GENERAL = 0.18
+TEXT_Y_POSITION_GENERAL = 0.35
+FONT_SIZE_GENERAL = 10
+TEXT_LINESPACING_GENERAL = 1.5
+# ============= CONFIGURACIÓN DE LAYOUT VELOCIDAD =============
+TEXT_X_POSITION_VELOCIDAD = 0.18
+TEXT_Y_POSITION_VELOCIDAD = 0.82
+FONT_SIZE_VELOCIDAD = 10
+TEXT_LINESPACING_VELOCIDAD = 1.5
+
+# ============================================================
+#                       SISTEMAS DIFUSOS
+# ============================================================
+# ============= CONFIGURACIÓN DE LAYOUT POSESION =============
+TEXT_X_POSITION_POSESION = -0.18
+TEXT_Y_POSITION_POSESION = 4.0 #2.4
+FONT_SIZE_POSESION = 9
+TEXT_LINESPACING_POSESION = 1.35
+# ============= CONFIGURACIÓN DE LAYOUT PROXIMIDAD ===========
+TEXT_X_POSITION_PROXIMIDAD = -0.18
+TEXT_Y_POSITION_PROXIMIDAD = 1.1
+FONT_SIZE_PROXIMIDAD = 9
+TEXT_LINESPACING_PROXIMIDAD = 1.35
+# ============= CONFIGURACIÓN DE LAYOUT ZONA ================
+TEXT_X_POSITION_ZONA = 0.01
+TEXT_Y_POSITION_ZONA = 1.1
+FONT_SIZE_ZONA = 9
+TEXT_LINESPACING_ZONA = 1.35

@@ -11,6 +11,9 @@ from robot_soccer.ai.behavior_tree.manager import BehaviorManager
 from robot_soccer.ai.behavior_tree.base import NodeStatus, get_global_tracer
 from robot_soccer.config import (ROL_ATACANTE, ROL_DEFENSIVO, ANCHO_CAMPO, ALTO_CAMPO, LARGO_ARCO,
                                  ZONA_IZQUIERDA, ZONA_DERECHA)
+from config_test import *
+from tools_fuzzy import get_fuzzy_variables
+
 
 # Clase para el formatter con colores
 class ColoredFormatter(logging.Formatter):
@@ -151,6 +154,7 @@ class ImprovedBehaviorDebugger:
         self.behavior_ax = None
         self.edit_ax = None
         self.details_ax = None
+        self.params_ax = None
         self.ball_circle = None
         self.ball_label = None
         self.player_circles = None
@@ -312,9 +316,14 @@ class ImprovedBehaviorDebugger:
         self.edit_ax.axis("off")
 
         # Panel de detalles del árbol
-        self.details_ax = self.fig.add_subplot(self.gs[3, 2])
+        self.details_ax = self.fig.add_subplot(self.gs[2, 2])
         self.details_ax.set_title("Detalles del Árbol de Comportamiento")
         self.details_ax.axis("off")
+
+        # Panel de parámetros afinables
+        self.params_ax = self.fig.add_subplot(self.gs[3, 2])
+        self.params_ax.set_title("Parámetros Afinables")
+        self.params_ax.axis("off")
 
         # Añadir controles
         self.add_controls()
@@ -533,7 +542,7 @@ class ImprovedBehaviorDebugger:
     def add_controls(self):
         """Añade controles interactivos mejorados"""
         # Selector de robot
-        robot_selector_ax = plt.axes((0.02, 0.73, 0.08, 0.15))
+        robot_selector_ax = plt.axes((0.02, 0.8, 0.08, 0.15))
         self.robot_selector = RadioButtons(
             robot_selector_ax,
             ["Robot 1", "Robot 2", "Robot 3", "Robot 4"],
@@ -542,26 +551,26 @@ class ImprovedBehaviorDebugger:
         self.robot_selector.on_clicked(self.on_robot_selected)
 
         # Botones de acción
-        analyze_button_ax = plt.axes((0.02, 0.55, 0.08, 0.04))
-        self.analyze_button = Button(analyze_button_ax, "Analizar")
-        self.analyze_button.on_clicked(self.analyze_behaviors)
-
-        roles_button_ax = plt.axes((0.02, 0.60, 0.08, 0.04))
-        self.roles_button = Button(roles_button_ax, "Actualizar Roles")
-        self.roles_button.on_clicked(self.update_roles)
-
-        reset_button_ax = plt.axes((0.02, 0.65, 0.08, 0.04))
+        reset_button_ax = plt.axes((0.02, 0.75, 0.08, 0.04))
         self.reset_button = Button(reset_button_ax, "Reset Posiciones")
         self.reset_button.on_clicked(self.reset_positions)
 
-        # Niveles de depuración
-        debug_level_ax = plt.axes((0.02, 0.35, 0.08, 0.15))
-        self.debug_level = RadioButtons(
-            debug_level_ax, ["Básico", "Detallado", "Completo"], active=0
-        )
-        self.debug_level.on_clicked(self.on_debug_level_changed)
+        roles_button_ax = plt.axes((0.02, 0.7, 0.08, 0.04))
+        self.roles_button = Button(roles_button_ax, "Actualizar Roles")
+        self.roles_button.on_clicked(self.update_roles)
 
-        sim_button_ax = plt.axes((0.02, 0.25, 0.08, 0.04))
+        analyze_button_ax = plt.axes((0.02, 0.65, 0.08, 0.04))
+        self.analyze_button = Button(analyze_button_ax, "Analizar")
+        self.analyze_button.on_clicked(self.analyze_behaviors)
+
+        # Niveles de depuración
+        # debug_level_ax = plt.axes((0.02, 0.6, 0.08, 0.14))
+        # self.debug_level = RadioButtons(
+        #     debug_level_ax, ["Básico", "Detallado", "Completo"], active=0
+        # )
+        # self.debug_level.on_clicked(self.on_debug_level_changed)
+
+        sim_button_ax = plt.axes((0.02, 0.6, 0.08, 0.04))
         self.sim_button = Button(sim_button_ax, "▶ Simular")
         self.sim_button.on_clicked(self.toggle_simulation)
 
@@ -750,33 +759,34 @@ class ImprovedBehaviorDebugger:
             # Restaurar valores anteriores en caso de error
             self.ball_widgets["vx"].set_val(f"{self.ball_physics['velocity_x']:.1f}")
             self.ball_widgets["vy"].set_val(f"{self.ball_physics['velocity_y']:.1f}")
-        def update_robot_position(self, player_id):
-            """Actualiza la posición de un robot desde los TextBoxes"""
-            try:
-                widgets = self.position_widgets[player_id]
-                x = float(widgets["x"].text)
-                y = float(widgets["y"].text)
-                angle = float(widgets["angle"].text) % 360
 
-                # Limitar dentro del campo
-                x = max(0, min(ANCHO_CAMPO, x))
-                y = max(0, min(ALTO_CAMPO, y))
+    def update_robot_position(self, player_id):
+        """Actualiza la posición de un robot desde los TextBoxes"""
+        try:
+            widgets = self.position_widgets[player_id]
+            x = float(widgets["x"].text)
+            y = float(widgets["y"].text)
+            angle = float(widgets["angle"].text) % 360
 
-                # Actualizar
-                player = self.players[player_id]
-                player.set_position(x, y)
-                player.set_angle(angle)
-                self.positions[player_id] = [x, y, angle]
+            # Limitar dentro del campo
+            x = max(0, min(ANCHO_CAMPO, x))
+            y = max(0, min(ALTO_CAMPO, y))
 
-                # Actualizar visuales
-                self.update_player_visual(player_id)
+            # Actualizar
+            player = self.players[player_id]
+            player.set_position(x, y)
+            player.set_angle(angle)
+            self.positions[player_id] = [x, y, angle]
 
-                # Analizar
-                self.analyze_behaviors()
-                self.fig.canvas.draw_idle()
+            # Actualizar visuales
+            self.update_player_visual(player_id)
 
-            except ValueError:
-                pass
+            # Analizar
+            self.analyze_behaviors()
+            self.fig.canvas.draw_idle()
+
+        except ValueError:
+            pass
 
     def update_player_visual(self, player_id):
         """Actualiza los elementos visuales de un jugador"""
@@ -1367,6 +1377,7 @@ class ImprovedBehaviorDebugger:
         self.update_behavior_view()
         self.update_actions_view()
         self.update_details_view()
+        self.update_params_view()
         self.update_movement_visualization()
         self.fig.canvas.draw_idle()
 
@@ -1385,10 +1396,10 @@ class ImprovedBehaviorDebugger:
         self.behavior_ax.clear()
         self.behavior_ax.set_title(
             f"Estado Robot {self.focused_robot_id}",
-            y=0.7,
-            x=0.42,
+            y=TITLE_DIFUSE_LOGIC_Y,
+            x=TITLE_DIFUSE_LOGIC_X,
             fontweight="bold",
-            fontsize=14,
+            fontsize=TITLE_HEADER_FONTSIZE,
         )
         self.behavior_ax.axis("off")
 
@@ -1396,134 +1407,369 @@ class ImprovedBehaviorDebugger:
             return
 
         state = self.current_states[self.focused_robot_id]
+        player = self.players[self.focused_robot_id]
 
+        # Determinar el equipo y obtener el contexto de lógica difusa correspondiente
+        team = "red" if self.focused_robot_id <= 2 else "blue"
+        fuzzy_manager = self.context_managers[team]
+
+        # Obtener las variables de entrada y salida del sistema difuso
+        fuzzy_vars = get_fuzzy_variables(fuzzy_manager, self.focused_robot_id, self.players, self.ball)
+
+        # Veolocida de la pelota
         speed = getattr(self.ball, 'speed', 0)
         velocity_info = "VELOCIDAD PELOTA\n"
         velocity_info += f"Velocidad: {speed:.2f} px/s\n"
-        # velocity_info += f"Simulación: {'ON' if self.simulation_active else '⏹ OFF'}\n"
 
-        # Información del estado
-        info_text = f"Equipo: {'Rojo' if self.focused_robot_id <= 2 else 'Azul'}\n"
-        info_text += f"Rol: {state.get('rol', 'Desconocido')}\n\n"
+        # COLUMNA 1: SISTEMA POSESIÓN (entradas y salida)
+        posesion_info = "$\\bf{SISTEMA \\ POSESIÓN}$\n"
+        posesion_info += "Entradas:\n"
+        posesion_info += f"• Dist A1: {fuzzy_vars['inputs']['distancia_aliado1']:.0f}\n"
+        posesion_info += f"• Dist A2: {fuzzy_vars['inputs']['distancia_aliado2']:.0f}\n"
+        posesion_info += f"• Dist R1: {fuzzy_vars['inputs']['distancia_rival1']:.0f}\n"
+        posesion_info += f"• Dist R2: {fuzzy_vars['inputs']['distancia_rival2']:.0f}\n"
+        posesion_info += f"• Ori A1: {fuzzy_vars['inputs']['orientacion_aliado1']:.2f}\n"
+        posesion_info += f"• Ori A2: {fuzzy_vars['inputs']['orientacion_aliado2']:.2f}\n"
+        posesion_info += f"• Ori R1: {fuzzy_vars['inputs']['orientacion_rival1']:.2f}\n"
+        posesion_info += f"• Ori R2: {fuzzy_vars['inputs']['orientacion_rival2']:.2f}\n"
+        posesion_info += f"• Vel: {fuzzy_vars['inputs']['velocidad_pelota']:.1f}\n"
+        posesion_info += f"• Dir: {fuzzy_vars['inputs']['direccion_movimiento']:.1f}\n\n"
+        posesion_info += f"Salida:\n"
+        posesion_info += f"• Posesión: {fuzzy_vars['outputs']['posesion_pelota']:.2f}"
 
-        # Estado de la pelota
-        info_estado_pelota = f"Pelota: {state.get('posesion_pelota', 'Desconocido')}\n"
-        info_estado_pelota += (
-            f"Proximidad: {state.get('proximidad_equipo', 'Desconocido')}\n"
-        )
-        info_estado_pelota += f"Zona: {state.get('zona_pelota', 'Desconocido')}\n\n"
 
-        # Métricas
-        info_metricas = f"Dist. pelota: {state.get('distancia_pelota', 0):.1f} px\n"
-        info_metricas += (
-            f"Tiene pelota: {'SÍ' if state.get('tiene_pelota', False) else 'NO'}\n"
-        )
+        # COLUMNA 2: SISTEMA PROXIMIDAD (entradas y salida)
+        proximidad_info = "$\\bf{SISTEMA \\ PROXIMIDAD}$\n"
+        proximidad_info += "Entradas:\n"
+        proximidad_info += f"• Posesión R: {fuzzy_vars['inputs']['posesion_pelota_result']:.2f}\n"
+        proximidad_info += f"• Ventaja P: {fuzzy_vars['inputs']['ventaja_proximidad']:.0f}\n"
+        proximidad_info += f"• Vel Pelota: {fuzzy_vars['inputs']['velocidad_pelota']:.1f}\n\n"
+        proximidad_info += f"Salida:\n"
+        proximidad_info += f"• Proximidad: {fuzzy_vars['outputs']['proximidad_equipo']:.2f}"
+
+        # COLUMNA 3: SISTEMA ZONA (entradas y salida)
+        zona_info = "$\\bf{SISTEMA \\ ZONA}$\n"
+        zona_info += "Entradas:\n"
+        zona_info += f"• Pos X: {fuzzy_vars['inputs']['posicion_x']:.0f}\n"
+        zona_info += f"• Dir Mov: {fuzzy_vars['inputs']['direccion_movimiento']:.1f}\n\n"
+        zona_info += f"Salida:\n"
+        zona_info += f"• Zona: {fuzzy_vars['outputs']['zona_pelota']:.2f}"
+
+
+        # Información del robot (parte superior)
+        info_basic = f"Equipo: {'Rojo' if self.focused_robot_id <= 2 else 'Azul'}\n"
+        info_basic += f"Rol: {state.get('rol', 'Desconocido')}\n"
 
         self.behavior_ax.text(
-            -0.15,
-            0.5,
+            TEXT_X_POSITION_GENERAL,
+            TEXT_Y_POSITION_GENERAL,
+            info_basic,
+            ha="left",
+            va="top",
+            transform=self.behavior_ax.transAxes,
+            fontsize=FONT_SIZE_GENERAL,
+            linespacing=TEXT_LINESPACING_GENERAL,
+        )
+        self.behavior_ax.text(
+            TEXT_X_POSITION_VELOCIDAD,
+            TEXT_Y_POSITION_VELOCIDAD,
             velocity_info,
             ha="left",
             va="top",
             transform=self.behavior_ax.transAxes,
-            fontsize=10,
-            linespacing=1.5,
+            fontsize=FONT_SIZE_VELOCIDAD,
+            linespacing=TEXT_LINESPACING_VELOCIDAD,
         )
         self.behavior_ax.text(
-            0.05,
-            0.5,
-            info_text,
+            TEXT_X_POSITION_POSESION,
+            TEXT_Y_POSITION_POSESION,
+            posesion_info,
             ha="left",
             va="top",
             transform=self.behavior_ax.transAxes,
-            fontsize=10,
-            linespacing=1.5,
+            fontsize=FONT_SIZE_POSESION,
+            linespacing=TEXT_LINESPACING_POSESION,
         )
         self.behavior_ax.text(
-            0.35,
-            0.5,
-            info_estado_pelota,
+            TEXT_X_POSITION_PROXIMIDAD,
+            TEXT_Y_POSITION_PROXIMIDAD,
+            proximidad_info,
             ha="left",
             va="top",
             transform=self.behavior_ax.transAxes,
-            fontsize=10,
-            linespacing=1.5,
+            fontsize=FONT_SIZE_PROXIMIDAD,
+            linespacing=TEXT_LINESPACING_PROXIMIDAD,
         )
         self.behavior_ax.text(
-            0.65,
-            0.5,
-            info_metricas,
+            TEXT_X_POSITION_ZONA,
+            TEXT_Y_POSITION_ZONA,
+            zona_info,
             ha="left",
             va="top",
             transform=self.behavior_ax.transAxes,
-            fontsize=10,
-            linespacing=1.5,
+            fontsize=FONT_SIZE_ZONA,
+            linespacing=TEXT_LINESPACING_ZONA,
         )
 
     def update_details_view(self):
-        """Actualiza la vista de detalles del árbol"""
+        """Actualiza la vista de detalles del árbol con jerarquía y condiciones"""
         self.details_ax.clear()
         self.details_ax.set_title(
-            "Detalles del Árbol de Comportamiento",
-            y=1.5,
-            x=0.42,
+            "Árbol de Decisiones y Parámetros",
+            y=-0.3,
+            x=-1.5,
             fontweight="bold",
             fontsize=12,
         )
         self.details_ax.axis("off")
 
         # ============= VARIABLES DE LAYOUT =============
-        # Posición del texto principal
-        text_x_position = -0.35     # Posición X del texto (alineación izquierda)
-        text_y_position = 1.5       # Posición Y del texto (altura)
+        text_x_col1 = -2.5   # Columna 1: Condiciones Evaluadas
+        text_x_col2 = -1.9   # Columna 2: Parámetros Clave
+        text_x_col3 = -1.3    # Columna 3: Flujo de Decisiones
+        text_y_position = -0.2
+        text_fontsize = 8
+        text_linespacing = 1.3
+        text_family = "monospace"
 
-        # Configuración de fuente y espaciado
-        text_fontsize = 9           # Tamaño de fuente
-        text_linespacing = 1.2      # Espaciado entre líneas
-        text_family = "monospace"   # Familia de fuente
+        # ============= GENERAR CONTENIDO =============
+        player = self.players[self.focused_robot_id]
+        blackboard = None
+        team = "red" if self.focused_robot_id <= 2 else "blue"
+        manager = self.team_managers[team]
 
-        # Límite de elementos de traza a mostrar
-        max_trace_items = self.execution_depth * 5
+        if self.focused_robot_id in manager.blackboards:
+            blackboard = manager.blackboards[self.focused_robot_id]
 
-        # ============= GENERACIÓN DE CONTENIDO =============
-        # Información de debug
-        debug_text = f"Robot enfocado: {self.focused_robot_id}\n"
-        debug_text += f"Trace items: {len(self.tracer.trace)}\n"
-        debug_text += f"Next action: {self.tracer.next_action}\n"
-        debug_text += f"Robot actions: {len(self.tracer_ext.robot_actions)}\n"
-        debug_text += f"Planned movements: {len(self.tracer_ext.planned_movements)}\n\n"
+        # ============= COLUMNA 1: CONDICIONES EVALUADAS =============
+        col1_text = f"Robot {self.focused_robot_id} ({'ATK' if player.rol == ROL_ATACANTE else 'DEF'})\n\n"
+        col1_text += "CONDICIONES EVALUADAS:\n"
+
+        if self.tracer.conditions_met:
+            for cond in self.tracer.conditions_met[-8:]:  # Últimas 8 condiciones
+                result_symbol = "✓" if cond['result'] else "✗"
+                cond_name = cond['name'].replace("_", " ").title()
+                col1_text += f"  {result_symbol} {cond_name}\n"
+        else:
+            col1_text += "  (Sin condiciones)\n"
+
+        # ============= COLUMNA 2: PARÁMETROS CLAVE =============
+        col2_text = "\n\n"  # Espaciado para alinear
+        col2_text += "PARÁMETROS CLAVE:\n"
+
+        if blackboard:
+            # Distancias
+            dist_ball = player.distance_to_ball(self.ball)
+            col2_text += f"• Dist pelota: {dist_ball:.0f} px\n"
+
+            # Umbrales de lógica difusa
+            col2_text += f"• Posesión: {blackboard.posesion_pelota:.2f}"
+            if blackboard.posesion_pelota < 0.3:
+                col2_text += " [ALIADA]\n"
+            elif blackboard.posesion_pelota > 0.7:
+                col2_text += " [RIVAL]\n"
+            else:
+                col2_text += " [LIBRE]\n"
+
+            col2_text += f"• Proximidad: {blackboard.proximidad_equipo:.2f}"
+            if blackboard.proximidad_equipo < 0.8:
+                col2_text += " [CERCA]\n"
+            elif blackboard.proximidad_equipo > 1.2:
+                col2_text += " [LEJOS]\n"
+            else:
+                col2_text += " [NEUTRAL]\n"
+
+            col2_text += f"• Zona: {blackboard.zona_pelota:.2f}"
+            if blackboard.zona_pelota < 0.4:
+                col2_text += " [DEFENSIVA]\n"
+            elif blackboard.zona_pelota > 1.6:
+                col2_text += " [OFENSIVA]\n"
+            else:
+                col2_text += " [NEUTRAL]\n"
+
+            # Ángulos
+            angle_diff = player.angle_difference_ball(self.ball)
+            col2_text += f"• Ángulo pelota: {angle_diff:.0f}°\n"
+
+            # Estado
+            col2_text += f"• Tiene pelota: {'SÍ' if player.has_ball() else 'NO'}\n"
+        else:
+            col2_text += "  (Sin parámetros)\n"
+
+        # ============= COLUMNA 3: FLUJO DE DECISIONES =============
+        col3_text = "\n\n"  # Espaciado para alinear
+        col3_text += "FLUJO DE DECISIONES:\n"
 
         if self.tracer.trace:
-            debug_text += "TRAZA DE EJECUCIÓN:\n"
+            # Procesar traza con indentación según tipo de nodo
+            indent_level = 0
+            last_node_type = None
 
-            for _, node in enumerate(self.tracer.trace[:max_trace_items]):
-                node_name = " ".join(
-                    word.capitalize() for word in node["name"].split("_")
-                )
-                # Cambiar símbolos por caracteres más compatibles
+            for node in self.tracer.trace[-15:]:  # Últimas 15 entradas
+                node_type = node['type']
+                node_name = node['name']
+                status = node['status']
+
+                # Ajustar indentación según tipo de nodo
+                if 'Selector' in node_type or 'Sequence' in node_type:
+                    if last_node_type in ['ActionNode', 'ConditionNode']:
+                        indent_level = max(0, indent_level - 1)
+                    indent = "  " * indent_level
+                    indent_level += 1
+                elif 'Condition' in node_type or 'Action' in node_type:
+                    indent = "  " * indent_level
+                else:
+                    indent = "  " * indent_level
+
+                # Símbolos de estado
                 status_symbols = {
-                    NodeStatus.SUCCESS: "[OK]",
-                    NodeStatus.FAILURE: "[X]",
-                    NodeStatus.RUNNING: "[>>]",
-                    NodeStatus.INVALID: "[?]",
+                    NodeStatus.SUCCESS: "✓",
+                    NodeStatus.FAILURE: "✗",
+                    NodeStatus.RUNNING: "▶",
+                    NodeStatus.INVALID: "?",
                 }
-                symbol = status_symbols.get(node["status"], "[?]")
+                symbol = status_symbols.get(status, "?")
 
-                debug_text += f"{symbol} {node_name}\n"
+                # Formatear nombre del nodo
+                formatted_name = node_name.replace("_", " ").title()
+
+                # Tipo de nodo (simplificado)
+                if 'Selector' in node_type:
+                    type_tag = "[SEL]"
+                elif 'Sequence' in node_type:
+                    type_tag = "[SEQ]"
+                elif 'Condition' in node_type:
+                    type_tag = "[IF?]"
+                elif 'Action' in node_type:
+                    type_tag = "[DO!]"
+                elif 'Inverter' in node_type:
+                    type_tag = "[NOT]"
+                else:
+                    type_tag = "[---]"
+
+                col3_text += f"{indent}{symbol} {type_tag} {formatted_name}\n"
+                last_node_type = node_type
         else:
-            debug_text += "No hay traza disponible.\n"
-            debug_text += "Presiona 'Analizar' para generar traza.\n"
+            col3_text += "No hay traza disponible.\n"
+            col3_text += "Presiona 'Analizar' para ejecutar.\n"
 
+        # ============= RENDERIZAR COLUMNAS =============
+        # Columna 1: Condiciones Evaluadas
         self.details_ax.text(
-            text_x_position,
+            text_x_col1,
             text_y_position,
-            debug_text,
+            col1_text,
             ha="left",
             va="top",
             transform=self.details_ax.transAxes,
             fontsize=text_fontsize,
             linespacing=text_linespacing,
             family=text_family,
+        )
+
+        # Columna 2: Parámetros Clave
+        self.details_ax.text(
+            text_x_col2,
+            text_y_position,
+            col2_text,
+            ha="left",
+            va="top",
+            transform=self.details_ax.transAxes,
+            fontsize=text_fontsize,
+            linespacing=text_linespacing,
+            family=text_family,
+        )
+
+        # Columna 3: Flujo de Decisiones
+        self.details_ax.text(
+            text_x_col3,
+            text_y_position,
+            col3_text,
+            ha="left",
+            va="top",
+            transform=self.details_ax.transAxes,
+            fontsize=text_fontsize,
+            linespacing=text_linespacing,
+            family=text_family,
+        )
+
+    def update_params_view(self):
+        """Actualiza la vista de parámetros afinables del sistema"""
+        self.params_ax.clear()
+        self.params_ax.set_title(
+            "Árbol de comportamiento",
+            y=1.55,
+            x=0.42,
+            fontweight="bold",
+            fontsize=10,
+        )
+        self.params_ax.axis("off")
+
+        # Configuración de layout
+        text_x_col1 = -0.15  # Columna izquierda
+        text_x_col2 = 0.55  # Columna derecha
+        text_y = 1.45
+        fontsize = 9
+        linespacing = 1.4
+
+        # ============= COLUMNA IZQUIERDA =============
+        params_text_col1 = "═══ UMBRALES CLAVE ═══\n\n"
+
+        # GRUPO 1: Umbrales de Lógica Difusa
+        params_text_col1 += "▶ Lógica Difusa:\n"
+        params_text_col1 += "  Posesión Aliada: < 0.3\n"
+        params_text_col1 += "  Posesión Rival:  > 0.7\n"
+        params_text_col1 += "  Prox. Cerca:     < 0.8\n"
+        params_text_col1 += "  Prox. Lejos:     > 1.2\n"
+        params_text_col1 += "  Zona Defensiva:  < 0.4\n"
+        params_text_col1 += "  Zona Ofensiva:   > 1.6\n\n"
+
+        # GRUPO 2: Distancias de Acción
+        params_text_col1 += "▶ Distancias (px):\n"
+        params_text_col1 += "  Captura pelota:  50-60\n"
+        params_text_col1 += "  Rango tiro:      < 400\n"
+        params_text_col1 += "  Rango pase:      100-600\n"
+        params_text_col1 += "  Aproximación:    25-50\n"
+
+        # ============= COLUMNA DERECHA =============
+        params_text_col2 = "\n\n"  # Espaciado para alinear con col1
+
+        # GRUPO 3: Ángulos
+        params_text_col2 += "▶ Ángulos:\n"
+        params_text_col2 += "  Orientación OK:  < 45°\n"
+        params_text_col2 += "  Ajuste rotación: > 10°\n"
+        params_text_col2 += "  Ajuste pase:     > 15°\n\n"
+
+        # GRUPO 4: Velocidades
+        params_text_col2 += "▶ Velocidades:\n"
+        params_text_col2 += "  Dribbling:       0.7x\n"
+        params_text_col2 += "  Disparo:         0.8x\n"
+        params_text_col2 += "  Intercepción:    1.5x\n"
+
+        # Renderizar columna izquierda
+        self.params_ax.text(
+            text_x_col1,
+            text_y,
+            params_text_col1,
+            ha="left",
+            va="top",
+            transform=self.params_ax.transAxes,
+            fontsize=fontsize,
+            linespacing=linespacing,
+            family="monospace",
+        )
+
+        # Renderizar columna derecha
+        self.params_ax.text(
+            text_x_col2,
+            text_y,
+            params_text_col2,
+            ha="left",
+            va="top",
+            transform=self.params_ax.transAxes,
+            fontsize=fontsize,
+            linespacing=linespacing,
+            family="monospace",
         )
 
     @staticmethod
