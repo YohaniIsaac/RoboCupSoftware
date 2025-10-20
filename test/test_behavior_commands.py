@@ -1589,7 +1589,8 @@ class ImprovedBehaviorDebugger:
 
             # Ángulos
             angle_diff = player.angle_difference_ball(self.ball)
-            col2_text += f"• Ángulo pelota: {angle_diff:.0f}°\n"
+            angle_diff_degrees = np.degrees(angle_diff)  # Convertir radianes a grados
+            col2_text += f"• Ángulo pelota: {angle_diff_degrees:.0f}°\n"
 
             # Estado
             col2_text += f"• Tiene pelota: {'SÍ' if player.has_ball() else 'NO'}\n"
