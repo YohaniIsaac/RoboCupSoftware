@@ -574,6 +574,10 @@ class ImprovedBehaviorDebugger:
         self.sim_button = Button(sim_button_ax, "▶ Simular")
         self.sim_button.on_clicked(self.toggle_simulation)
 
+        export_button_ax = plt.axes((0.02, 0.55, 0.08, 0.04))
+        self.export_button = Button(export_button_ax, "Exportar")
+        self.export_button.on_clicked(self.export_game_context)
+
     def add_position_editors(self):
         """Añade widgets para editar posiciones manualmente"""
         # Limpiar panel de edición
@@ -1772,6 +1776,162 @@ class ImprovedBehaviorDebugger:
             linespacing=linespacing,
             family="monospace",
         )
+
+    def export_game_context(self, event=None):
+        """Exporta el contexto completo del juego a un archivo de texto"""
+        import datetime
+
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"game_context_{timestamp}.txt"
+
+        try:
+            with open(filename, 'w', encoding='utf-8') as f:
+                f.write("=" * 80 + "\n")
+                f.write("CONTEXTO DEL JUEGO - DEPURACIÓN ROBOCUP\n")
+                f.write(f"Fecha: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write("=" * 80 + "\n\n")
+
+                # ===== POSICIONES ACTUALES =====
+                f.write("█ POSICIONES ACTUALES\n")
+                f.write("-" * 80 + "\n")
+                f.write(f"Pelota: X={self.ball.x:.1f}, Y={self.ball.y:.1f}\n")
+                f.write(f"Velocidad Pelota: VX={self.ball_physics['velocity_x']:.2f}, VY={self.ball_physics['velocity_y']:.2f}\n\n")
+
+                for player_id in [1, 2, 3, 4]:
+                    player = self.players[player_id]
+                    rol = "ATACANTE" if player.rol == ROL_ATACANTE else "DEFENSOR"
+                    team = "ROJO" if player.team == "red" else "AZUL"
+                    f.write(f"Robot {player_id} ({team} - {rol}):\n")
+                    f.write(f"  Posición: X={player.x:.1f}, Y={player.y:.1f}, Ángulo={player.angle:.1f}°\n")
+                    f.write(f"  Distancia a pelota: {player.distance_to_ball(self.ball):.1f} px\n")
+                    angle_diff = player.angle_difference_ball(self.ball)
+                    f.write(f"  Ángulo a pelota: {np.degrees(angle_diff):.1f}°\n")
+                    f.write(f"  Tiene pelota: {'SÍ' if player.has_ball() else 'NO'}\n\n")
+
+                # ===== LÓGICA DIFUSA =====
+                f.write("\n" + "█" * 80 + "\n")
+                f.write("█ LÓGICA DIFUSA - PARÁMETROS ACTUALES\n")
+                f.write("█" * 80 + "\n\n")
+
+                for player_id in [1, 2, 3, 4]:
+                    player = self.players[player_id]
+                    team = "red" if player_id <= 2 else "blue"
+                    manager = self.team_managers[team]
+
+                    if player_id in manager.blackboards:
+                        blackboard = manager.blackboards[player_id]
+                        f.write(f"Robot {player_id}:\n")
+                        f.write(f"  • Posesión pelota: {blackboard.posesion_pelota:.3f}")
+                        if blackboard.posesion_pelota < 0.3:
+                            f.write(" [ALIADA]\n")
+                        elif blackboard.posesion_pelota > 0.7:
+                            f.write(" [RIVAL]\n")
+                        else:
+                            f.write(" [LIBRE]\n")
+
+                        f.write(f"  • Proximidad equipo: {blackboard.proximidad_equipo:.3f}")
+                        if blackboard.proximidad_equipo < 0.8:
+                            f.write(" [CERCA]\n")
+                        elif blackboard.proximidad_equipo > 1.2:
+                            f.write(" [LEJOS]\n")
+                        else:
+                            f.write(" [NEUTRAL]\n")
+
+                        f.write(f"  • Zona pelota: {blackboard.zona_pelota:.3f}")
+                        if blackboard.zona_pelota < 0.4:
+                            f.write(" [DEFENSIVA]\n")
+                        elif blackboard.zona_pelota > 1.6:
+                            f.write(" [OFENSIVA]\n")
+                        else:
+                            f.write(" [NEUTRAL]\n")
+                        f.write("\n")
+
+                # ===== UMBRALES Y PARÁMETROS =====
+                f.write("\n" + "█" * 80 + "\n")
+                f.write("█ UMBRALES Y PARÁMETROS DEL SISTEMA\n")
+                f.write("█" * 80 + "\n\n")
+
+                f.write("▶ LÓGICA DIFUSA:\n")
+                f.write("  • Posesión Aliada:  < 0.3\n")
+                f.write("  • Posesión Rival:   > 0.7\n")
+                f.write("  • Proximidad Cerca: < 0.8\n")
+                f.write("  • Proximidad Lejos: > 1.2\n")
+                f.write("  • Zona Defensiva:   < 0.4\n")
+                f.write("  • Zona Ofensiva:    > 1.6\n\n")
+
+                f.write("▶ DISTANCIAS (píxeles):\n")
+                f.write("  • Captura pelota:   50-60 px\n")
+                f.write("  • Rango de tiro:    < 400 px\n")
+                f.write("  • Rango de pase:    100-600 px\n")
+                f.write("  • Aproximación:     25-50 px\n\n")
+
+                f.write("▶ ÁNGULOS:\n")
+                f.write("  • Orientación OK:   < 45°\n")
+                f.write("  • Ajuste rotación:  > 10°\n")
+                f.write("  • Ajuste pase:      > 15°\n\n")
+
+                f.write("▶ VELOCIDADES:\n")
+                f.write("  • Dribbling:        0.7x\n")
+                f.write("  • Disparo:          0.8x\n")
+                f.write("  • Intercepción:     1.5x\n\n")
+
+                # ===== ÁRBOL DE DECISIONES =====
+                f.write("\n" + "█" * 80 + "\n")
+                f.write("█ ÁRBOL DE DECISIONES - TRAZA DE EJECUCIÓN\n")
+                f.write("█" * 80 + "\n\n")
+
+                if self.tracer.trace:
+                    f.write("Últimas 20 decisiones del árbol:\n\n")
+                    for idx, node in enumerate(self.tracer.trace[-20:], 1):
+                        status_symbols = {
+                            NodeStatus.SUCCESS: "✓",
+                            NodeStatus.FAILURE: "✗",
+                            NodeStatus.RUNNING: "▶",
+                            NodeStatus.INVALID: "?",
+                        }
+                        symbol = status_symbols.get(node['status'], "?")
+                        node_type = node['type']
+                        node_name = node['name'].replace("_", " ").title()
+
+                        f.write(f"{idx:2d}. [{symbol}] {node_type:20s} - {node_name}\n")
+                else:
+                    f.write("No hay traza disponible. Ejecuta 'Analizar' primero.\n")
+
+                # ===== CONDICIONES EVALUADAS =====
+                if self.tracer.conditions_met:
+                    f.write("\n\nCondiciones evaluadas recientemente:\n\n")
+                    for cond in self.tracer.conditions_met[-10:]:
+                        result = "✓ TRUE " if cond['result'] else "✗ FALSE"
+                        cond_name = cond['name'].replace("_", " ").title()
+                        f.write(f"  {result} - {cond_name}\n")
+
+                # ===== ACCIONES PLANIFICADAS =====
+                f.write("\n\n" + "█" * 80 + "\n")
+                f.write("█ ACCIONES PLANIFICADAS\n")
+                f.write("█" * 80 + "\n\n")
+
+                for player_id in [1, 2, 3, 4]:
+                    if player_id in self.tracer_ext.robot_actions:
+                        action = self.tracer_ext.robot_actions[player_id]
+                        f.write(f"Robot {player_id}: {action.replace('_', ' ').title()}\n")
+
+                        if player_id in self.tracer_ext.planned_movements:
+                            movement = self.tracer_ext.planned_movements[player_id]
+                            target = movement['target_pos']
+                            f.write(f"  → Destino: ({target[0]:.1f}, {target[1]:.1f})\n")
+                    else:
+                        f.write(f"Robot {player_id}: Sin acción asignada\n")
+
+                f.write("\n" + "=" * 80 + "\n")
+                f.write("FIN DEL REPORTE\n")
+                f.write("=" * 80 + "\n")
+
+            log.info(f"✅ Contexto exportado exitosamente: {filename}")
+            print(f"\n✅ Contexto del juego exportado a: {filename}")
+
+        except Exception as e:
+            log.error(f"❌ Error al exportar contexto: {e}")
+            print(f"\n❌ Error al exportar: {e}")
 
     @staticmethod
     def run():
