@@ -241,13 +241,13 @@ class FuzzyRobotTeamManager:
 
         # SALIDAS
         self.posesion_pelota["posesion_aliada"] = fuzz.trimf(
-            self.posesion_pelota.universe, [0, 0, 0.4]
+            self.posesion_pelota.universe, [0, 0, 0.35]
         )
         self.posesion_pelota["libre"] = fuzz.trimf(
-            self.posesion_pelota.universe, [0.3, 0.5, 0.7]
+            self.posesion_pelota.universe, [0.25, 0.5, 0.75]
         )
         self.posesion_pelota["posesion_rival"] = fuzz.trimf(
-            self.posesion_pelota.universe, [0.6, 1, 1]
+            self.posesion_pelota.universe, [0.65, 1, 1]
         )
 
     def _definir_reglas_posesion(self):
@@ -464,13 +464,13 @@ class FuzzyRobotTeamManager:
         """Define las funciones de membresía para las variables de entrada y salida del sistema de proximidad."""
         # ENTRADA - posesión de la pelota
         self.posesion_pelota_result["posesion_aliada"] = fuzz.trimf(
-            self.posesion_pelota.universe, [0, 0, 0.3]
+            self.posesion_pelota.universe, [0, 0, 0.35]
         )
         self.posesion_pelota_result["libre"] = fuzz.trimf(
             self.posesion_pelota.universe, [0.2, 0.5, 0.8]
         )
         self.posesion_pelota_result["posesion_rival"] = fuzz.trimf(
-            self.posesion_pelota.universe, [0.7, 1, 1]
+            self.posesion_pelota.universe, [0.65, 1, 1]
         )
 
         # ENTRADA - Ventaja de proximidad (negativo = ventaja aliada, positivo = ventaja rival)

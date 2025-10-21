@@ -125,7 +125,7 @@ def is_ball_free(blackboard):
     Returns:
         bool: True si la pelota está libre
     """
-    return 0.3 <= blackboard.posesion_pelota <= 0.7
+    return 0.25 <= blackboard.posesion_pelota <= 0.75
 
 
 def is_ball_in_team_possession(blackboard):
@@ -137,7 +137,7 @@ def is_ball_in_team_possession(blackboard):
     Returns:
         bool: True si el equipo tiene posesión de la pelota
     """
-    return blackboard.posesion_pelota < 0.3
+    return blackboard.posesion_pelota < 0.25
 
 
 def is_ball_in_opponent_possession(blackboard):
@@ -149,7 +149,7 @@ def is_ball_in_opponent_possession(blackboard):
     Returns:
         bool: True si el equipo rival tiene posesión de la pelota
     """
-    return blackboard.posesion_pelota > 0.7
+    return blackboard.posesion_pelota > 0.75
 
 
 def is_ball_close_to_team(blackboard):
@@ -986,15 +986,19 @@ def is_closest_defender_to_ball(blackboard):
 
 
 def is_no_attacker_closer_to_ball(blackboard):
-    """Comprueba si no hay ningún atacante del equipo más cerca de la pelota."""
+    """Comprueba si no hay ningún atacante del equipo más cerca de la pelota.
+
+    El defensor solo irá a la pelota si está al menos 200px más cerca que
+    todos los atacantes del equipo, dando prioridad clara al rol atacante.
+    """
     my_distance = blackboard.player.distance_to_ball(blackboard.ball)
 
     # Verificar atacantes del equipo
     for teammate in blackboard.team_players:
         if teammate.rol == ROL_ATACANTE:
             teammate_distance = teammate.distance_to_ball(blackboard.ball)
-            # Si hay un atacante significativamente más cerca, el defensor no debería ir
-            if teammate_distance < my_distance - 50:  # Margen de 50px
+            # Si el atacante está a menos de 200px más lejos, darle prioridad
+            if teammate_distance < my_distance + 200:  # Margen de 200px a favor del atacante
                 return False
 
     return True

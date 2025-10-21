@@ -1722,8 +1722,8 @@ class ImprovedBehaviorDebugger:
 
         # GRUPO 1: Umbrales de Lógica Difusa
         params_text_col1 += "▶ Lógica Difusa:\n"
-        params_text_col1 += "  Posesión Aliada: < 0.3\n"
-        params_text_col1 += "  Posesión Rival:  > 0.7\n"
+        params_text_col1 += "  Posesión Aliada: < 0.25\n"
+        params_text_col1 += "  Posesión Rival:  > 0.75\n"
         params_text_col1 += "  Prox. Cerca:     < 0.8\n"
         params_text_col1 += "  Prox. Lejos:     > 1.2\n"
         params_text_col1 += "  Zona Defensiva:  < 0.4\n"
@@ -1735,6 +1735,7 @@ class ImprovedBehaviorDebugger:
         params_text_col1 += "  Rango tiro:      < 400\n"
         params_text_col1 += "  Rango pase:      100-600\n"
         params_text_col1 += "  Aproximación:    25-50\n"
+        params_text_col1 += "  Margen defensor: +200\n"
 
         # ============= COLUMNA DERECHA =============
         params_text_col2 = "\n\n"  # Espaciado para alinear con col1
@@ -1852,8 +1853,8 @@ class ImprovedBehaviorDebugger:
                 f.write("█" * 80 + "\n\n")
 
                 f.write("▶ LÓGICA DIFUSA:\n")
-                f.write("  • Posesión Aliada:  < 0.3\n")
-                f.write("  • Posesión Rival:   > 0.7\n")
+                f.write("  • Posesión Aliada:  < 0.25\n")
+                f.write("  • Posesión Rival:   > 0.75\n")
                 f.write("  • Proximidad Cerca: < 0.8\n")
                 f.write("  • Proximidad Lejos: > 1.2\n")
                 f.write("  • Zona Defensiva:   < 0.4\n")
@@ -1863,7 +1864,8 @@ class ImprovedBehaviorDebugger:
                 f.write("  • Captura pelota:   50-60 px\n")
                 f.write("  • Rango de tiro:    < 400 px\n")
                 f.write("  • Rango de pase:    100-600 px\n")
-                f.write("  • Aproximación:     25-50 px\n\n")
+                f.write("  • Aproximación:     25-50 px\n")
+                f.write("  • Margen defensor:  +200 px (prioridad atacante)\n\n")
 
                 f.write("▶ ÁNGULOS:\n")
                 f.write("  • Orientación OK:   < 45°\n")
