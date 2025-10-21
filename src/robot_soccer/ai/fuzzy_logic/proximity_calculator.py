@@ -109,8 +109,8 @@ def calcular_ventaja_proximidad(distancias_aliados, distancias_rivales,
 
     Returns:
         int: Ventaja de proximidad entre -1000 y 1000.
-            - Valores negativos indican ventaja del equipo aliado.
-            - Valores positivos indican ventaja del equipo rival.
+            - Valores POSITIVOS indican ventaja del equipo aliado (más cerca).
+            - Valores NEGATIVOS indican ventaja del equipo rival (aliado más lejos).
             - Cero indica equilibrio entre equipos.
     """
     # Obtener equipo para logging
@@ -167,6 +167,8 @@ def calcular_ventaja_proximidad(distancias_aliados, distancias_rivales,
         factor_pelota_rapida = 1.0
 
     # 4. Ventaja combinada (70% mejor jugador + 30% equipo completo)
+    # Valores POSITIVOS = aliado más cerca, NEGATIVOS = rival más cerca
+    # Esto luego se transforma para que coincida con la escala de proximidad
     ventaja_mejor_jugador = (mejor_aliado - mejor_rival) * 100
     ventaja_equipo = (suma_efectividad_aliada - suma_efectividad_rival) * 50
 

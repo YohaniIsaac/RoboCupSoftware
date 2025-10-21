@@ -473,21 +473,21 @@ class FuzzyRobotTeamManager:
             self.posesion_pelota.universe, [0.65, 1, 1]
         )
 
-        # ENTRADA - Ventaja de proximidad (negativo = ventaja aliada, positivo = ventaja rival)
+        # ENTRADA - Ventaja de proximidad (POSITIVO = ventaja aliada, NEGATIVO = ventaja rival)
         self.ventaja_proximidad["ventaja_aliada_grande"] = fuzz.trimf(
-            self.ventaja_proximidad.universe, [-1000, -1000, -300]
+            self.ventaja_proximidad.universe, [300, 1000, 1000]
         )
         self.ventaja_proximidad["ventaja_aliada_media"] = fuzz.trimf(
-            self.ventaja_proximidad.universe, [-500, -200, -50]
+            self.ventaja_proximidad.universe, [50, 200, 500]
         )
         self.ventaja_proximidad["equilibrado"] = fuzz.trimf(
             self.ventaja_proximidad.universe, [-100, 0, 100]
         )
         self.ventaja_proximidad["ventaja_rival_media"] = fuzz.trimf(
-            self.ventaja_proximidad.universe, [50, 200, 500]
+            self.ventaja_proximidad.universe, [-500, -200, -50]
         )
         self.ventaja_proximidad["ventaja_rival_grande"] = fuzz.trimf(
-            self.ventaja_proximidad.universe, [300, 1000, 1000]
+            self.ventaja_proximidad.universe, [-1000, -1000, -300]
         )
 
         # ENTRADA - Velocidad de la pelota
