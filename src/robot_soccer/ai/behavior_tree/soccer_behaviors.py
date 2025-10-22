@@ -968,21 +968,22 @@ def position_to_defend_goal(blackboard):
     # Este es un comportamiento continuo, siempre está en ejecución
     return NodeStatus.RUNNING
 
+def is_closest_attacker_to_ball(blackboard):
+    """Comprueba si este jugador es el atacante del equipo.
+
+    Nota: Como solo hay 1 atacante por equipo, esta condición simplemente
+    verifica que el jugador tenga el rol de atacante.
+    """
+    return blackboard.player.rol == ROL_ATACANTE
+
+
 def is_closest_defender_to_ball(blackboard):
-    """Comprueba si este defensor es el más cercano a la pelota entre los defensores."""
-    if blackboard.player.rol != ROL_DEFENSIVO:
-        return False
+    """Comprueba si este jugador es el defensor del equipo.
 
-    my_distance = blackboard.player.distance_to_ball(blackboard.ball)
-
-    # Comparar con otros defensores del equipo
-    for teammate in blackboard.team_players:
-        if teammate.id != blackboard.player.id and teammate.rol == ROL_DEFENSIVO:
-            teammate_distance = teammate.distance_to_ball(blackboard.ball)
-            if teammate_distance < my_distance:
-                return False
-
-    return True
+    Nota: Como solo hay 1 defensor por equipo, esta condición simplemente
+    verifica que el jugador tenga el rol de defensor.
+    """
+    return blackboard.player.rol == ROL_DEFENSIVO
 
 
 def is_no_attacker_closer_to_ball(blackboard):
@@ -1037,10 +1038,17 @@ def create_attacker_tree():
     offensive_without_ball.add_children(
         InverterNode(ConditionNode(is_player_with_ball, "NoTienePelota")),
         SelectorNode("AccionSinPelota").add_children(
-            # Capturar la pelota si está libre y cerca
+            # Capturar la pelota si está libre y cerca del equipo
             SequenceNode("CapturarPelotaLibre").add_children(
                 ConditionNode(is_ball_free, "PelotaLibre"),
                 ConditionNode(is_ball_close_to_team, "PelotaCercaDelEquipo"),
+                ActionNode(move_to_ball, "MoverHaciaPelota"),
+                ActionNode(capture_ball, "CapturarPelota"),
+            ),
+            # NUEVA: Capturar pelota libre si soy el atacante más cercano (sin restricción de proximidad)
+            SequenceNode("CapturarPelotaLibreSiMasCercano").add_children(
+                ConditionNode(is_ball_free, "PelotaLibre"),
+                ConditionNode(is_closest_attacker_to_ball, "AtacanteMasCercano"),
                 ActionNode(move_to_ball, "MoverHaciaPelota"),
                 ActionNode(capture_ball, "CapturarPelota"),
             ),
