@@ -4,17 +4,17 @@ import numpy as np
 log = logging.getLogger(__name__)
 
 # Constantes para mejor legibilidad
-DISTANCIA_MAX_NORMALIZACION = 800
+DISTANCIA_MAX_NORMALIZACION = 1200  # Aumentado de 800 para campo más grande
 VELOCIDAD_MAX_ROBOT = 10
 VELOCIDAD_BASE_ROBOT = 5
 VELOCIDAD_MAX_PELOTA = 20
 PENALIZACION_PELOTA_RAPIDA = 0.3
 
-# Pesos de factores
-PESO_DISTANCIA = 0.4
-PESO_ORIENTACION = 0.3
-PESO_VELOCIDAD = 0.2
-PESO_TIEMPO = 0.1
+# Pesos de factores (DISTANCIA es el factor más importante)
+PESO_DISTANCIA = 0.6    # Aumentado de 0.4 para dar más peso a la distancia
+PESO_ORIENTACION = 0.15  # Reducido de 0.3 (orientación es secundaria)
+PESO_VELOCIDAD = 0.15    # Reducido de 0.2
+PESO_TIEMPO = 0.1        # Mantener igual
 
 # Factores de rol
 FACTOR_ROL_ATACANTE = 1.2
@@ -44,7 +44,12 @@ def _calcular_efectividad_jugador(player, distancia, orientacion):
     factor_distancia = max(0, 1 - distancia / DISTANCIA_MAX_NORMALIZACION)
 
     # 2. Factor de orientación mejorado (0-1, 1 = perfectamente orientado)
-    factor_orientacion = max(0.1, np.cos(orientacion))
+    # Penalizar más los ángulos malos: usar coseno al cuadrado para amplificar diferencias
+    cos_orientacion = np.cos(orientacion)
+    if cos_orientacion > 0:
+        factor_orientacion = cos_orientacion ** 1.5  # Amplifica diferencias
+    else:
+        factor_orientacion = 0.05  # Ángulos > 90° son muy malos
 
     # 3. Factor de velocidad del robot (más robusto)
     factor_velocidad = 0.7  # Valor por defecto
@@ -169,8 +174,8 @@ def calcular_ventaja_proximidad(distancias_aliados, distancias_rivales,
     # 4. Ventaja combinada (70% mejor jugador + 30% equipo completo)
     # Valores POSITIVOS = aliado más cerca, NEGATIVOS = rival más cerca
     # Esto luego se transforma para que coincida con la escala de proximidad
-    ventaja_mejor_jugador = (mejor_aliado - mejor_rival) * 100
-    ventaja_equipo = (suma_efectividad_aliada - suma_efectividad_rival) * 50
+    ventaja_mejor_jugador = (mejor_aliado - mejor_rival) * 150  # Aumentado de 100 a 150
+    ventaja_equipo = (suma_efectividad_aliada - suma_efectividad_rival) * 75  # Aumentado de 50 a 75
 
     ventaja_total = (ventaja_mejor_jugador * PESO_MEJOR_JUGADOR +
                     ventaja_equipo * PESO_EQUIPO_COMPLETO)
@@ -178,8 +183,8 @@ def calcular_ventaja_proximidad(distancias_aliados, distancias_rivales,
     # 5. Aplicar factor de pelota rápida
     ventaja_total /= factor_pelota_rapida
 
-    # 6. Escalar y limitar resultado
-    ventaja_final = max(-1000, min(1000, int(ventaja_total * 10)))
+    # 6. Escalar y limitar resultado (amplificado para mayor sensibilidad)
+    ventaja_final = max(-1000, min(1000, int(ventaja_total * 15)))  # Aumentado de 10 a 15
 
     efectividades_aliados_fmt = [f'{e:.2f}' for e in efectividades_aliados]
     efectividades_rivales_fmt = [f'{e:.2f}' for e in efectividades_rivales]
