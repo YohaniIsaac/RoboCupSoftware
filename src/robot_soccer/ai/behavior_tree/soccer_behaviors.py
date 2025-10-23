@@ -828,6 +828,13 @@ def block_opponent(blackboard):
 def move_to_defensive_position(blackboard):
     """Mover el jugador a una posición defensiva estratégica.
 
+    Elige entre las posiciones defensivas predefinidas la más cercana a la
+    posición ACTUAL del defensor (no a la pelota), para minimizar movimiento
+    y evitar cruzar el camino del atacante.
+
+    Si el atacante está activamente yendo a la pelota, el defensor espera
+    en su posición actual para no interferir.
+
     Args:
         blackboard: Pizarra con el estado del juego
 
@@ -841,14 +848,35 @@ def move_to_defensive_position(blackboard):
         )
         return NodeStatus.FAILURE
 
-    # Elegir posición defensiva
     ball_pos = blackboard.ball.get_position()
-    defensive_pos = None
+    player_pos = blackboard.player.get_position()
 
-    # Elegir la posición defensiva más cercana a la pelota
+    # PRIORIDAD 1: Verificar si el atacante está yendo activamente a la pelota
+    # Si es así, el defensor NO se mueve para no obstruir
+    teammates = blackboard.team_players
+    for teammate in teammates:
+        if teammate.id != blackboard.player.id and teammate.rol == ROL_ATACANTE:
+            teammate_pos = teammate.get_position()
+
+            # Calcular distancia del atacante a la pelota
+            attacker_distance_to_ball = np.linalg.norm(
+                np.array(teammate_pos) - np.array(ball_pos)
+            )
+
+            # Si el atacante está cerca de la pelota (< 600 px), esperar
+            if attacker_distance_to_ball < 600:
+                # No moverse, quedarse en posición actual
+                # El defensor esperará hasta que el atacante termine
+                return NodeStatus.RUNNING
+
+    # PRIORIDAD 2: Si el atacante NO está activo, elegir posición defensiva
+    # Elegir la posición defensiva MÁS CERCANA a la posición ACTUAL del defensor
+    # (NO a la pelota, para minimizar movimiento)
+    defensive_pos = None
     min_distance = float("inf")
+
     for pos in blackboard.defensive_positions:
-        distance = np.linalg.norm(np.array(pos) - np.array(ball_pos))
+        distance = np.linalg.norm(np.array(pos) - np.array(player_pos))
         if distance < min_distance:
             min_distance = distance
             defensive_pos = pos
@@ -860,7 +888,6 @@ def move_to_defensive_position(blackboard):
     blackboard.command_manager.move_robot_to(blackboard.player.id, defensive_pos)
 
     # Verificar si hemos llegado
-    player_pos = blackboard.player.get_position()
     distance = np.linalg.norm(np.array(player_pos) - np.array(defensive_pos))
 
     if distance < 30:
