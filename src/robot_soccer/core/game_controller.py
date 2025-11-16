@@ -122,7 +122,7 @@ def execute_multiprocessing(use_camera=False, camera_id=2, modules=None):
             # PROCESO 2: Búsqueda de pelota
             p2 = multiprocessing.Process(
                 target=busqueda_ball,
-                args=(fr2ball_recv, ball_send),
+                args=(fr2ball_recv, ball_send, enable_planning),
                 name="BallTracking"
             )
             processes.append(p2)
@@ -130,7 +130,7 @@ def execute_multiprocessing(use_camera=False, camera_id=2, modules=None):
             # PROCESO 3: Búsqueda de jugadores
             p3 = multiprocessing.Process(
                 target=busqueda_player,
-                args=(fr2player_recv, player_send, use_camera),
+                args=(fr2player_recv, player_send, use_camera, enable_planning),
                 name="PlayerTracking"
             )
             processes.append(p3)
