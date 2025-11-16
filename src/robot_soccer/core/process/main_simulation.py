@@ -14,7 +14,7 @@ from robot_soccer.config import (ANCHO_TOTAL, ALTO_TOTAL, ANCHO_CAMPO, ALTO_CAMP
                                 COLOR_BLANCO, MARGEN_CANCHA, LARGO_ARCO, FPS)
 
 
-def simulacion_principal(fr2ball_env, fr2player_env, env_ruta, fr2traj_env):
+def simulacion_principal(fr2ball_env, fr2player_env, env_ruta, fr2traj_env, enable_ball=True, enable_player=True, enable_traj=True):
     """Ejecuta la simulación principal del juego de fútbol robot.
 
     Esta función inicializa y ejecuta el bucle principal de simulación,
@@ -42,6 +42,15 @@ def simulacion_principal(fr2ball_env, fr2player_env, env_ruta, fr2traj_env):
             Pipe para enviar frames al proceso de análisis de trayectorias.
             Se utiliza para enviar información visual al módulo de análisis
             de trayectorias y paths de los jugadores.
+
+        enable_ball : bool, optional
+            Si True, envía frames al proceso de búsqueda de pelota (default: True).
+
+        enable_player : bool, optional
+            Si True, envía frames al proceso de búsqueda de jugadores (default: True).
+
+        enable_traj : bool, optional
+            Si True, envía frames al proceso de trayectorias (default: True).
 
     Returns:
         None
@@ -220,9 +229,13 @@ def simulacion_principal(fr2ball_env, fr2player_env, env_ruta, fr2traj_env):
             frame = np.transpose(frame, (1, 0, 2))
             frame = cv.cvtColor(frame, cv.COLOR_RGB2BGR)
 
-            fr2ball_env.send(frame)
-            fr2player_env.send(frame)
-            fr2traj_env.send(frame)
+            # Enviar frames solo a los procesos habilitados
+            if enable_ball:
+                fr2ball_env.send(frame)
+            if enable_player:
+                fr2player_env.send(frame)
+            if enable_traj:
+                fr2traj_env.send(frame)
             # inicio += 1
     except Exception as e:
         print(f"error en make {e}")
