@@ -70,6 +70,29 @@ RRT_ITER_MAX = 10000        # Número máximo de iteraciones
 FPS = 40  # Frames por segundo
 
 # ==========================================
+# Configuración de ROI (Region of Interest) para cámara
+# ==========================================
+# Transformación de perspectiva para la cancha
+# Define los 4 puntos (esquinas) de la cancha en la imagen de la cámara
+# Orden: [top-left, top-right, bottom-right, bottom-left]
+# Formato: (x, y) en píxeles
+
+CAMERA_PERSPECTIVE_ENABLED = True  # Habilitar/deshabilitar transformación de perspectiva
+
+# Puntos de origen (esquinas de la cancha en la imagen de la cámara)
+# Ajusta estos valores usando el script scripts/calibrate_perspective.py
+CAMERA_PERSPECTIVE_SRC_POINTS = [
+    (54, 37),      # Top-left (esquina superior izquierda)
+    (636, 97),     # Top-right (esquina superior derecha)
+    (622, 446),    # Bottom-right (esquina inferior derecha)
+    (9, 387)       # Bottom-left (esquina inferior izquierda)
+]
+
+# Dimensiones de la imagen de salida (rectángulo destino)
+CAMERA_PERSPECTIVE_WIDTH = 640   # Ancho de la imagen transformada
+CAMERA_PERSPECTIVE_HEIGHT = 480  # Alto de la imagen transformada
+
+# ==========================================
 # Colores (en formato BGR para OpenCV y RGB para Pygame)
 # ==========================================
 COLOR_NEGRO = (0, 0, 0)
