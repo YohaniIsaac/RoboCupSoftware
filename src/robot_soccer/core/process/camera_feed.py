@@ -6,6 +6,9 @@ permitiendo usar el sistema de percepción con una cámara física.
 import time
 import logging
 import cv2
+import numpy as np
+from robot_soccer.config import (CAMERA_PERSPECTIVE_ENABLED, CAMERA_PERSPECTIVE_SRC_POINTS,
+                                  CAMERA_PERSPECTIVE_WIDTH, CAMERA_PERSPECTIVE_HEIGHT)
 
 log = logging.getLogger(__name__)
 
@@ -61,6 +64,32 @@ def camera_feed(fr2ball_env, fr2player_env, env_ruta, fr2traj_env, camera_id=2,
     log.info("Cámara abierta")
     log.info("   Resolución: %i x %i", width, height)
     log.info("   FPS: %i", fps_cam)
+
+    # Configurar transformación de perspectiva
+    perspective_matrix = None
+    if CAMERA_PERSPECTIVE_ENABLED:
+        # Puntos de origen (trapecio en la imagen de la cámara)
+        src_points = np.float32(CAMERA_PERSPECTIVE_SRC_POINTS)
+
+        # Puntos de destino (rectángulo perfecto)
+        dst_width = CAMERA_PERSPECTIVE_WIDTH
+        dst_height = CAMERA_PERSPECTIVE_HEIGHT
+        dst_points = np.float32([
+            [0, 0],                          # Top-left
+            [dst_width - 1, 0],              # Top-right
+            [dst_width - 1, dst_height - 1], # Bottom-right
+            [0, dst_height - 1]              # Bottom-left
+        ])
+
+        # Calcular matriz de transformación
+        perspective_matrix = cv2.getPerspectiveTransform(src_points, dst_points)
+
+        log.info("Transformación de Perspectiva Habilitada:")
+        log.info("   Puntos origen: %s", CAMERA_PERSPECTIVE_SRC_POINTS)
+        log.info("   Tamaño destino: %ix%i", dst_width, dst_height)
+    else:
+        log.info("Transformación de Perspectiva Deshabilitada - usando frame completo")
+
     log.info("=" * 60)
 
     frame_count = 0
@@ -87,25 +116,53 @@ def camera_feed(fr2ball_env, fr2player_env, env_ruta, fr2traj_env, camera_id=2,
                 fps_display = frame_count / elapsed if elapsed > 0 else 0
                 log.debug("FPS: %.1f  | Frames: %i", fps_display, frame_count)
 
-            # Enviar frame a procesos de percepción (solo si están habilitados)
+            # Aplicar transformación de perspectiva
+            if CAMERA_PERSPECTIVE_ENABLED and perspective_matrix is not None:
+                frame_transformed = cv2.warpPerspective(
+                    frame,
+                    perspective_matrix,
+                    (CAMERA_PERSPECTIVE_WIDTH, CAMERA_PERSPECTIVE_HEIGHT)
+                )
+            else:
+                frame_transformed = frame
+
+            # Enviar frame transformado a procesos de percepción (solo si están habilitados)
             # Los frames ya están en formato BGR (OpenCV), no necesitan conversión
             try:
                 if enable_ball:
-                    fr2ball_env.send(frame)
+                    fr2ball_env.send(frame_transformed)
                 if enable_player:
-                    fr2player_env.send(frame)
+                    fr2player_env.send(frame_transformed)
                 if enable_traj:
-                    fr2traj_env.send(frame)
+                    fr2traj_env.send(frame_transformed)
             except Exception as e:
                 log.error("Error enviando frame a procesos: %i", e)
                 # break
 
             # Mostrar frame con información
             display_frame = frame.copy()
-            cv2.putText(display_frame, "CAMERA MODE - FPS: {fps_display:.1f}",
+
+            # Dibujar los 4 puntos de la perspectiva si está habilitado
+            if CAMERA_PERSPECTIVE_ENABLED:
+                # Dibujar polígono que conecta los 4 puntos
+                points = np.array(CAMERA_PERSPECTIVE_SRC_POINTS, dtype=np.int32)
+                cv2.polylines(display_frame, [points], True, (0, 255, 0), 2)
+
+                # Dibujar círculos en cada punto
+                labels = ['TL', 'TR', 'BR', 'BL']  # Top-Left, Top-Right, etc.
+                for i, (point, label) in enumerate(zip(CAMERA_PERSPECTIVE_SRC_POINTS, labels)):
+                    cv2.circle(display_frame, point, 5, (0, 255, 0), -1)
+                    cv2.putText(display_frame, label,
+                               (point[0] + 10, point[1] - 10),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+
+            cv2.putText(display_frame, f"CAMERA MODE - FPS: {fps_display:.1f}",
                        (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
             cv2.putText(display_frame, f"Frame: {frame_count}",
                        (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+            if CAMERA_PERSPECTIVE_ENABLED:
+                cv2.putText(display_frame, f"Perspective: {CAMERA_PERSPECTIVE_WIDTH}x{CAMERA_PERSPECTIVE_HEIGHT}",
+                           (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
             cv2.putText(display_frame, "ESC - Salir",
                        (10, height - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
 
