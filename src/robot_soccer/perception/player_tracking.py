@@ -14,7 +14,7 @@ from robot_soccer.config import COLOR_VERDE, COLOR_AZUL_CV
 ##############################
 
 
-def deteccion_jugadores_aruco_tag(frame):
+def deteccion_jugadores_aruco_tag(frame, use_camera=False):
     """Detecta jugadores mediante marcadores ArUco y calcula su posición y orientación.
 
     Esta función procesa una imagen para identificar marcadores ArUco que representan
@@ -25,6 +25,8 @@ def deteccion_jugadores_aruco_tag(frame):
     Args:
         frame (numpy.ndarray): Imagen BGR de entrada donde se buscarán los marcadores.
             Debe ser una matriz numpy con forma (height, width, 3).
+        use_camera (bool): Si True usa diccionario DICT_6X6_1000 (cámara física),
+            si False usa DICT_7X7_1000 (simulación). Default: False.
 
     Returns:
         tuple: Una tupla conteniendo:
@@ -41,13 +43,18 @@ def deteccion_jugadores_aruco_tag(frame):
                 rotadas del rectángulo que representa al robot
 
     Note:
-        - Utiliza el diccionario ArUco DICT_7X7_1000 para la detección
+        - Utiliza el diccionario ArUco DICT_6X6_1000 (cámara) o DICT_7X7_1000 (simulación)
         - El rectángulo del robot tiene dimensiones fijas de 104x140 píxeles
         - Las esquinas se calculan rotadas según la orientación del marcador
         - Si no se detectan marcadores, retorna la imagen original y una lista vacía
     """
     gray = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
-    aruco_dict = cv.aruco.getPredefinedDictionary(cv.aruco.DICT_7X7_1000)
+
+    # Seleccionar diccionario según el modo
+    if use_camera:
+        aruco_dict = cv.aruco.getPredefinedDictionary(cv.aruco.DICT_6X6_1000)
+    else:
+        aruco_dict = cv.aruco.getPredefinedDictionary(cv.aruco.DICT_7X7_1000)
 
     parameters = cv.aruco.DetectorParameters()
     detector = cv.aruco.ArucoDetector(aruco_dict, parameters)
