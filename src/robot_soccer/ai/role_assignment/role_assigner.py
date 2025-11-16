@@ -3,10 +3,17 @@
 Este módulo implementa estrategias para asignar dinámicamente roles
 a los robots basándose en múltiples factores como posición, orientación,
 distancia a la pelota y situación del juego.
+
+NOTA: Este módulo usa los mismos métodos de cálculo de distancia y orientación
+que proximity_calculator.py para garantizar consistencia, pero mantiene
+factores específicos para asignación de roles (posesión, posición estratégica).
 """
 
 import numpy as np
 from robot_soccer.config import ROL_ATACANTE, ROL_DEFENSIVO
+
+# Constantes para mejor legibilidad (alineadas con proximity_calculator.py)
+DISTANCIA_MAX_NORMALIZACION = 1200  # Distancia máxima para normalización (igual que proximity_calculator)
 
 
 class RoleAssigner:
@@ -91,8 +98,9 @@ class RoleAssigner:
     def _calculate_player_score(self, player):
         """Calcula una puntuación para determinar qué tan adecuado es un jugador para el rol de atacante.
 
-        Considera múltiples factores incluyendo distancia a la pelota, orientación,
-        posesión actual, posición estratégica y factor de inercia para estabilidad.
+        Usa los mismos métodos de cálculo de distancia y orientación que proximity_calculator.py,
+        pero mantiene factores específicos para asignación de roles como posesión actual y
+        posición estratégica.
 
         Args:
             player: Objeto jugador a evaluar.
@@ -105,28 +113,36 @@ class RoleAssigner:
         distance = player.distance_to_ball(self.ball)
         orientation = player.angle_difference_ball(self.ball)
 
-        # Normalización (0-1, donde 1 es mejor)
-        dist_norm = max(0, 1.0 - (distance / 500))  # 500 como distancia máxima
-        ori_norm = max(0, 1.0 - (orientation / np.pi))  # π como desorientación máxima
+        # 1. Factor de distancia (0-1, donde 1 es mejor)
+        # MÉTODO de proximity_calculator: normalización con 1200px
+        dist_norm = max(0, 1.0 - (distance / DISTANCIA_MAX_NORMALIZACION))
 
-        # Factor de posesión actual
+        # 2. Factor de orientación (0-1, donde 1 es mejor)
+        # MÉTODO de proximity_calculator: usar coseno con exponente para amplificar diferencias
+        cos_orientacion = np.cos(orientation)
+        if cos_orientacion > 0:
+            ori_norm = cos_orientacion ** 1.5  # Amplifica diferencias
+        else:
+            ori_norm = 0.05  # Ángulos > 90° son muy malos
+
+        # 3. Factor de posesión actual (específico para asignación de roles)
         possession_factor = 1.0 if player.has_ball() else 0.0
 
-        # Factor de inercia (para mantener estabilidad)
+        # 4. Factor de posición estratégica (específico para asignación de roles)
+        strategic_position = self._calculate_strategic_position(player)
+
+        # 5. Factor de inercia (para mantener estabilidad)
         inertia_factor = 0.0
         if self.last_assignment and self.last_assignment.get(player.id) == ROL_ATACANTE:
             inertia_factor = 0.2
 
-        # Calcular posición estratégica
-        strategic_position = self._calculate_strategic_position(player)
-
-        # Combinación ponderada
+        # Combinación ponderada (manteniendo estructura original)
         score = (
-            0.35 * dist_norm  # Distancia a la pelota
-            + 0.25 * ori_norm  # Orientación hacia la pelota
-            + 0.20 * possession_factor  # Posesión actual
-            + 0.10 * strategic_position  # Posición estratégica
-            + 0.10 * inertia_factor  # Estabilidad
+            0.35 * dist_norm           # 35% - Distancia a la pelota
+            + 0.25 * ori_norm          # 25% - Orientación hacia la pelota
+            + 0.20 * possession_factor # 20% - Posesión actual
+            + 0.10 * strategic_position# 10% - Posición estratégica
+            + 0.10 * inertia_factor    # 10% - Estabilidad
         )
 
         return score
