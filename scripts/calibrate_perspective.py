@@ -15,35 +15,38 @@ Controles:
     - ENTER: Guardar configuración
     - ESC: Salir sin guardar
 """
-import cv2
 import sys
-import numpy as np
 from pathlib import Path
+
+import cv2
+import numpy as np
 
 # Agregar src al path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from robot_soccer.config import (CAMERA_PERSPECTIVE_SRC_POINTS,
-                                  CAMERA_PERSPECTIVE_WIDTH,
-                                  CAMERA_PERSPECTIVE_HEIGHT)
+from robot_soccer.config import (  # pylint: disable=wrong-import-position
+    CAMERA_PERSPECTIVE_SRC_POINTS,
+    CAMERA_PERSPECTIVE_WIDTH,
+    CAMERA_PERSPECTIVE_HEIGHT
+)
 
-# Variables globales para el callback del mouse
-points = []
-window_name = 'Calibracion_Perspectiva'  # Sin espacios ni caracteres especiales
+# Constantes
+WINDOW_NAME = 'Calibracion_Perspectiva'  # Sin espacios ni caracteres especiales
 
 
-def mouse_callback(event, x, y, flags, param):
-    """Callback para capturar clicks del mouse."""
-    global points
+def create_mouse_callback(points_list):
+    """Crea un callback del mouse que usa una lista mutable."""
+    def mouse_callback(event, x, y, flags, param):  # pylint: disable=unused-argument
+        """Callback para capturar clicks del mouse."""
+        if event == cv2.EVENT_LBUTTONDOWN:
+            if len(points_list) < 4:
+                points_list.append((x, y))
+                print(f"Punto {len(points_list)}: ({x}, {y})")
 
-    if event == cv2.EVENT_LBUTTONDOWN:
-        if len(points) < 4:
-            points.append((x, y))
-            print(f"Punto {len(points)}: ({x}, {y})")
-
-            if len(points) == 4:
-                print("\n✅ 4 puntos seleccionados")
-                print("   Presiona ENTER para guardar o R para resetear")
+                if len(points_list) == 4:
+                    print("\n✅ 4 puntos seleccionados")
+                    print("   Presiona ENTER para guardar o R para resetear")
+    return mouse_callback
 
 
 def draw_points(frame, pts):
@@ -54,7 +57,7 @@ def draw_points(frame, pts):
 
     # Dibujar líneas entre puntos
     if len(pts) > 1:
-        for i in range(len(pts)):
+        for i, _ in enumerate(pts):
             if len(pts) == 4:
                 pt1 = pts[i]
                 pt2 = pts[(i + 1) % 4]
@@ -106,8 +109,6 @@ def show_transformed_preview(original, src_pts, dst_width, dst_height):
 
 def calibrate_perspective(camera_id=2):
     """Calibra la transformación de perspectiva interactivamente."""
-    global points, window_name
-
     print("=" * 70)
     print("CALIBRACIÓN DE TRANSFORMACIÓN DE PERSPECTIVA")
     print("=" * 70)
@@ -140,7 +141,8 @@ def calibrate_perspective(camera_id=2):
     print("\nEsperando clicks en las esquinas de la cancha...")
     print("(Asegúrate de que toda la cancha sea visible)")
 
-    # Inicializar con puntos existentes si los hay
+    # Inicializar puntos
+    points = []
     if len(CAMERA_PERSPECTIVE_SRC_POINTS) == 4:
         print(f"\nPuntos actuales: {CAMERA_PERSPECTIVE_SRC_POINTS}")
         print("Puedes hacer click para redefinirlos o presionar ENTER para mantenerlos")
@@ -161,8 +163,9 @@ def calibrate_perspective(camera_id=2):
     print("\nHaz click en las 4 esquinas de la cancha")
 
     # Crear ventana y configurar callback
-    cv2.namedWindow(window_name)
-    cv2.setMouseCallback(window_name, mouse_callback)
+    cv2.namedWindow(WINDOW_NAME)
+    callback = create_mouse_callback(points)
+    cv2.setMouseCallback(WINDOW_NAME, callback)
 
     preview_window = 'Preview_Transformada'
     warped_preview = None
@@ -170,7 +173,7 @@ def calibrate_perspective(camera_id=2):
     while True:
         # Dibujar puntos actuales
         display_frame = draw_points(current_frame, points)
-        cv2.imshow(window_name, display_frame)
+        cv2.imshow(WINDOW_NAME, display_frame)
 
         # Actualizar preview si hay 4 puntos
         if len(points) == 4:
@@ -192,18 +195,19 @@ def calibrate_perspective(camera_id=2):
             print("\n🔄 Puntos reseteados - selecciona 4 nuevas esquinas")
 
         # Guardar
-        elif key == 13:  # ENTER
+        if key == 13:  # ENTER
             if len(points) == 4:
                 print("\n" + "=" * 70)
                 print("GUARDANDO CONFIGURACIÓN")
                 print("=" * 70)
-                save_perspective_config(points, CAMERA_PERSPECTIVE_WIDTH, CAMERA_PERSPECTIVE_HEIGHT)
+                save_perspective_config(
+                    points, CAMERA_PERSPECTIVE_WIDTH, CAMERA_PERSPECTIVE_HEIGHT
+                )
                 break
-            else:
-                print(f"\n⚠️  Necesitas seleccionar 4 puntos (tienes {len(points)})")
+            print(f"\n⚠️  Necesitas seleccionar 4 puntos (tienes {len(points)})")
 
         # Salir sin guardar
-        elif key == 27:  # ESC
+        if key == 27:  # ESC
             print("\n❌ Calibración cancelada - no se guardaron cambios")
             break
 
@@ -216,16 +220,19 @@ def save_perspective_config(pts, dst_width, dst_height):
     config_path = Path(__file__).parent.parent / "src" / "robot_soccer" / "config.py"
 
     # Leer archivo
-    with open(config_path, 'r') as f:
+    with open(config_path, 'r', encoding='utf-8') as f:
         lines = f.readlines()
 
     # Modificar líneas
     new_lines = []
     skip_until_bracket = False
 
-    for i, line in enumerate(lines):
+    for line in lines:
         if line.startswith("CAMERA_PERSPECTIVE_ENABLED ="):
-            new_lines.append("CAMERA_PERSPECTIVE_ENABLED = True  # Habilitar/deshabilitar transformación de perspectiva\n")
+            new_lines.append(
+                "CAMERA_PERSPECTIVE_ENABLED = True  "
+                "# Habilitar/deshabilitar transformación de perspectiva\n"
+            )
         elif line.startswith("CAMERA_PERSPECTIVE_SRC_POINTS ="):
             # Escribir los puntos en formato multilínea
             new_lines.append("CAMERA_PERSPECTIVE_SRC_POINTS = [\n")
@@ -247,7 +254,7 @@ def save_perspective_config(pts, dst_width, dst_height):
             new_lines.append(line)
 
     # Escribir archivo
-    with open(config_path, 'w') as f:
+    with open(config_path, 'w', encoding='utf-8') as f:
         f.writelines(new_lines)
 
     print(f"\n✅ Configuración guardada en: {config_path}")
