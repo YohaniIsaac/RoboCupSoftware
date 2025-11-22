@@ -163,3 +163,4 @@ AlgortimosBasicos/
 # Archivos extras
 game_context_*.txt
 test_*.txt
+.pio/

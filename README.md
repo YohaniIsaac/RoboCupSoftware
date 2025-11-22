@@ -20,9 +20,10 @@ Sistema completo para enfrentamientos autónomos de fútbol robot 2 contra 2, co
 - PySerial (para comunicación con Arduino)
 
 ### Hardware
-- Arduino Nano con módulo RF
+- Arduino Nano con módulo RF (NRF24L01)
 - Cámara para captura de video
 - Marcadores ArUco impresos
+- PlatformIO Core (para compilar firmware Arduino)
 
 ## Instalación
 
@@ -40,6 +41,13 @@ pip install -r requirements.txt
 3. **Configurar ArUco markers:**
    - Los marcadores deben ubicarse en `arucoMarkers/`
    - Configura las IDs de robots en `src/robot_soccer/config.py`
+
+4. **Compilar firmware (opcional, para robots físicos):**
+   - Ver la guía completa en `firmware/README.md`
+   ```bash
+   cd firmware/msr
+   pio run -t upload --upload-port /dev/ttyUSB0
+   ```
 
 ## Uso Rápido
 
@@ -103,8 +111,28 @@ robot_soccer/                           # Directorio raíz del proyecto
 ├── controllers/                    # Controladores específicos
 │    └── robot_controller.py        # Controlador de robot
 │
-└── utils/                              # Utilidades
-    └── tools.py                        # Herramientas generales
+├── utils/                              # Utilidades
+│    └── tools.py                       # Herramientas generales
+│
+└── firmware/                           # Firmware para Arduino (ver firmware/README.md)
+    ├── msr/                            # Robot MSR (control de motores, RF)
+    │   ├── src/                        # Código fuente
+    │   │   ├── main.cpp
+    │   │   └── robot_control.cpp
+    │   ├── include/                    # Headers
+    │   │   ├── config.h
+    │   │   └── robot_control.h
+    │   └── platformio.ini              # Configuración PlatformIO
+    └── tablero/                        # Tablero de marcador/cronómetro
+        ├── src/
+        │   ├── main.cpp
+        │   ├── display.cpp
+        │   └── game_control.cpp
+        ├── include/
+        │   ├── config.h
+        │   ├── display.h
+        │   └── game_control.h
+        └── platformio.ini
 ```
 
 ## Configuración
