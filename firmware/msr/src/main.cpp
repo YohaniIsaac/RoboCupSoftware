@@ -39,10 +39,7 @@ void setup() {
 
   // Inicializar módulo RF
   radio.begin();
-  radio.setDataRate(RF24_2MBPS);    // Mismo data rate que transmisor
-  radio.setPALevel(RF24_PA_HIGH);   // Potencia máxima
-  radio.setChannel(76);              // Mismo canal que transmisor
-  radio.setAutoAck(true);            // Activar auto-acknowledge
+  radio.setDataRate(RF24_2MBPS);  // Misma configuración que tablero
   radio.openReadingPipe(1, address);
   radio.startListening();
 

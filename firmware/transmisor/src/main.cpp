@@ -33,11 +33,8 @@ void setup() {
     while (1) { delay(1000); }
   }
 
-  radio.setDataRate(RF24_2MBPS);
-  radio.setPALevel(RF24_PA_HIGH);  // Potencia máxima
-  radio.setChannel(76);
+  radio.setDataRate(RF24_2MBPS);  // Misma configuración que tablero (solo esto)
   radio.stopListening();  // Modo transmisor
-  radio.setAutoAck(true);  // Activar auto-acknowledge
 
   // Mensaje de inicio
   Serial.println("\n========================================");

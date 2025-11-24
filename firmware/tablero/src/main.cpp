@@ -22,8 +22,10 @@ void setup() {
   inicializarDisplay(sevseg);
 
   // Inicializar módulo RF
+  // NOTA: Solo configurar setDataRate, el resto usa defaults de RF24
+  // Esto mantiene compatibilidad con todos los dispositivos del sistema
   radio.begin();
-  radio.setDataRate(RF24_2MBPS);
+  radio.setDataRate(RF24_2MBPS);  // 2Mbps (resto: canal 76, PA max, auto-ack true por default)
   radio.openReadingPipe(1, address);
   radio.startListening();
 }
