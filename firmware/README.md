@@ -7,7 +7,8 @@ Firmware para los componentes físicos del sistema RoboCup Soccer.
 ```
 firmware/
 ├── msr/          # Robot MSR (control de motores, comunicación RF)
-└── tablero/      # Tablero de marcador/cronómetro
+├── tablero/      # Tablero de marcador/cronómetro
+└── transmisor/   # Transmisor RF (conectado a PC vía USB)
 ```
 
 ## Hardware
@@ -16,6 +17,7 @@ firmware/
 - **Comunicación**: NRF24L01 (RF 2.4GHz)
 - **MSR**: Puente H MX1508, solenoide, motores DC
 - **Tablero**: Displays 7 segmentos con shift registers
+- **Transmisor**: NRF24L01, conexión USB a PC
 
 ## Comandos PlatformIO
 
@@ -29,6 +31,10 @@ pio run
 # Tablero
 cd firmware/tablero
 pio run
+
+# Transmisor
+cd firmware/transmisor
+pio run
 ```
 
 ### Flashear (subir a la placa)
@@ -40,6 +46,10 @@ pio run -t upload --upload-port /dev/ttyUSB0
 
 # Tablero
 cd firmware/tablero
+pio run -t upload --upload-port /dev/ttyUSB0
+
+# Transmisor
+cd firmware/transmisor
 pio run -t upload --upload-port /dev/ttyUSB0
 ```
 
@@ -115,6 +125,50 @@ pio run -t clean
 **Pines**:
 - CE: 10, CSN: 9 (NRF24L01)
 - Shift registers: DS=2, STCP=3, SHCP=4
+
+## Proyecto Transmisor
+
+**Descripción**: Puente entre PC y robots/tablero vía RF
+
+**Funcionalidades**:
+- Recibe comandos por serial (USB desde PC)
+- Transmite comandos por RF a robots y tablero
+- Protocolo simple y extensible
+
+**Librerías**:
+- RF24: Comunicación NRF24L01
+
+**Pines**:
+- CE: 10, CSN: 9 (NRF24L01)
+
+**Protocolo Serial** (115200 baud):
+```
+Robots:   R[ID][CMD]    Ejemplo: R1F (Robot 1, Forward)
+Tablero:  T[CMD]        Ejemplo: T2  (Goal equipo 1)
+```
+
+**Uso desde Python**:
+```python
+from robot_soccer.controllers.rf_transmitter import RFTransmitter, RobotCommand
+
+transmitter = RFTransmitter(port='/dev/ttyUSB0')
+transmitter.connect()
+transmitter.send_robot_command(1, RobotCommand.FORWARD)
+transmitter.disconnect()
+```
+
+Ver ejemplo completo en: `src/robot_soccer/controllers/rf_transmitter_example.py`
+
+**Testing manual (sin Python)**:
+```bash
+cd firmware/transmisor
+python test_manual.py
+
+# O directamente por serial:
+echo "R1F" > /dev/ttyUSB0  # Robot 1 adelante
+```
+
+Ver guía completa de testing: `firmware/transmisor/TESTING.md`
 
 ## Comunicación RF
 

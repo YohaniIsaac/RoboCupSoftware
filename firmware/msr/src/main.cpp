@@ -19,6 +19,13 @@ void setup() {
 
   delay(1000);
 
+  // DEBUG: Indicar ID del robot con buzzer
+  // Robot 1 = 1 beep, Robot 2 = 2 beeps, etc.
+  for (int i = 0; i < ROBOT_ID; i++) {
+    buzzer.playFromProgramSpace(PSTR("!L16 V10 c"));
+    delay(200);
+  }
+
   // Configurar pines de actuadores
   pinMode(SOLENOIDE_PIN, OUTPUT);
   pinMode(MOTOR_DC_PIN, OUTPUT);
@@ -32,6 +39,10 @@ void setup() {
 
   // Inicializar módulo RF
   radio.begin();
+  radio.setDataRate(RF24_2MBPS);    // Mismo data rate que transmisor
+  radio.setPALevel(RF24_PA_HIGH);   // Potencia máxima
+  radio.setChannel(76);              // Mismo canal que transmisor
+  radio.setAutoAck(true);            // Activar auto-acknowledge
   radio.openReadingPipe(1, address);
   radio.startListening();
 

@@ -6,7 +6,25 @@
 // Configuración de comunicación RF
 #define RF_CE_PIN 10
 #define RF_CSN_PIN 9
-#define RF_ADDRESS "00001"
+
+// ID del robot (definido por build flag)
+#ifndef ROBOT_ID
+#define ROBOT_ID 1  // Default si no se especifica
+#endif
+
+// Dirección RF única por robot
+// Nota: "00001" está reservado para el Tablero
+#if ROBOT_ID == 1
+#define RF_ADDRESS "00002"
+#elif ROBOT_ID == 2
+#define RF_ADDRESS "00003"
+#elif ROBOT_ID == 3
+#define RF_ADDRESS "00004"
+#elif ROBOT_ID == 4
+#define RF_ADDRESS "00005"
+#else
+#define RF_ADDRESS "00002"  // Default
+#endif
 
 // Pines de control de motores (Puente H MX1508)
 #define MOTOR_1A_PIN A0  // Motor izquierdo - atrás
