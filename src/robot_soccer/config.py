@@ -82,15 +82,26 @@ CAMERA_PERSPECTIVE_ENABLED = True  # Habilitar/deshabilitar transformación de p
 # Puntos de origen (esquinas de la cancha en la imagen de la cámara)
 # Ajusta estos valores usando el script scripts/calibrate_perspective.py
 CAMERA_PERSPECTIVE_SRC_POINTS = [
-    (54, 37),      # Top-left (esquina superior izquierda)
-    (636, 97),     # Top-right (esquina superior derecha)
-    (622, 446),    # Bottom-right (esquina inferior derecha)
-    (9, 387)       # Bottom-left (esquina inferior izquierda)
+    (8, 34),      # Top-left (esquina superior izquierda)
+    (616, 9),     # Top-right (esquina superior derecha)
+    (630, 365),    # Bottom-right (esquina inferior derecha)
+    (18, 393)       # Bottom-left (esquina inferior izquierda)
 ]
 
 # Dimensiones de la imagen de salida (rectángulo destino)
 CAMERA_PERSPECTIVE_WIDTH = 640   # Ancho de la imagen transformada
 CAMERA_PERSPECTIVE_HEIGHT = 480  # Alto de la imagen transformada
+
+# ==========================================
+# Configuración de detección de robots (ArUco)
+# ==========================================
+# Dimensiones del rectángulo que representa al robot en la imagen
+# Estos valores definen el tamaño del bounding box alrededor del marcador ArUco
+ROBOT_DETECTION_HALF_WIDTH = 35   # Mitad del ancho del robot en píxeles (simulacion 52 total = 104) largo robot
+ROBOT_DETECTION_HALF_HEIGHT = 22  # Mitad del alto del robot en píxeles (simulacion 70 total = 140) ancho robot
+
+# Longitud de la línea que indica la orientación del robot
+ROBOT_ORIENTATION_LINE_LENGTH = 25  # Longitud en píxeles de la línea verde de orientación
 
 # ==========================================
 # Colores (en formato BGR para OpenCV y RGB para Pygame)
