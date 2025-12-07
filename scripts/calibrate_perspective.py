@@ -190,9 +190,10 @@ def calibrate_perspective(camera_id=2):
 
         # Resetear
         if key == ord('r') or key == ord('R'):
-            points = []
+            points.clear()  # Limpiar la lista existente en lugar de crear una nueva
             cv2.destroyWindow(preview_window)
             print("\n🔄 Puntos reseteados - selecciona 4 nuevas esquinas")
+            print(f"   Puntos actuales: {len(points)} (esperando clicks...)")
 
         # Guardar
         if key == 13:  # ENTER
