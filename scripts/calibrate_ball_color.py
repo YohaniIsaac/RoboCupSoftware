@@ -47,6 +47,68 @@ def nothing(_):
     """Callback vacío para trackbars."""
 
 
+def create_color_preview(h_min_val, h_max_val, s_min_val, s_max_val, v_min_val, v_max_val):
+    """Crea una imagen de preview del rango de color HSV actual."""
+    # Imagen de controles (más alta para acomodar la barra de color)
+    img = np.zeros((300, 500, 3), dtype=np.uint8)
+
+    # Instrucciones
+    cv2.putText(img, "Ajusta los rangos HSV", (10, 25),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+    cv2.putText(img, "Objetivo: Solo pelota en blanco", (10, 55),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 1)
+    cv2.putText(img, "R = Reset | ENTER = Guardar | ESC = Salir", (10, 85),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+
+    # Título de la barra de color
+    cv2.putText(img, "Rango de Color Detectado:", (10, 120),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+
+    # Crear barra de color HSV (gradiente del rango)
+    bar_height = 60
+    bar_width = 480
+    bar_x = 10
+    bar_y = 130
+
+    # Crear imagen HSV con el rango seleccionado
+    color_bar_hsv = np.zeros((bar_height, bar_width, 3), dtype=np.uint8)
+
+    # Llenar con gradiente de H (de h_min a h_max)
+    h_range = h_max_val - h_min_val if h_max_val > h_min_val else 1
+    for i in range(bar_width):
+        # Calcular H en el rango
+        h_val = h_min_val + int((i / bar_width) * h_range)
+        # Usar valores medios-altos de S y V para mostrar el color claramente
+        s_val = (s_min_val + s_max_val) // 2
+        v_val = max(v_max_val, 200)  # Al menos 200 para que se vea bien
+
+        color_bar_hsv[:, i] = [h_val, s_val, v_val]
+
+    # Convertir a BGR para mostrar
+    color_bar_bgr = cv2.cvtColor(color_bar_hsv, cv2.COLOR_HSV2BGR)
+
+    # Insertar la barra en la imagen
+    img[bar_y:bar_y+bar_height, bar_x:bar_x+bar_width] = color_bar_bgr
+
+    # Dibujar borde alrededor de la barra
+    cv2.rectangle(img, (bar_x, bar_y), (bar_x+bar_width, bar_y+bar_height),
+                  (255, 255, 255), 2)
+
+    # Mostrar valores HSV
+    cv2.putText(img, f"H: {h_min_val}-{h_max_val}  S: {s_min_val}-{s_max_val}  V: {v_min_val}-{v_max_val}",
+                (10, 220), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+
+    # Leyenda
+    cv2.putText(img, "H = Matiz (color)", (10, 250),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 200, 255), 1)
+    cv2.putText(img, "S = Saturacion (intensidad)", (10, 270),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 200, 255), 1)
+    cv2.putText(img, "V = Valor (brillo)", (10, 290),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 200, 255), 1)
+
+    return img
+
+
 def reset_to_default():
     """Resetea los valores a los del config actual."""
     global h_min, h_max, s_min, s_max, v_min, v_max
@@ -116,21 +178,6 @@ def calibrate_ball_color(camera_id=2):
     cv2.createTrackbar("V Min", WINDOW_CONTROLS, v_min, 255, nothing)
     cv2.createTrackbar("V Max", WINDOW_CONTROLS, v_max, 255, nothing)
 
-    # Crear imagen de instrucciones para ventana de controles
-    controls_img = np.zeros((200, 500, 3), dtype=np.uint8)
-    cv2.putText(controls_img, "Ajusta los rangos HSV", (10, 30),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-    cv2.putText(controls_img, "Objetivo: Solo pelota en blanco", (10, 70),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 1)
-    cv2.putText(controls_img, "R = Reset | ENTER = Guardar | ESC = Salir", (10, 110),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-    cv2.putText(controls_img, "H = Matiz (color)", (10, 140),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 200, 255), 1)
-    cv2.putText(controls_img, "S = Saturacion (intensidad)", (10, 165),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 200, 255), 1)
-    cv2.putText(controls_img, "V = Valor (brillo)", (10, 190),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 200, 255), 1)
-
     while True:
         # Leer frame
         ret, frame = cap.read()
@@ -191,6 +238,9 @@ def calibrate_ball_color(camera_id=2):
         # Añadir información en resultado
         cv2.putText(result, "Result - Pelota aislada", (10, 30),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+
+        # Crear imagen de controles dinámica con visualización del color
+        controls_img = create_color_preview(h_min, h_max, s_min, s_max, v_min, v_max)
 
         # Mostrar ventanas
         cv2.imshow(WINDOW_ORIGINAL, info_frame)
