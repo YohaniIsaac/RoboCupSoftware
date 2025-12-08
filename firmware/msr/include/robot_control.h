@@ -9,6 +9,7 @@ void moverAtras();
 void girarIzquierda();
 void girarDerecha();
 void detenerMovimiento();
+void setMotorSpeeds(int16_t leftSpeed, int16_t rightSpeed);
 
 // Funciones de actuadores
 void activarSolenoide();

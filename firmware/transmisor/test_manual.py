@@ -6,9 +6,8 @@ Permite enviar comandos a robots y tablero desde la consola.
 Perfecto para hacer pruebas y calibrar movimientos.
 """
 
-import serial
 import time
-import sys
+import serial
 
 
 def print_menu():
@@ -122,16 +121,16 @@ def parse_command(cmd):
 def main():
     """Función principal."""
     # Configuración del puerto (ajusta según tu sistema)
-    PORT = '/dev/ttyUSB0'
-    BAUDRATE = 115200
+    port = '/dev/ttyUSB0'
+    baudrate = 9600  # Compatible con firmware actualizado
 
     print("\n🤖 Test Manual de Transmisor RF")
-    print(f"Puerto: {PORT}")
-    print(f"Baudrate: {BAUDRATE}")
+    print(f"Puerto: {port}")
+    print(f"Baudrate: {baudrate}")
 
     # Conectar al transmisor
     try:
-        ser = serial.Serial(PORT, BAUDRATE, timeout=1)
+        ser = serial.Serial(port, baudrate, timeout=1)
         print("✓ Conectado al transmisor")
         time.sleep(2)  # Esperar inicialización del Arduino
 
@@ -142,10 +141,10 @@ def main():
 
     except serial.SerialException as e:
         print(f"✗ Error al conectar: {e}")
-        print(f"\nAsegúrate de:")
-        print(f"  1. Tener el transmisor conectado por USB")
-        print(f"  2. Haber flasheado el firmware del transmisor")
-        print(f"  3. Tener permisos: sudo chmod 666 {PORT}")
+        print("\nAsegúrate de:")
+        print("  1. Tener el transmisor conectado por USB")
+        print("  2. Haber flasheado el firmware del transmisor")
+        print(f"  3. Tener permisos: sudo chmod 666 {port}")
         return
 
     # Mostrar menú
@@ -164,12 +163,12 @@ def main():
             if cmd.lower() == 'exit':
                 print("👋 Saliendo...")
                 break
-            elif cmd.lower() == 'help':
+            if cmd.lower() == 'help':
                 print_menu()
                 continue
 
             # Comandos de diagnóstico (se envían directamente)
-            elif cmd.lower() in ['ping', 'scan', 'info']:
+            if cmd.lower() in ['ping', 'scan', 'info']:
                 send_command(ser, cmd.lower(), is_diagnostic=True)
                 continue
 

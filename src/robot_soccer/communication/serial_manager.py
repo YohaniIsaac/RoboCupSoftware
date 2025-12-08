@@ -32,14 +32,14 @@ class SerialManager:
         running (bool): Bandera de control para el hilo de trabajo.
     """
 
-    def __init__(self, port='/dev/ttyUSB0', baud_rate=115200, timeout=1):
+    def __init__(self, port='/dev/ttyUSB0', baud_rate=9600, timeout=1):
         """Inicializa el gestor de comunicación serial.
 
         Args:
             port (str, optional): Puerto serial donde está conectado el Arduino.
                 Defaults to '/dev/ttyUSB0'.
             baud_rate (int, optional): Velocidad de comunicación en baudios.
-                Defaults to 115200.
+                Defaults to 9600.
             timeout (int, optional): Tiempo de espera para operaciones de
                 lectura en segundos. Defaults to 1.
         """
@@ -52,6 +52,7 @@ class SerialManager:
         self.lock = threading.Lock()
         self.worker_thread = None
         self.running = False
+        self.response_buffer = []  # Buffer para respuestas del Arduino
 
     def connect(self):
         """Establece la conexión serial con el Arduino.
@@ -74,7 +75,7 @@ class SerialManager:
             )
             time.sleep(2)  # Dar tiempo para que Arduino se reinicie
             self.is_connected = True
-            log.info("Conectado al puerto %i a %f baudios", self.port, self.baud_rate)
+            log.info("Conectado al puerto %s a %d baudios", self.port, self.baud_rate)
 
             # Iniciar hilo de trabajo
             self.running = True
@@ -134,6 +135,73 @@ class SerialManager:
 
         return True
 
+    def send_command_sync(self, command, timeout=3.0, expected_lines=1):
+        """Envía un comando y espera la(s) respuesta(s) de forma sincrónica.
+
+        Args:
+            command (str): Comando a enviar al Arduino.
+            timeout (float): Tiempo máximo de espera en segundos.
+            expected_lines (int): Número de líneas de respuesta esperadas.
+                Si es None, lee hasta que no haya más datos (útil para ping).
+
+        Returns:
+            list: Lista de respuestas recibidas, o lista vacía si hay timeout/error.
+        """
+        if not self.is_connected:
+            log.error("No hay conexión con Arduino")
+            return []
+
+        # Limpiar buffer de respuestas previas
+        with self.lock:
+            self.response_buffer.clear()
+
+        # Enviar comando
+        if not self.send_command(command):
+            return []
+
+        # Pequeño delay para que el worker thread procese el comando
+        time.sleep(0.05)
+
+        # Esperar respuestas
+        responses = []
+        start_time = time.time()
+        no_data_timeout = 0.5  # Timeout de 500ms sin datos nuevos (aumentado para ping)
+
+        if expected_lines is None:
+            # Modo: leer hasta que no haya más datos
+            last_response_time = time.time()
+
+            while True:
+                # Timeout absoluto
+                if time.time() - start_time > timeout:
+                    log.warning("Timeout absoluto esperando respuesta para comando: %s", command.strip())
+                    break
+
+                # Timeout por falta de datos nuevos
+                if time.time() - last_response_time > no_data_timeout:
+                    break
+
+                with self.lock:
+                    if self.response_buffer:
+                        responses.append(self.response_buffer.pop(0))
+                        last_response_time = time.time()
+
+                time.sleep(0.01)
+        else:
+            # Modo original: esperar número fijo de líneas
+            while len(responses) < expected_lines:
+                if time.time() - start_time > timeout:
+                    log.warning("Timeout esperando respuesta para comando: %s", command.strip())
+                    break
+
+                with self.lock:
+                    if self.response_buffer:
+                        responses.append(self.response_buffer.pop(0))
+
+                time.sleep(0.01)
+
+        return responses
+
     def _worker(self):
         """Hilo de trabajo para enviar comandos y recibir respuestas.
 
@@ -160,10 +228,37 @@ class SerialManager:
                 self.serial.write(command.encode('utf-8'))
                 log.debug("Enviado: %s", command.strip())
 
-                # Leer respuesta (si la hay)
-                response = self.serial.readline().decode('utf-8').strip()
-                if response:
-                    log.debug("Recibido: %s", response)
+                # Leer todas las respuestas disponibles (no solo una línea)
+                # Comandos como "ping" pueden enviar múltiples líneas (~11)
+                max_wait_time = 0.5  # Máximo 500ms esperando respuestas
+                start_read_time = time.time()
+                no_data_timeout = 0.05  # 50ms sin datos = fin de respuestas
+
+                last_response_time = time.time()
+
+                while True:
+                    # Timeout absoluto
+                    if time.time() - start_read_time > max_wait_time:
+                        break
+
+                    # Timeout por falta de datos (si no hay respuestas en 50ms, asumimos que terminó)
+                    if time.time() - last_response_time > no_data_timeout:
+                        break
+
+                    # Verificar si hay datos disponibles
+                    if self.serial.in_waiting > 0:
+                        try:
+                            response = self.serial.readline().decode('utf-8').strip()
+                            if response:
+                                log.debug("Recibido: %s", response)
+                                with self.lock:
+                                    self.response_buffer.append(response)
+                                last_response_time = time.time()
+                        except Exception as read_error:
+                            log.warning("Error leyendo respuesta: %s", read_error)
+                            break
+                    else:
+                        time.sleep(0.01)
 
             except Exception as e:
                 log.error("Error en comunicación: %s", e)

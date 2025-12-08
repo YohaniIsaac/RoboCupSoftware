@@ -59,9 +59,28 @@ void loop() {
 
   // Procesar comandos RF
   if (radio.available()) {
-    char comando;
-    radio.read(&comando, sizeof(comando));
-    ejecutarComando(comando);
+    // Leer primer byte para determinar tipo de comando
+    uint8_t data[5];
+    radio.read(&data, sizeof(data));
+
+    // Verificar si es comando de motor (M) o comando discreto
+    if (data[0] == 'M') {
+      // Comando de motor con velocidades variables
+      // data[0] = 'M'
+      // data[1] = robot_id
+      // data[2] = left_speed (0-255, convertir a -128..127)
+      // data[3] = right_speed (0-255, convertir a -128..127)
+
+      int16_t leftSpeed = (int16_t)data[2] - 128;
+      int16_t rightSpeed = (int16_t)data[3] - 128;
+
+      setMotorSpeeds(leftSpeed, rightSpeed);
+      tiempoInicio = millis();
+    } else {
+      // Comando discreto tradicional (F, B, L, R, P, D, S, Q)
+      char comando = data[0];
+      ejecutarComando(comando);
+    }
   }
 
   // Detener movimiento después de la duración configurada

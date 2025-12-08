@@ -85,10 +85,49 @@ void loop() {
     }
 
     RobotCommand robotCmd;
+    MotorCommand motorCmd;
     TableroCommand tableroCmd;
-    MessageType msgType = parseMessage(mensaje, robotCmd, tableroCmd);
+    MessageType msgType = parseMessage(mensaje, robotCmd, motorCmd, tableroCmd);
 
     switch (msgType) {
+      case MSG_MOTOR_CONTROL: {
+        // Seleccionar dirección según el robot
+        const byte* targetAddress;
+        switch (motorCmd.robotId) {
+          case 1: targetAddress = addressRobot1; break;
+          case 2: targetAddress = addressRobot2; break;
+          case 3: targetAddress = addressRobot3; break;
+          case 4: targetAddress = addressRobot4; break;
+          default: targetAddress = addressRobot1; break;
+        }
+
+        // Cambiar dirección de escritura
+        radio.openWritingPipe(targetAddress);
+
+        // Enviar estructura de motor (3 bytes)
+        uint8_t data[5];
+        data[0] = 'M';  // Identificador de comando de motor
+        data[1] = motorCmd.robotId;
+        data[2] = (uint8_t)(motorCmd.leftSpeed + 128);   // Convertir -128..127 a 0..255
+        data[3] = (uint8_t)(motorCmd.rightSpeed + 128);  // Convertir -128..127 a 0..255
+        data[4] = 0;  // Byte de relleno/checksum futuro
+
+        bool success = radio.write(&data, sizeof(data));
+
+        if (success) {
+          Serial.print("OK: Robot ");
+          Serial.print(motorCmd.robotId);
+          Serial.print(" <- M(");
+          Serial.print(motorCmd.leftSpeed);
+          Serial.print(",");
+          Serial.print(motorCmd.rightSpeed);
+          Serial.println(")");
+        } else {
+          Serial.println("ERROR: Fallo al transmitir");
+        }
+        break;
+      }
+
       case MSG_ROBOT_CONTROL: {
         // Seleccionar dirección según el robot
         const byte* targetAddress;

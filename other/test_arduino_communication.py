@@ -3,12 +3,14 @@
 Script para probar la comunicación con Arduino (sin usar RF).
 Envía comandos de prueba y verifica las respuestas.
 """
+# pylint: disable=logging-fstring-interpolation
 
-import time
 import argparse
-import serial
-import threading
 import logging
+import threading
+import time
+
+import serial
 
 # Configurar logging
 logging.basicConfig(
@@ -28,7 +30,7 @@ class ArduinoTester:
     Clase para probar la comunicación con Arduino enviando comandos de prueba.
     """
 
-    def __init__(self, port, baud_rate=115200):
+    def __init__(self, port, baud_rate=9600):
         self.port = port
         self.baud_rate = baud_rate
         self.serial = None
@@ -149,7 +151,7 @@ class ArduinoTester:
                 logger.info(f"Comando enviado. Esperando {step['duration']} segundos...")
                 time.sleep(step["duration"])
             else:
-                logger.error(f"Error al enviar comando. Abortando secuencia.")
+                logger.error("Error al enviar comando. Abortando secuencia.")
                 break
 
         # Asegurar que el robot se detenga al final
@@ -177,10 +179,10 @@ class ArduinoTester:
             logger.info(f"Prueba: Pateo con potencia {power}")
 
             if self.send_command(command):
-                logger.info(f"Comando enviado. Esperando 2 segundos...")
+                logger.info("Comando enviado. Esperando 2 segundos...")
                 time.sleep(2)
             else:
-                logger.error(f"Error al enviar comando. Abortando secuencia.")
+                logger.error("Error al enviar comando. Abortando secuencia.")
                 break
 
         logger.info("Prueba de pateo completada.")
@@ -206,10 +208,10 @@ class ArduinoTester:
             logger.info(f"Prueba: Dribbler con potencia {power}")
 
             if self.send_command(command):
-                logger.info(f"Comando enviado. Esperando 3 segundos...")
+                logger.info("Comando enviado. Esperando 3 segundos...")
                 time.sleep(3)
             else:
-                logger.error(f"Error al enviar comando. Abortando secuencia.")
+                logger.error("Error al enviar comando. Abortando secuencia.")
                 break
 
         logger.info("Prueba de dribbler completada.")
@@ -240,44 +242,44 @@ class ArduinoTester:
 
         logger.info(f"=== PRUEBAS COMPLETAS PARA ROBOT {robot_id} FINALIZADAS ===")
 
-        def run_interactive_test(self):
-            """
-            Ejecuta un modo interactivo donde el usuario puede enviar comandos manualmente.
-            """
-            if not self.is_connected:
-                logger.error("No conectado. Imposible iniciar modo interactivo.")
-                return
+    def run_interactive_test(self):
+        """
+        Ejecuta un modo interactivo donde el usuario puede enviar comandos manualmente.
+        """
+        if not self.is_connected:
+            logger.error("No conectado. Imposible iniciar modo interactivo.")
+            return
 
-            print("\n=== MODO INTERACTIVO ===")
-            print("Ingrese comandos para enviar al Arduino o 'exit' para salir.")
-            print("Formato de comandos:")
-            print("  Motores:   M,id,left,right  (ej: M,1,100,-100)")
-            print("  Pateo:     K,id,power       (ej: K,1,255)")
-            print("  Dribbler:  D,id,power       (ej: D,1,200)")
-            print("  Detener:   S,id             (ej: S,1)")
+        print("\n=== MODO INTERACTIVO ===")
+        print("Ingrese comandos para enviar al Arduino o 'exit' para salir.")
+        print("Formato de comandos:")
+        print("  Motores:   M,id,left,right  (ej: M,1,100,-100)")
+        print("  Pateo:     K,id,power       (ej: K,1,255)")
+        print("  Dribbler:  D,id,power       (ej: D,1,200)")
+        print("  Detener:   S,id             (ej: S,1)")
 
-            while True:
-                try:
-                    command = input("\nComando > ").strip()
+        while True:
+            try:
+                command = input("\nComando > ").strip()
 
-                    if command.lower() == 'exit':
-                        break
-
-                    if command:
-                        self.send_command(command)
-
-                except KeyboardInterrupt:
+                if command.lower() == 'exit':
                     break
-                except Exception as e:
-                    logger.error(f"Error: {e}")
 
-            print("Modo interactivo finalizado.")
+                if command:
+                    self.send_command(command)
+
+            except KeyboardInterrupt:
+                break
+            except Exception as e:
+                logger.error(f"Error: {e}")
+
+        print("Modo interactivo finalizado.")
 
 def main():
     """Función principal."""
     parser = argparse.ArgumentParser(description='Prueba de comunicación con Arduino')
     parser.add_argument('--port', required=True, help='Puerto serial (ej: /dev/ttyUSB0, COM3)')
-    parser.add_argument('--baud', type=int, default=115200, help='Velocidad en baudios')
+    parser.add_argument('--baud', type=int, default=9600, help='Velocidad en baudios')
     parser.add_argument('--robot', type=int, default=1, choices=[1, 2, 3, 4], help='ID del robot a probar')
     parser.add_argument('--test', choices=['motor', 'kicker', 'dribbler', 'all', 'interactive'],
                         default='interactive', help='Tipo de prueba a realizar')

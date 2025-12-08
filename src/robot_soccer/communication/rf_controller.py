@@ -6,8 +6,16 @@ de fútbol mediante comunicación por radiofrecuencia a través de Arduino.
 """
 
 import logging
+import sys
+from pathlib import Path
+
+# Agregar path para importar módulos del proyecto
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+# pylint: disable=wrong-import-position
 from .serial_manager import SerialManager
 from .command_protocol import RobotCommandProtocol
+from ..controllers.robot_calibration import get_calibration_manager
 
 log = logging.getLogger(__name__)
 
@@ -25,15 +33,26 @@ class RFController:
         logger (Logger): Logger para registrar eventos y errores.
     """
 
-    def __init__(self, port="/dev/ttyUSB0"):
+    def __init__(self, port="/dev/ttyUSB0", enable_calibration=True):
         """Inicializa el controlador RF.
 
         Args:
             port (str): Puerto serial donde está conectado el Arduino.
                 Defaults to '/dev/ttyUSB0'.
+            enable_calibration (bool): Si es True, aplica calibración individual por robot.
+                Defaults to True.
         """
         self.serial_manager = SerialManager(port=port)
         self.protocol = RobotCommandProtocol()
+        self.enable_calibration = enable_calibration
+
+        # Cargar gestor de calibración
+        if self.enable_calibration:
+            self.calibration = get_calibration_manager()
+            log.info("Calibración de motores habilitada")
+        else:
+            self.calibration = None
+            log.info("Calibración de motores deshabilitada")
 
     def initialize(self):
         """Inicializa la comunicación con el Arduino.
@@ -67,9 +86,20 @@ class RFController:
         Returns:
             bool: True si el comando se envió correctamente, False en caso contrario.
         """
-        # Convertir velocidades normalizadas (-1 a 1) a valores para Arduino (-255 a 255)
-        left_val = int(left_speed * 255)
-        right_val = int(right_speed * 255)
+        # Convertir velocidades normalizadas (-1 a 1) a valores para Arduino (-127 a 127)
+        # Limitado a este rango debido a la conversión uint8_t en el transmisor RF
+        left_val = int(left_speed * 127)
+        right_val = int(right_speed * 127)
+
+        # Aplicar calibración individual si está habilitada
+        if self.enable_calibration and self.calibration:
+            left_val, right_val = self.calibration.apply_calibration(
+                robot_id, left_val, right_val
+            )
+            log.debug(
+                "Robot %i: Calibrado L=%d, R=%d (original: L=%.2f, R=%.2f)",
+                robot_id, left_val, right_val, left_speed, right_speed
+            )
 
         # Generar comando
         command = self.protocol.format_motor_command(robot_id, left_val, right_val)
@@ -156,3 +186,48 @@ class RFController:
             log.debug("Robot %i: Detenido", robot_id)
 
         return success
+
+    def test_connections(self):
+        """Prueba la conexión RF con todos los dispositivos.
+
+        Envía un comando 'ping' al transmisor que verifica la conexión
+        con el tablero y todos los robots.
+
+        Returns:
+            dict: Diccionario con el estado de cada dispositivo.
+                  Formato: {'tablero': bool, 'robot_1': bool, ...}
+        """
+        log.info("Probando conexiones RF...")
+
+        # Enviar comando ping (el transmisor responde con ~11 líneas)
+        # Usamos expected_lines=None para leer todo lo disponible
+        responses = self.serial_manager.send_command_sync("ping", timeout=5.0, expected_lines=None)
+
+        # Debug: mostrar respuestas recibidas
+        log.debug("Ping recibió %d respuestas:", len(responses))
+        for i, resp in enumerate(responses):
+            log.debug("  [%d] %s", i, resp)
+
+        # Parsear respuestas
+        connections = {
+            'tablero': False,
+            'robot_1': False,
+            'robot_2': False,
+            'robot_3': False,
+            'robot_4': False
+        }
+
+        # El firmware envía "✓ Robot X responded!" o "✗ Robot X NO RESPONSE"
+        for response in responses:
+            if 'Tablero' in response and 'responded' in response:
+                connections['tablero'] = True
+            elif 'Robot 1' in response and 'responded' in response:
+                connections['robot_1'] = True
+            elif 'Robot 2' in response and 'responded' in response:
+                connections['robot_2'] = True
+            elif 'Robot 3' in response and 'responded' in response:
+                connections['robot_3'] = True
+            elif 'Robot 4' in response and 'responded' in response:
+                connections['robot_4'] = True
+
+        return connections

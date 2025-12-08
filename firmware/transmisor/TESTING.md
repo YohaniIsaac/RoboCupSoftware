@@ -90,7 +90,7 @@ echo "T2" > /dev/ttyUSB0
 
 **Nota:** Puede que necesites configurar el puerto primero:
 ```bash
-stty -F /dev/ttyUSB0 115200
+stty -F /dev/ttyUSB0 9600
 ```
 
 ---
@@ -99,10 +99,10 @@ stty -F /dev/ttyUSB0 115200
 
 ```bash
 # Con screen
-screen /dev/ttyUSB0 115200
+screen /dev/ttyUSB0 9600
 
 # Con minicom
-minicom -D /dev/ttyUSB0 -b 115200
+minicom -D /dev/ttyUSB0 -b 9600
 ```
 
 Luego escribe los comandos directamente.

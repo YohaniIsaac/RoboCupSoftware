@@ -52,4 +52,33 @@
 #define VELOCIDAD_GIRO_LENTO 30
 #define VELOCIDAD_GIRO_RAPIDO 40
 
+// ========================================================================
+// CALIBRACIÓN INDIVIDUAL POR ROBOT
+// ========================================================================
+// Estos factores corrigen diferencias físicas entre robots
+// Valores de 0.0 a 1.0 (1.0 = sin corrección)
+// Ajusta estos valores después de calibrar con Python
+
+#if ROBOT_ID == 1
+  #define CALIBRATION_LEFT_FACTOR 1.0
+  #define CALIBRATION_RIGHT_FACTOR 1.0
+  #define CALIBRATION_BIAS 0.0
+#elif ROBOT_ID == 2
+  #define CALIBRATION_LEFT_FACTOR 1.0
+  #define CALIBRATION_RIGHT_FACTOR 1.0
+  #define CALIBRATION_BIAS 0.0
+#elif ROBOT_ID == 3
+  #define CALIBRATION_LEFT_FACTOR 1.0
+  #define CALIBRATION_RIGHT_FACTOR 1.0
+  #define CALIBRATION_BIAS 0.0
+#elif ROBOT_ID == 4
+  #define CALIBRATION_LEFT_FACTOR 1.0
+  #define CALIBRATION_RIGHT_FACTOR 1.0
+  #define CALIBRATION_BIAS 0.0
+#else
+  #define CALIBRATION_LEFT_FACTOR 1.0
+  #define CALIBRATION_RIGHT_FACTOR 1.0
+  #define CALIBRATION_BIAS 0.0
+#endif
+
 #endif
