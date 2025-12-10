@@ -5,7 +5,17 @@ utilizando el color distintivo de ésta. Incluye procesamiento de imagen para
 identificar la posición y delimitar la circunferencia de la pelota.
 """
 import cv2 as cv
-from robot_soccer.config import COLOR_NEGRO, COLOR_ROJO_CV, COLOR_AZUL_CV
+from robot_soccer.config import (
+    COLOR_NEGRO,
+    COLOR_ROJO_CV,
+    COLOR_AZUL_CV,
+    BALL_DETECTION_KERNEL_SIZE,
+    BALL_DETECTION_MORPH_ITERATIONS,
+    BALL_DETECTION_HOUGH_PARAM1,
+    BALL_DETECTION_HOUGH_PARAM2,
+    BALL_DETECTION_MIN_RADIUS,
+    BALL_DETECTION_MAX_RADIUS,
+)
 #########################
 # BUSQUEDA DE LA PELOTA #
 #########################
@@ -131,8 +141,8 @@ class Ball:
     def detectar_circulos_color(cls, img_hsv, colores, img_origi):
         """Detecta círculos de un color específico en la imagen usando transformada de Hough.
 
-        Aplica filtrado por color, suavizado gaussiano y la transformada de Hough
-        para detectar círculos que correspondan a la pelota en la imagen.
+        Aplica filtrado por color, operaciones morfológicas para limpiar la máscara,
+        y la transformada de Hough para detectar círculos que correspondan a la pelota.
 
         Args:
             img_hsv (numpy.ndarray): Imagen en espacio de color HSV para filtrado.
@@ -145,15 +155,24 @@ class Ball:
                   Formato: (x, y, radio). Retorna (None, None, None) si no se detecta.
 
         Note:
-            Utiliza parámetros optimizados para la transformada de Hough:
-            - minDist=20: distancia mínima entre centros de círculos
-            - param1=15, param2=15: parámetros de sensibilidad
-            - minRadius=10, maxRadius=50: rango de radios esperados
+            Utiliza parámetros calibrados desde config.py:
+            - Morfología: kernel size, iteraciones de apertura/cierre
+            - HoughCircles: param1, param2, min/max radius
         """
         color_bajo, color_alto = colores
 
         # Crear una máscara utilizando los rangos de color especificados
         mascara = cv.inRange(img_hsv, color_bajo, color_alto)
+
+        # Aplicar operaciones morfológicas para limpiar la máscara (reduce ruido y redondea forma)
+        if BALL_DETECTION_KERNEL_SIZE > 0 and BALL_DETECTION_MORPH_ITERATIONS > 0:
+            kernel = cv.getStructuringElement(
+                cv.MORPH_ELLIPSE,
+                (BALL_DETECTION_KERNEL_SIZE, BALL_DETECTION_KERNEL_SIZE)
+            )
+            for _ in range(BALL_DETECTION_MORPH_ITERATIONS):
+                mascara = cv.morphologyEx(mascara, cv.MORPH_CLOSE, kernel)
+                mascara = cv.morphologyEx(mascara, cv.MORPH_OPEN, kernel)
 
         # Aplicar la máscara a la imagen original
         imagen_filtrada = cv.bitwise_and(img_origi, img_origi, mask=mascara)
@@ -164,10 +183,17 @@ class Ball:
         # Aplicar un filtro de suavizado para reducir el ruido
         imagen_suavizada = cv.GaussianBlur(imagen_gris, (5, 5), 0)
 
-        # Aplicar la transformada de Hough para detectar círculos
-        circulos = cv.HoughCircles(imagen_suavizada, cv.HOUGH_GRADIENT, 1, minDist=20,
-                                   param1=15, param2=15,
-                                   minRadius=10, maxRadius=50)
+        # Aplicar la transformada de Hough para detectar círculos con parámetros calibrados
+        circulos = cv.HoughCircles(
+            imagen_suavizada,
+            cv.HOUGH_GRADIENT,
+            1,
+            minDist=20,
+            param1=BALL_DETECTION_HOUGH_PARAM1,
+            param2=BALL_DETECTION_HOUGH_PARAM2,
+            minRadius=BALL_DETECTION_MIN_RADIUS,
+            maxRadius=BALL_DETECTION_MAX_RADIUS
+        )
 
         # Si se detectaron círculos, agregarlos a la lista de circulos_detectados
         x, y, r = None, None, None
