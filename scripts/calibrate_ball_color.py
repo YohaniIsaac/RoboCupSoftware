@@ -1,16 +1,24 @@
 #!/usr/bin/env python3
-"""Script para calibrar el rango de color HSV para detectar la pelota.
+"""Script para calibrar el rango de color HSV y parámetros de detección de la pelota.
 
-Este script te permite ajustar interactivamente los rangos de color HSV
-usando trackbars (deslizantes) para optimizar la detección de la pelota.
+Este script te permite ajustar interactivamente:
+  FASE 1: Rangos de color HSV para filtrar la pelota
+  FASE 2: Parámetros de detección (morfología y círculos)
 
 Uso:
     python scripts/calibrate_ball_color.py [--camera-id 2]
 
-Controles:
+Controles FASE 1 (Color HSV):
     - Trackbars: Ajustar rangos H, S, V (min y max)
-    - R: Resetear a valores por defecto (naranja)
+    - R: Resetear a valores por defecto
+    - N: Siguiente fase (calibración de detección)
+    - ESC: Salir sin guardar
+
+Controles FASE 2 (Detección):
+    - Trackbars: Ajustar morfología y parámetros de círculos
+    - R: Resetear a valores por defecto
     - ENTER: Guardar configuración en config.py
+    - B: Volver a fase 1 (color)
     - ESC: Salir sin guardar
 """
 import sys
@@ -33,7 +41,7 @@ WINDOW_MASK = "2. Mask - Deteccion Binaria"
 WINDOW_RESULT = "3. Result - Pelota Detectada"
 WINDOW_CONTROLS = "Controles HSV"
 
-# Variables globales para trackbars
+# Variables globales para trackbars - FASE 1 (Color HSV)
 # pylint: disable=invalid-name,global-statement
 h_min = 0
 h_max = 179
@@ -41,6 +49,14 @@ s_min = 0
 s_max = 255
 v_min = 0
 v_max = 255
+
+# Variables globales para trackbars - FASE 2 (Detección)
+kernel_size = 5  # Tamaño del kernel morfológico (debe ser impar)
+morph_iterations = 1  # Iteraciones de apertura/cierre
+hough_param1 = 50  # Umbral superior para detección de bordes Canny
+hough_param2 = 30  # Umbral de acumulador para detección de círculos
+min_radius = 5  # Radio mínimo del círculo
+max_radius = 100  # Radio máximo del círculo
 
 
 def nothing(_):
@@ -53,22 +69,24 @@ def create_color_preview(h_min_val, h_max_val, s_min_val, s_max_val, v_min_val, 
     img = np.zeros((300, 500, 3), dtype=np.uint8)
 
     # Instrucciones
-    cv2.putText(img, "Ajusta los rangos HSV", (10, 25),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+    cv2.putText(img, "FASE 1: Ajusta rangos HSV", (10, 25),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
     cv2.putText(img, "Objetivo: Solo pelota en blanco", (10, 55),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 1)
-    cv2.putText(img, "R = Reset | ENTER = Guardar | ESC = Salir", (10, 85),
+    cv2.putText(img, "R = Reset | N = Siguiente Fase", (10, 85),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+    cv2.putText(img, "ESC = Salir sin guardar", (10, 110),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
 
     # Título de la barra de color
-    cv2.putText(img, "Rango de Color Detectado:", (10, 120),
+    cv2.putText(img, "Rango de Color Detectado:", (10, 140),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
     # Crear barra de color HSV (gradiente del rango)
-    bar_height = 60
+    bar_height = 50
     bar_width = 480
     bar_x = 10
-    bar_y = 130
+    bar_y = 150
 
     # Crear imagen HSV con el rango seleccionado
     color_bar_hsv = np.zeros((bar_height, bar_width, 3), dtype=np.uint8)
@@ -96,21 +114,21 @@ def create_color_preview(h_min_val, h_max_val, s_min_val, s_max_val, v_min_val, 
 
     # Mostrar valores HSV
     cv2.putText(img, f"H: {h_min_val}-{h_max_val}  S: {s_min_val}-{s_max_val}  V: {v_min_val}-{v_max_val}",
-                (10, 220), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+                (10, 215), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
 
     # Leyenda
-    cv2.putText(img, "H = Matiz (color)", (10, 250),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 200, 255), 1)
-    cv2.putText(img, "S = Saturacion (intensidad)", (10, 270),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 200, 255), 1)
-    cv2.putText(img, "V = Valor (brillo)", (10, 290),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 200, 255), 1)
+    cv2.putText(img, "H = Matiz (color)", (10, 245),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.45, (100, 200, 255), 1)
+    cv2.putText(img, "S = Saturacion (intensidad)", (10, 265),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.45, (100, 200, 255), 1)
+    cv2.putText(img, "V = Valor (brillo)", (10, 285),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.45, (100, 200, 255), 1)
 
     return img
 
 
-def reset_to_default():
-    """Resetea los valores a los del config actual."""
+def load_hsv_from_config():
+    """Carga los valores HSV del config sin actualizar trackbars."""
     global h_min, h_max, s_min, s_max, v_min, v_max
 
     # Obtener valores de config
@@ -119,28 +137,259 @@ def reset_to_default():
     h_min, s_min, v_min = h_min_cfg, s_min_cfg, v_min_cfg
     h_max, s_max, v_max = h_max_cfg, s_max_cfg, v_max_cfg
 
-    # Actualizar trackbars
-    cv2.setTrackbarPos("H Min", WINDOW_CONTROLS, h_min)
-    cv2.setTrackbarPos("H Max", WINDOW_CONTROLS, h_max)
-    cv2.setTrackbarPos("S Min", WINDOW_CONTROLS, s_min)
-    cv2.setTrackbarPos("S Max", WINDOW_CONTROLS, s_max)
-    cv2.setTrackbarPos("V Min", WINDOW_CONTROLS, v_min)
-    cv2.setTrackbarPos("V Max", WINDOW_CONTROLS, v_max)
 
-    print("✅ Valores reseteados a los de config.py")
+def reset_to_default():
+    """Resetea los valores a los del config actual y actualiza trackbars."""
+    load_hsv_from_config()
+
+    # Actualizar trackbars (solo si existen)
+    try:
+        cv2.setTrackbarPos("H Min", WINDOW_CONTROLS, h_min)
+        cv2.setTrackbarPos("H Max", WINDOW_CONTROLS, h_max)
+        cv2.setTrackbarPos("S Min", WINDOW_CONTROLS, s_min)
+        cv2.setTrackbarPos("S Max", WINDOW_CONTROLS, s_max)
+        cv2.setTrackbarPos("V Min", WINDOW_CONTROLS, v_min)
+        cv2.setTrackbarPos("V Max", WINDOW_CONTROLS, v_max)
+        print("✅ Valores reseteados a los de config.py")
+    except cv2.error:
+        # Trackbars no existen, solo cargamos valores
+        print("✅ Valores HSV cargados de config.py")
+
+
+def calibrate_detection_params(camera_id=2):
+    """FASE 2: Calibra los parámetros de detección de círculos y morfología."""
+    global kernel_size, morph_iterations, hough_param1, hough_param2, min_radius, max_radius
+
+    print("\n" + "=" * 70)
+    print("FASE 2: CALIBRACIÓN DE DETECCIÓN DE PELOTA")
+    print("=" * 70)
+    print("\nControles:")
+    print("  Trackbars    - Ajustar parámetros de detección")
+    print("  R            - Resetear a valores por defecto")
+    print("  B            - Volver a calibración de color (Fase 1)")
+    print("  ENTER        - Guardar configuración completa")
+    print("  ESC          - Salir sin guardar")
+    print("\nVentanas:")
+    print("  1. Original     - Feed de cámara")
+    print("  2. Mask+Morph   - Máscara con filtros morfológicos")
+    print("  3. Detection    - Círculos detectados")
+    print("=" * 70)
+
+    # Ventanas para fase 2
+    WINDOW_DETECTION = "3. Detection - Circulos Detectados"
+    WINDOW_CONTROLS_DETECT = "Controles Deteccion"
+
+    # Abrir cámara
+    cap = cv2.VideoCapture(camera_id)
+
+    if not cap.isOpened():
+        print(f"\n❌ Error: No se pudo abrir la cámara {camera_id}")
+        return False
+
+    # Crear ventanas
+    cv2.namedWindow(WINDOW_ORIGINAL)
+    cv2.namedWindow(WINDOW_MASK)
+    cv2.namedWindow(WINDOW_DETECTION)
+    cv2.namedWindow(WINDOW_CONTROLS_DETECT)
+
+    # Valores por defecto
+    kernel_size = 5
+    morph_iterations = 1
+    hough_param1 = 50
+    hough_param2 = 30
+    min_radius = 5
+    max_radius = 100
+
+    # Crear trackbars (kernel debe ser impar: 1,3,5,7,9,11)
+    cv2.createTrackbar("Kernel (*2+1)", WINDOW_CONTROLS_DETECT, 2, 5, nothing)  # 0-5 → 1,3,5,7,9,11
+    cv2.createTrackbar("Morph Iters", WINDOW_CONTROLS_DETECT, morph_iterations, 5, nothing)
+    cv2.createTrackbar("Hough Param1", WINDOW_CONTROLS_DETECT, hough_param1, 200, nothing)
+    cv2.createTrackbar("Hough Param2", WINDOW_CONTROLS_DETECT, hough_param2, 100, nothing)
+    cv2.createTrackbar("Min Radius", WINDOW_CONTROLS_DETECT, min_radius, 50, nothing)
+    cv2.createTrackbar("Max Radius", WINDOW_CONTROLS_DETECT, max_radius, 200, nothing)
+
+    back_to_phase1 = False
+
+    while True:
+        # Leer frame
+        ret, frame = cap.read()
+        if not ret:
+            print("❌ Error leyendo frame")
+            break
+
+        # Obtener valores de trackbars
+        kernel_idx = cv2.getTrackbarPos("Kernel (*2+1)", WINDOW_CONTROLS_DETECT)
+        kernel_size = kernel_idx * 2 + 1  # Convertir 0-5 a 1,3,5,7,9,11
+        morph_iterations = cv2.getTrackbarPos("Morph Iters", WINDOW_CONTROLS_DETECT)
+        hough_param1 = cv2.getTrackbarPos("Hough Param1", WINDOW_CONTROLS_DETECT)
+        hough_param2 = cv2.getTrackbarPos("Hough Param2", WINDOW_CONTROLS_DETECT)
+        min_radius = cv2.getTrackbarPos("Min Radius", WINDOW_CONTROLS_DETECT)
+        max_radius = cv2.getTrackbarPos("Max Radius", WINDOW_CONTROLS_DETECT)
+
+        # Convertir a HSV
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+
+        # Aplicar máscara de color (usando valores de FASE 1)
+        lower_color = np.array([h_min, s_min, v_min])
+        upper_color = np.array([h_max, s_max, v_max])
+        mask = cv2.inRange(hsv, lower_color, upper_color)
+
+        # Aplicar operaciones morfológicas
+        if kernel_size > 0 and morph_iterations > 0:
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
+            for _ in range(morph_iterations):
+                mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+                mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+
+        # Aplicar máscara y convertir a gris
+        imagen_filtrada = cv2.bitwise_and(frame, frame, mask=mask)
+        imagen_gris = cv2.cvtColor(imagen_filtrada, cv2.COLOR_BGR2GRAY)
+        imagen_suavizada = cv2.GaussianBlur(imagen_gris, (5, 5), 0)
+
+        # Detectar círculos con HoughCircles
+        circulos = None
+        if hough_param1 > 0 and hough_param2 > 0 and max_radius > min_radius:
+            circulos = cv2.HoughCircles(
+                imagen_suavizada,
+                cv2.HOUGH_GRADIENT,
+                1,
+                minDist=20,
+                param1=hough_param1,
+                param2=hough_param2,
+                minRadius=min_radius,
+                maxRadius=max_radius
+            )
+
+        # Preparar frames para visualización
+        info_frame = frame.copy()
+        mask_bgr = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
+        detection_frame = frame.copy()
+
+        # Dibujar círculos detectados
+        num_circles = 0
+        if circulos is not None:
+            circulos = np.uint16(np.around(circulos))
+            for i in circulos[0, :]:
+                # Dibujar círculo exterior
+                cv2.circle(detection_frame, (i[0], i[1]), i[2], (0, 255, 0), 2)
+                # Dibujar centro
+                cv2.circle(detection_frame, (i[0], i[1]), 2, (0, 0, 255), 3)
+                num_circles += 1
+
+        # Información en frames
+        cv2.putText(info_frame, "Original - Pelota en escena", (10, 30),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+
+        cv2.putText(mask_bgr, "Mask + Morfologia", (10, 30),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        cv2.putText(mask_bgr, f"Kernel: {kernel_size}x{kernel_size}, Iters: {morph_iterations}",
+                   (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+
+        status_color = (0, 255, 0) if num_circles == 1 else (0, 0, 255)
+        cv2.putText(detection_frame, f"Circulos Detectados: {num_circles}", (10, 30),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, status_color, 2)
+        cv2.putText(detection_frame, f"P1:{hough_param1} P2:{hough_param2} R:{min_radius}-{max_radius}",
+                   (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+
+        # Crear panel de controles
+        controls_img = np.zeros((350, 500, 3), dtype=np.uint8)
+        cv2.putText(controls_img, "FASE 2: Parametros de Deteccion", (10, 25),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
+
+        y_offset = 60
+        cv2.putText(controls_img, f"Kernel: {kernel_size}x{kernel_size} (morfologia)", (10, y_offset),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+        y_offset += 25
+        cv2.putText(controls_img, f"Iteraciones: {morph_iterations}", (10, y_offset),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+        y_offset += 35
+        cv2.putText(controls_img, "Parametros HoughCircles:", (10, y_offset),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (100, 200, 255), 2)
+        y_offset += 25
+        cv2.putText(controls_img, f"  Param1 (Canny): {hough_param1}", (10, y_offset),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+        y_offset += 25
+        cv2.putText(controls_img, f"  Param2 (Acumulador): {hough_param2}", (10, y_offset),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+        y_offset += 25
+        cv2.putText(controls_img, f"  Radio Min: {min_radius} px", (10, y_offset),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+        y_offset += 25
+        cv2.putText(controls_img, f"  Radio Max: {max_radius} px", (10, y_offset),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+
+        y_offset += 40
+        result_color = (0, 255, 0) if num_circles == 1 else (0, 165, 255) if num_circles == 0 else (0, 0, 255)
+        result_text = "Perfecto!" if num_circles == 1 else "No detecta" if num_circles == 0 else "Multiples!"
+        cv2.putText(controls_img, f"Estado: {result_text} ({num_circles} circulos)", (10, y_offset),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, result_color, 2)
+
+        y_offset += 35
+        cv2.putText(controls_img, "Objetivo: Detectar exactamente 1 circulo", (10, y_offset),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+
+        y_offset += 35
+        cv2.putText(controls_img, "R = Reset | B = Volver Fase 1", (10, y_offset),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        y_offset += 25
+        cv2.putText(controls_img, "ENTER = Guardar | ESC = Salir", (10, y_offset),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+
+        # Mostrar ventanas
+        cv2.imshow(WINDOW_ORIGINAL, info_frame)
+        cv2.imshow(WINDOW_MASK, mask_bgr)
+        cv2.imshow(WINDOW_DETECTION, detection_frame)
+        cv2.imshow(WINDOW_CONTROLS_DETECT, controls_img)
+
+        # Capturar tecla
+        key = cv2.waitKey(1) & 0xFF
+
+        # Resetear
+        if key == ord('r') or key == ord('R'):
+            cv2.setTrackbarPos("Kernel (*2+1)", WINDOW_CONTROLS_DETECT, 2)
+            cv2.setTrackbarPos("Morph Iters", WINDOW_CONTROLS_DETECT, 1)
+            cv2.setTrackbarPos("Hough Param1", WINDOW_CONTROLS_DETECT, 50)
+            cv2.setTrackbarPos("Hough Param2", WINDOW_CONTROLS_DETECT, 30)
+            cv2.setTrackbarPos("Min Radius", WINDOW_CONTROLS_DETECT, 5)
+            cv2.setTrackbarPos("Max Radius", WINDOW_CONTROLS_DETECT, 100)
+            print("✅ Parámetros reseteados a valores por defecto")
+
+        # Volver a fase 1
+        elif key == ord('b') or key == ord('B'):
+            print("\n🔙 Volviendo a calibración de color (Fase 1)...")
+            back_to_phase1 = True
+            break
+
+        # Guardar
+        elif key == 13:  # ENTER
+            print("\n" + "=" * 70)
+            print("GUARDANDO CONFIGURACIÓN COMPLETA")
+            print("=" * 70)
+            save_complete_config()
+            break
+
+        # Salir sin guardar
+        elif key == 27:  # ESC
+            print("\n❌ Calibración cancelada - no se guardaron cambios")
+            break
+
+    cap.release()
+    cv2.destroyAllWindows()
+
+    return back_to_phase1
 
 
 def calibrate_ball_color(camera_id=2):
-    """Calibra el rango de color HSV para detectar la pelota."""
+    """FASE 1: Calibra el rango de color HSV para detectar la pelota."""
     global h_min, h_max, s_min, s_max, v_min, v_max
 
     print("=" * 70)
-    print("CALIBRACIÓN DE COLOR - DETECCIÓN DE PELOTA")
+    print("FASE 1: CALIBRACIÓN DE COLOR HSV - DETECCIÓN DE PELOTA")
     print("=" * 70)
     print("\nControles:")
     print("  Trackbars    - Ajustar rangos HSV")
     print("  R            - Resetear a valores por defecto")
-    print("  ENTER        - Guardar configuración en config.py")
+    print("  N            - Siguiente fase (calibrar detección)")
     print("  ESC          - Salir sin guardar")
     print("\nVentanas:")
     print("  1. Original  - Feed de cámara")
@@ -255,13 +504,12 @@ def calibrate_ball_color(camera_id=2):
         if key == ord('r') or key == ord('R'):
             reset_to_default()
 
-        # Guardar
-        elif key == 13:  # ENTER
-            print("\n" + "=" * 70)
-            print("GUARDANDO CONFIGURACIÓN")
-            print("=" * 70)
-            save_color_config(h_min, h_max, s_min, s_max, v_min, v_max)
-            break
+        # Siguiente fase (detección)
+        elif key == ord('n') or key == ord('N'):
+            print("\n➡️  Pasando a calibración de detección (Fase 2)...")
+            cap.release()
+            cv2.destroyAllWindows()
+            return True  # Continuar a fase 2
 
         # Salir sin guardar
         elif key == 27:  # ESC
@@ -270,35 +518,61 @@ def calibrate_ball_color(camera_id=2):
 
     cap.release()
     cv2.destroyAllWindows()
+    return False  # No continuar a fase 2
 
 
-def save_color_config(h_min_val, h_max_val, s_min_val, s_max_val, v_min_val, v_max_val):
-    """Guarda la configuración del rango de color en config.py."""
+def save_complete_config():
+    """Guarda la configuración completa (HSV + parámetros de detección) en config.py."""
     config_path = Path(__file__).parent.parent / "src" / "robot_soccer" / "config.py"
 
     # Leer archivo
     with open(config_path, 'r', encoding='utf-8') as f:
         lines = f.readlines()
 
-    # Modificar línea de RANGO_COLOR_NARANJO
+    # Modificar líneas necesarias
     new_lines = []
     for line in lines:
         if line.strip().startswith("RANGO_COLOR_NARANJO ="):
-            # Reemplazar con nuevos valores
-            new_line = (f"RANGO_COLOR_NARANJO = (({h_min_val}, {s_min_val}, {v_min_val}), "
-                       f"({h_max_val}, {s_max_val}, {v_max_val}))"
+            # Actualizar rango HSV
+            new_line = (f"RANGO_COLOR_NARANJO = (({h_min}, {s_min}, {v_min}), "
+                       f"({h_max}, {s_max}, {v_max}))"
                        "  # Rango HSV para pelota naranja\n")
             new_lines.append(new_line)
-            print("\n✅ Configuración actualizada:")
-            print(f"   H (Hue):        {h_min_val} - {h_max_val}")
-            print(f"   S (Saturation): {s_min_val} - {s_max_val}")
-            print(f"   V (Value):      {v_min_val} - {v_max_val}")
+            print("\n✅ Configuración HSV actualizada:")
+            print(f"   H (Hue):        {h_min} - {h_max}")
+            print(f"   S (Saturation): {s_min} - {s_max}")
+            print(f"   V (Value):      {v_min} - {v_max}")
+        elif line.strip().startswith("# Parámetros de detección de pelota"):
+            # Agregar bloque de parámetros de detección si no existe
+            new_lines.append(line)
+            # Buscar las siguientes líneas para actualizarlas
         else:
             new_lines.append(line)
+
+    # Si no existen los parámetros de detección, agregarlos al final
+    has_detection_params = any("BALL_DETECTION_KERNEL_SIZE" in line for line in new_lines)
+
+    if not has_detection_params:
+        # Agregar parámetros de detección al final del archivo
+        new_lines.append("\n# Parámetros de detección de pelota (morfología y HoughCircles)\n")
+        new_lines.append(f"BALL_DETECTION_KERNEL_SIZE = {kernel_size}  # Tamaño del kernel morfológico\n")
+        new_lines.append(f"BALL_DETECTION_MORPH_ITERATIONS = {morph_iterations}  # Iteraciones de apertura/cierre\n")
+        new_lines.append(f"BALL_DETECTION_HOUGH_PARAM1 = {hough_param1}  # Umbral Canny\n")
+        new_lines.append(f"BALL_DETECTION_HOUGH_PARAM2 = {hough_param2}  # Umbral acumulador\n")
+        new_lines.append(f"BALL_DETECTION_MIN_RADIUS = {min_radius}  # Radio mínimo (px)\n")
+        new_lines.append(f"BALL_DETECTION_MAX_RADIUS = {max_radius}  # Radio máximo (px)\n")
 
     # Escribir archivo
     with open(config_path, 'w', encoding='utf-8') as f:
         f.writelines(new_lines)
+
+    print("\n✅ Parámetros de detección guardados:")
+    print(f"   Kernel Size:       {kernel_size}x{kernel_size}")
+    print(f"   Morph Iterations:  {morph_iterations}")
+    print(f"   Hough Param1:      {hough_param1}")
+    print(f"   Hough Param2:      {hough_param2}")
+    print(f"   Min Radius:        {min_radius} px")
+    print(f"   Max Radius:        {max_radius} px")
 
     print(f"\n✅ Guardado en: {config_path}")
     print("\nPuedes probar la detección con:")
@@ -307,9 +581,9 @@ def save_color_config(h_min_val, h_max_val, s_min_val, s_max_val, v_min_val, v_m
 
 
 def main():
-    """Función principal."""
+    """Función principal - maneja el flujo entre Fase 1 y Fase 2."""
     parser = argparse.ArgumentParser(
-        description="Calibrar rango de color HSV para detectar la pelota"
+        description="Calibrar color HSV y parámetros de detección de la pelota"
     )
     parser.add_argument(
         '--camera-id',
@@ -317,9 +591,37 @@ def main():
         default=2,
         help='ID de la cámara (default: 2 para DroidCam)'
     )
+    parser.add_argument(
+        '--skip-phase1',
+        action='store_true',
+        help='Saltar Fase 1 (color) e ir directo a Fase 2 (detección)'
+    )
 
     args = parser.parse_args()
-    calibrate_ball_color(args.camera_id)
+
+    # Determinar fase inicial
+    if args.skip_phase1:
+        print("\n⏭️  Saltando Fase 1, iniciando en Fase 2 (Detección)...")
+        # Cargar valores HSV del config (sin actualizar trackbars)
+        load_hsv_from_config()
+        calibrate_detection_params(args.camera_id)
+    else:
+        # Loop entre fases
+        while True:
+            # Fase 1: Calibración de color HSV
+            go_to_phase2 = calibrate_ball_color(args.camera_id)
+
+            if not go_to_phase2:
+                # Usuario presionó ESC o salió
+                break
+
+            # Fase 2: Calibración de detección
+            back_to_phase1 = calibrate_detection_params(args.camera_id)
+
+            if not back_to_phase1:
+                # Usuario presionó ENTER (guardar) o ESC (salir)
+                break
+            # Si back_to_phase1 es True, el loop continúa y vuelve a Fase 1
 
 
 if __name__ == "__main__":
