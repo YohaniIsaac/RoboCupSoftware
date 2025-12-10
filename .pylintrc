@@ -35,7 +35,8 @@ disable=missing-module-docstring,
         missing-class-docstring,
         missing-function-docstring,
         too-many-return-statements,
-        too-many-public-methods
+        too-many-public-methods,
+        unsubscriptable-object
 
 [FORMAT]
 # Consistente con black formatter
@@ -45,3 +46,7 @@ max-module-lines=1500
 [BASIC]
 # Permitir nombres de constantes en minúsculas para casos específicos
 const-rgx=^([A-Z_][A-Z0-9_]*|__.*__|module_name|logger)$
+
+[DESIGN]
+# Límites de complejidad de código
+max-branches=20  # Default es 12, aumentado para funciones interactivas complejas

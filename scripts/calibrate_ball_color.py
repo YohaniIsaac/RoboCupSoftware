@@ -32,7 +32,19 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 # pylint: disable=wrong-import-position
-from robot_soccer.config import RANGO_COLOR_NARANJO
+from robot_soccer.config import (
+    RANGO_COLOR_NARANJO,
+    BALL_DETECTION_KERNEL_SIZE,
+    BALL_DETECTION_MORPH_ITERATIONS,
+    BALL_DETECTION_HOUGH_PARAM1,
+    BALL_DETECTION_HOUGH_PARAM2,
+    BALL_DETECTION_MIN_RADIUS,
+    BALL_DETECTION_MAX_RADIUS,
+    CAMERA_PERSPECTIVE_ENABLED,
+    CAMERA_PERSPECTIVE_SRC_POINTS,
+    CAMERA_PERSPECTIVE_WIDTH,
+    CAMERA_PERSPECTIVE_HEIGHT,
+)
 
 
 # Nombres de ventanas (constantes)
@@ -57,6 +69,49 @@ hough_param1 = 50  # Umbral superior para detección de bordes Canny
 hough_param2 = 30  # Umbral de acumulador para detección de círculos
 min_radius = 5  # Radio mínimo del círculo
 max_radius = 100  # Radio máximo del círculo
+
+
+def get_perspective_matrix():
+    """Calcula la matriz de transformación de perspectiva.
+
+    Returns:
+        numpy.ndarray or None: Matriz de perspectiva si está habilitada, None si no.
+    """
+    if not CAMERA_PERSPECTIVE_ENABLED:
+        return None
+
+    # Puntos de origen (trapecio en la imagen de la cámara)
+    src_points = np.float32(CAMERA_PERSPECTIVE_SRC_POINTS)
+
+    # Puntos de destino (rectángulo perfecto)
+    dst_points = np.float32([
+        [0, 0],                                              # Top-left
+        [CAMERA_PERSPECTIVE_WIDTH - 1, 0],                   # Top-right
+        [CAMERA_PERSPECTIVE_WIDTH - 1, CAMERA_PERSPECTIVE_HEIGHT - 1],  # Bottom-right
+        [0, CAMERA_PERSPECTIVE_HEIGHT - 1]                   # Bottom-left
+    ])
+
+    # Calcular matriz de transformación
+    return cv2.getPerspectiveTransform(src_points, dst_points)
+
+
+def apply_perspective_transform(frame, perspective_matrix):
+    """Aplica transformación de perspectiva al frame si está habilitada.
+
+    Args:
+        frame: Frame original de la cámara.
+        perspective_matrix: Matriz de transformación (None si está deshabilitada).
+
+    Returns:
+        numpy.ndarray: Frame transformado o frame original si la perspectiva está deshabilitada.
+    """
+    if CAMERA_PERSPECTIVE_ENABLED and perspective_matrix is not None:
+        return cv2.warpPerspective(
+            frame,
+            perspective_matrix,
+            (CAMERA_PERSPECTIVE_WIDTH, CAMERA_PERSPECTIVE_HEIGHT)
+        )
+    return frame
 
 
 def nothing(_):
@@ -186,22 +241,33 @@ def calibrate_detection_params(camera_id=2):
         print(f"\n❌ Error: No se pudo abrir la cámara {camera_id}")
         return False
 
+    # Calcular matriz de perspectiva
+    perspective_matrix = get_perspective_matrix()
+    if CAMERA_PERSPECTIVE_ENABLED:
+        print(f"\n⚠️  Transformación de perspectiva HABILITADA "
+              f"({CAMERA_PERSPECTIVE_WIDTH}x{CAMERA_PERSPECTIVE_HEIGHT})")
+    print("=" * 70)
+
     # Crear ventanas
     cv2.namedWindow(WINDOW_ORIGINAL)
     cv2.namedWindow(WINDOW_MASK)
     cv2.namedWindow(WINDOW_DETECTION)
     cv2.namedWindow(WINDOW_CONTROLS_DETECT)
 
-    # Valores por defecto
-    kernel_size = 5
-    morph_iterations = 1
-    hough_param1 = 50
-    hough_param2 = 30
-    min_radius = 5
-    max_radius = 100
+    # Cargar valores guardados de config.py
+    kernel_size = BALL_DETECTION_KERNEL_SIZE
+    morph_iterations = BALL_DETECTION_MORPH_ITERATIONS
+    hough_param1 = BALL_DETECTION_HOUGH_PARAM1
+    hough_param2 = BALL_DETECTION_HOUGH_PARAM2
+    min_radius = BALL_DETECTION_MIN_RADIUS
+    max_radius = BALL_DETECTION_MAX_RADIUS
 
-    # Crear trackbars (kernel debe ser impar: 1,3,5,7,9,11)
-    cv2.createTrackbar("Kernel (*2+1)", WINDOW_CONTROLS_DETECT, 2, 5, nothing)  # 0-5 → 1,3,5,7,9,11
+    # Calcular posición inicial del trackbar de kernel (debe ser impar: 1,3,5,7,9,11)
+    # kernel_idx se mapea: 0→1, 1→3, 2→5, 3→7, 4→9, 5→11
+    kernel_idx = (kernel_size - 1) // 2  # Convertir 1,3,5,7,9,11 de vuelta a 0-5
+
+    # Crear trackbars con valores cargados desde config
+    cv2.createTrackbar("Kernel (*2+1)", WINDOW_CONTROLS_DETECT, kernel_idx, 5, nothing)  # 0-5 → 1,3,5,7,9,11
     cv2.createTrackbar("Morph Iters", WINDOW_CONTROLS_DETECT, morph_iterations, 5, nothing)
     cv2.createTrackbar("Hough Param1", WINDOW_CONTROLS_DETECT, hough_param1, 200, nothing)
     cv2.createTrackbar("Hough Param2", WINDOW_CONTROLS_DETECT, hough_param2, 100, nothing)
@@ -216,6 +282,9 @@ def calibrate_detection_params(camera_id=2):
         if not ret:
             print("❌ Error leyendo frame")
             break
+
+        # Aplicar transformación de perspectiva (igual que en camera_feed.py)
+        frame = apply_perspective_transform(frame, perspective_matrix)
 
         # Obtener valores de trackbars
         kernel_idx = cv2.getTrackbarPos("Kernel (*2+1)", WINDOW_CONTROLS_DETECT)
@@ -404,10 +473,19 @@ def calibrate_ball_color(camera_id=2):
         print(f"\n❌ Error: No se pudo abrir la cámara {camera_id}")
         print("Asegúrate de que droidcam-cli esté corriendo:")
         print("  cd algoritmos_basicos/aruco_tag && ./start_droidcam.sh")
-        return
+        return False
 
     print("\n✅ Cámara abierta")
     print("\nAjusta los trackbars hasta que solo la pelota sea blanca en 'Mask'")
+
+    # Calcular matriz de perspectiva
+    perspective_matrix = get_perspective_matrix()
+    if CAMERA_PERSPECTIVE_ENABLED:
+        print(f"\n⚠️  Transformación de perspectiva HABILITADA "
+              f"({CAMERA_PERSPECTIVE_WIDTH}x{CAMERA_PERSPECTIVE_HEIGHT})")
+        print("    La calibración se hará sobre la imagen transformada (igual que en detección real)")
+    else:
+        print("\n⚠️  Transformación de perspectiva DESHABILITADA")
     print("=" * 70)
 
     # Crear ventanas
@@ -433,6 +511,9 @@ def calibrate_ball_color(camera_id=2):
         if not ret:
             print("❌ Error leyendo frame")
             break
+
+        # Aplicar transformación de perspectiva (igual que en camera_feed.py)
+        frame = apply_perspective_transform(frame, perspective_matrix)
 
         # Obtener valores de trackbars
         h_min = cv2.getTrackbarPos("H Min", WINDOW_CONTROLS)
@@ -531,29 +612,54 @@ def save_complete_config():
 
     # Modificar líneas necesarias
     new_lines = []
+    skip_until_next_section = False
+    detection_params_found = False
+
     for line in lines:
+        # Actualizar RANGO_COLOR_NARANJO
         if line.strip().startswith("RANGO_COLOR_NARANJO ="):
-            # Actualizar rango HSV
             new_line = (f"RANGO_COLOR_NARANJO = (({h_min}, {s_min}, {v_min}), "
                        f"({h_max}, {s_max}, {v_max}))"
                        "  # Rango HSV para pelota naranja\n")
             new_lines.append(new_line)
-            print("\n✅ Configuración HSV actualizada:")
-            print(f"   H (Hue):        {h_min} - {h_max}")
-            print(f"   S (Saturation): {s_min} - {s_max}")
-            print(f"   V (Value):      {v_min} - {v_max}")
-        elif line.strip().startswith("# Parámetros de detección de pelota"):
-            # Agregar bloque de parámetros de detección si no existe
+            continue
+
+        # Actualizar o crear sección de parámetros de detección
+        if line.strip().startswith("# Parámetros de detección de pelota"):
+            detection_params_found = True
             new_lines.append(line)
-            # Buscar las siguientes líneas para actualizarlas
+            # Agregar parámetros actualizados
+            new_lines.append(f"BALL_DETECTION_KERNEL_SIZE = {kernel_size}  "
+                           f"# Tamaño del kernel morfológico\n")
+            new_lines.append(f"BALL_DETECTION_MORPH_ITERATIONS = {morph_iterations}  "
+                           f"# Iteraciones de apertura/cierre\n")
+            new_lines.append(f"BALL_DETECTION_HOUGH_PARAM1 = {hough_param1}  # Umbral Canny\n")
+            new_lines.append(f"BALL_DETECTION_HOUGH_PARAM2 = {hough_param2}  # Umbral acumulador\n")
+            new_lines.append(f"BALL_DETECTION_MIN_RADIUS = {min_radius}  # Radio mínimo (px)\n")
+            new_lines.append(f"BALL_DETECTION_MAX_RADIUS = {max_radius}  # Radio máximo (px)\n")
+            skip_until_next_section = True
+            continue
+
+        # Saltar las viejas líneas de parámetros de detección
+        if skip_until_next_section:
+            if line.strip().startswith("BALL_DETECTION_"):
+                continue  # Saltar líneas viejas
+            if line.strip() and not line.strip().startswith("#"):
+                # Nueva sección encontrada, dejar de saltar
+                skip_until_next_section = False
+                new_lines.append(line)
+            elif line.strip().startswith("#"):
+                # Comentario, podría ser nueva sección
+                skip_until_next_section = False
+                new_lines.append(line)
+            else:
+                # Línea vacía
+                new_lines.append(line)
         else:
             new_lines.append(line)
 
-    # Si no existen los parámetros de detección, agregarlos al final
-    has_detection_params = any("BALL_DETECTION_KERNEL_SIZE" in line for line in new_lines)
-
-    if not has_detection_params:
-        # Agregar parámetros de detección al final del archivo
+    # Si no existían los parámetros de detección, agregarlos al final
+    if not detection_params_found:
         new_lines.append("\n# Parámetros de detección de pelota (morfología y HoughCircles)\n")
         new_lines.append(f"BALL_DETECTION_KERNEL_SIZE = {kernel_size}  # Tamaño del kernel morfológico\n")
         new_lines.append(f"BALL_DETECTION_MORPH_ITERATIONS = {morph_iterations}  # Iteraciones de apertura/cierre\n")
@@ -565,6 +671,11 @@ def save_complete_config():
     # Escribir archivo
     with open(config_path, 'w', encoding='utf-8') as f:
         f.writelines(new_lines)
+
+    print("\n✅ Configuración HSV actualizada:")
+    print(f"   H (Hue):        {h_min} - {h_max}")
+    print(f"   S (Saturation): {s_min} - {s_max}")
+    print(f"   V (Value):      {v_min} - {v_max}")
 
     print("\n✅ Parámetros de detección guardados:")
     print(f"   Kernel Size:       {kernel_size}x{kernel_size}")
