@@ -4,10 +4,15 @@ Este módulo proporciona funcionalidades para detectar robots jugadores en el ca
 utilizando marcadores ArUco. Incluye procesamiento de imagen para identificar
 la posición, orientación y delimitar las esquinas de cada robot detectado.
 """
+import logging
 import math
 import numpy as np
 import cv2 as cv
-from robot_soccer.config import COLOR_VERDE, COLOR_AZUL_CV
+from robot_soccer.config import (COLOR_VERDE, COLOR_AZUL_CV,
+                                  ROBOT_DETECTION_HALF_WIDTH, ROBOT_DETECTION_HALF_HEIGHT,
+                                  ROBOT_ORIENTATION_LINE_LENGTH)
+
+log = logging.getLogger(__name__)
 
 ##############################
 # BUSQUEDA DE LLOS JUGADORES #
@@ -52,14 +57,29 @@ def deteccion_jugadores_aruco_tag(frame, use_camera=False):
 
     # Seleccionar diccionario según el modo
     if use_camera:
-        aruco_dict = cv.aruco.getPredefinedDictionary(cv.aruco.DICT_6X6_1000)
+        aruco_dict = cv.aruco.getPredefinedDictionary(cv.aruco.DICT_5X5_1000)
+        log.debug("Usando diccionario DICT_5X5_1000 (cámara física)")
     else:
         aruco_dict = cv.aruco.getPredefinedDictionary(cv.aruco.DICT_7X7_1000)
+        log.debug("Usando diccionario DICT_7X7_1000 (simulación)")
 
     parameters = cv.aruco.DetectorParameters()
+    # Parámetros más permisivos para detectar marcadores 4x4
+    parameters.adaptiveThreshWinSizeMin = 3
+    parameters.adaptiveThreshWinSizeMax = 23
+    parameters.adaptiveThreshWinSizeStep = 10
+    parameters.minMarkerPerimeterRate = 0.03
+    parameters.maxMarkerPerimeterRate = 4.0
+
     detector = cv.aruco.ArucoDetector(aruco_dict, parameters)
 
     corners, ids, _ = detector.detectMarkers(gray)
+
+    # Log de depuración
+    if ids is not None:
+        log.debug("Detectados %d marcadores: IDs = %s", len(ids), ids.flatten())
+    else:
+        log.debug("No se detectaron marcadores")
     datos = []
 
     if ids is not None:
@@ -83,8 +103,8 @@ def deteccion_jugadores_aruco_tag(frame, use_camera=False):
             identificador = aruco_id[0]
 
             # para el rectángulo que representa al robot
-            des_x = 52
-            des_y = 70
+            des_x = ROBOT_DETECTION_HALF_WIDTH
+            des_y = ROBOT_DETECTION_HALF_HEIGHT
             esquinas = [
                 (center_x - des_x, center_y + des_y),  # Esquina superior izquierda
                 (center_x + des_x, center_y + des_y),  # Esquina superior derecha
@@ -129,8 +149,8 @@ def deteccion_jugadores_aruco_tag(frame, use_camera=False):
             # Dibujar el centro y la orientación en la imagen
             cv.circle(frame, (int(center_x), int(center_y)), 5, COLOR_VERDE, -1)
             end_point = (
-                int(center_x + 50 * np.cos(angle)),
-                int(center_y + 50 * np.sin(angle)),
+                int(center_x + ROBOT_ORIENTATION_LINE_LENGTH * np.cos(angle)),
+                int(center_y + ROBOT_ORIENTATION_LINE_LENGTH * np.sin(angle)),
             )
             cv.line(frame, (int(center_x), int(center_y)), end_point, COLOR_VERDE, 2)
     return frame, datos

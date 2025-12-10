@@ -22,22 +22,29 @@ from robot_soccer.config import (
 
 
 class Ball:
-    """Clase para el seguimiento y detección de la pelota en el campo de juego.
+    """Clase para el seguimiento y detección de la pelota con búsqueda inteligente.
 
-    Esta clase maneja la detección, seguimiento y análisis de la pelota utilizando
-    técnicas de procesamiento de imágenes con OpenCV. Incluye funcionalidades para
-    detectar goles y mantener el estado de la pelota durante el juego.
+    Esta clase implementa un sistema de tracking adaptativo que optimiza el rendimiento:
+    - SEARCHING: Busca en toda la imagen cuando no tiene lock de la pelota
+    - TRACKING: Busca solo en ROI pequeño una vez que tiene tracking estable
+
+    El sistema cambia automáticamente entre modos según detecciones exitosas/fallidas.
 
     Attributes:
         color (tuple): Rangos de colores HSV para la detección de la pelota.
         x (int): Coordenada X del centro de la pelota.
         y (int): Coordenada Y del centro de la pelota.
-        vecindad (int): Radio de vecindad para el seguimiento optimizado.
+        vecindad (int): Radio de vecindad para el seguimiento optimizado en ROI (default: 40px).
         goles_rojo (int): Contador de goles del equipo rojo.
         goles_azul (int): Contador de goles del equipo azul.
         pelota_fuera (bool): Estado que indica si la pelota está fuera del área de gol.
         roi_hsv (numpy.ndarray): Región de interés en espacio de color HSV.
         roi_img (numpy.ndarray): Región de interés en espacio de color RGB.
+        tracking_mode (bool): False=SEARCHING (imagen completa), True=TRACKING (ROI).
+        consecutive_detections (int): Contador de detecciones exitosas consecutivas.
+        consecutive_failures (int): Contador de fallos consecutivos en modo TRACKING.
+        frames_to_lock (int): Frames necesarios para cambiar a modo TRACKING (default: 10).
+        max_failures (int): Máximo de fallos antes de volver a SEARCHING (default: 5).
     """
 
     def __init__(self, color, centro):
@@ -50,8 +57,9 @@ class Ball:
                            Formato: (x, y).
 
         Note:
-            La vecindad se establece en 40 píxeles por defecto para optimizar
-            el seguimiento en frames posteriores.
+            - La vecindad se establece en 40 píxeles por defecto para el tracking optimizado
+            - Comienza en modo SEARCHING (búsqueda en toda la imagen)
+            - Requiere 10 detecciones consecutivas para cambiar a modo TRACKING
         """
         self.color = color
         self.x, self.y = centro
@@ -64,41 +72,88 @@ class Ball:
         self.roi_hsv = None
         self.roi_img = None
 
-    def seguimiento(self, hsv, img, frame):
-        """Realiza el seguimiento de la pelota en el frame actual.
+        # Sistema de tracking inteligente
+        self.tracking_mode = False  # False = SEARCHING (buscar en toda imagen), True = TRACKING (ROI)
+        self.consecutive_detections = 0  # Contador de detecciones consecutivas
+        self.frames_to_lock = 10  # Frames necesarios para cambiar a modo TRACKING
+        self.max_failures = 5  # Máximo de fallos consecutivos antes de volver a SEARCHING
+        self.consecutive_failures = 0  # Contador de fallos consecutivos
 
-        Recorta la imagen HSV y RGB en la vecindad de la última posición conocida
-        de la pelota para optimizar la detección. Actualiza la posición de la pelota
-        y dibuja elementos visuales en el frame.
+    def seguimiento(self, hsv, img, frame):
+        """Realiza el seguimiento de la pelota con búsqueda inteligente.
+
+        Implementa dos modos de operación:
+        - SEARCHING: Busca la pelota en toda la imagen (modo inicial y al perder tracking)
+        - TRACKING: Busca solo en ROI pequeño alrededor de última posición (más rápido)
+
+        El cambio entre modos se hace automáticamente según detecciones/fallos consecutivos.
 
         Args:
             hsv (numpy.ndarray): Imagen en espacio de color HSV.
-            img (numpy.ndarray): Imagen en espacio de color RGB para procesamiento.
-            frame (numpy.ndarray): Frame original donde se dibujarán los elementos visuales.
+            img (numpy.ndarray): Imagen en espacio de color RGB para procesamiento (¡NO BGR!).
+            frame (numpy.ndarray): Frame original en BGR donde se dibujarán los elementos visuales.
 
         Returns:
             tuple: Tupla con las coordenadas actualizadas de la pelota (x, y).
 
         Note:
-            Este método utiliza la región de interés (ROI) para mejorar el rendimiento
-            del seguimiento, limitando la búsqueda a un área específica alrededor de
-            la última posición conocida.
+            - Modo SEARCHING: Requiere 10 detecciones consecutivas para cambiar a TRACKING
+            - Modo TRACKING: 5 fallos consecutivos vuelven a modo SEARCHING
         """
-        # Recorta la imagen HSV y RGB
-        self.roi_hsv = hsv[self.y - self.vecindad:self.y + self.vecindad, self.x - self.vecindad:self.x + self.vecindad]
+        # Decidir si buscar en toda la imagen o en ROI
+        if self.tracking_mode:
+            # MODO TRACKING: Buscar solo en ROI alrededor de la última posición
+            y_min = max(0, self.y - self.vecindad)
+            y_max = min(hsv.shape[0], self.y + self.vecindad)
+            x_min = max(0, self.x - self.vecindad)
+            x_max = min(hsv.shape[1], self.x + self.vecindad)
 
-        self.roi_img = img[self.y - self.vecindad:self.y + self.vecindad, self.x - self.vecindad:self.x + self.vecindad]
+            self.roi_hsv = hsv[y_min:y_max, x_min:x_max]
+            self.roi_img = img[y_min:y_max, x_min:x_max]
 
-        if len(self.roi_hsv) > 0:
-            # Detecta los circulos dentro del recorte y su centro
-            x_nuevo, y_nuevo, r_nuevo = self.detectar_circulos_color(self.roi_hsv, self.color, self.roi_img)
-            cv.circle(self.roi_hsv, (x_nuevo, y_nuevo), r_nuevo, COLOR_NEGRO, 1)
-            # Reescribe el centro y actualiza este en el objeto
-            self.x, self.y = self.x + x_nuevo - self.vecindad, self.y + y_nuevo - self.vecindad
-            # Dibuja un círculo en el centro de la pelota
-            cv.circle(frame, (self.x, self.y), 1, COLOR_NEGRO, -1)
-            cv.circle(self.roi_hsv, (self.x, self.y), r_nuevo, COLOR_NEGRO, 1)
-            self.goles(frame)
+            if len(self.roi_hsv) > 0 and self.roi_hsv.shape[0] > 0 and self.roi_hsv.shape[1] > 0:
+                # Detectar en el ROI
+                x_roi, y_roi, r_nuevo = self.detectar_circulos_color(self.roi_hsv, self.color, self.roi_img)
+
+                if x_roi is not None and y_roi is not None:
+                    # Detección exitosa en ROI
+                    self.x = x_min + x_roi
+                    self.y = y_min + y_roi
+                    self.consecutive_failures = 0
+                    cv.circle(frame, (self.x, self.y), 1, COLOR_NEGRO, -1)
+                    if r_nuevo is not None:
+                        cv.circle(frame, (self.x, self.y), r_nuevo, COLOR_NEGRO, 1)
+                    self.goles(frame)
+                else:
+                    # Fallo en detección
+                    self.consecutive_failures += 1
+                    if self.consecutive_failures >= self.max_failures:
+                        # Demasiados fallos, volver a modo SEARCHING
+                        self.tracking_mode = False
+                        self.consecutive_detections = 0
+                        self.consecutive_failures = 0
+        else:
+            # MODO SEARCHING: Buscar en toda la imagen
+            x_full, y_full, r_nuevo = self.detectar_circulos_color(hsv, self.color, img)
+
+            if x_full is not None and y_full is not None:
+                # Detección exitosa en imagen completa
+                self.x = x_full
+                self.y = y_full
+                self.consecutive_detections += 1
+                self.consecutive_failures = 0
+
+                cv.circle(frame, (self.x, self.y), 1, COLOR_NEGRO, -1)
+                if r_nuevo is not None:
+                    cv.circle(frame, (self.x, self.y), r_nuevo, COLOR_NEGRO, 1)
+                self.goles(frame)
+
+                # Si hemos detectado consistentemente, cambiar a modo TRACKING
+                if self.consecutive_detections >= self.frames_to_lock:
+                    self.tracking_mode = True
+            else:
+                # Fallo en búsqueda completa
+                self.consecutive_detections = 0
 
         return self.x, self.y
 
@@ -152,7 +207,8 @@ class Ball:
 
         Returns:
             tuple: Tupla con las coordenadas del centro y radio del círculo detectado.
-                  Formato: (x, y, radio). Retorna (None, None, None) si no se detecta.
+                  - Si se detecta: (x, y, radio) como enteros
+                  - Si NO se detecta: (None, None, None)
 
         Note:
             Utiliza parámetros calibrados desde config.py:
@@ -177,8 +233,8 @@ class Ball:
         # Aplicar la máscara a la imagen original
         imagen_filtrada = cv.bitwise_and(img_origi, img_origi, mask=mascara)
 
-        # Convertir la imagen filtrada a escala de grises
-        imagen_gris = cv.cvtColor(imagen_filtrada, cv.COLOR_BGR2GRAY)
+        # Convertir la imagen filtrada a escala de grises (img_origi es RGB)
+        imagen_gris = cv.cvtColor(imagen_filtrada, cv.COLOR_RGB2GRAY)
 
         # Aplicar un filtro de suavizado para reducir el ruido
         imagen_suavizada = cv.GaussianBlur(imagen_gris, (5, 5), 0)
@@ -195,8 +251,10 @@ class Ball:
             maxRadius=BALL_DETECTION_MAX_RADIUS
         )
 
-        # Si se detectaron círculos, agregarlos a la lista de circulos_detectados
-        x, y, r = None, None, None
-        if circulos is not None:
+        # Si se detectaron círculos, devolver el primero
+        if circulos is not None and len(circulos) > 0:
             x, y, r = circulos[0][0][0], circulos[0][0][1], circulos[0][0][2]
-        return int(x), int(y), int(r)
+            return int(x), int(y), int(r)
+
+        # Si no se detectó ningún círculo, retornar None
+        return None, None, None
