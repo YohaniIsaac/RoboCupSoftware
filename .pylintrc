@@ -36,7 +36,9 @@ disable=missing-module-docstring,
         missing-function-docstring,
         too-many-return-statements,
         too-many-public-methods,
-        unsubscriptable-object
+        unsubscriptable-object,
+        too-many-nested-blocks,
+        duplicate-code
 
 [FORMAT]
 # Consistente con black formatter
