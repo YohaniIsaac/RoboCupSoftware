@@ -195,7 +195,7 @@ RANGO_COLOR_CIAN = ((85, 150, 150), (95, 255, 255), None, None)
 # Parámetros de detección de pelota (morfología y HoughCircles)
 BALL_DETECTION_KERNEL_SIZE = 3  # Tamaño del kernel morfológico
 BALL_DETECTION_MORPH_ITERATIONS = 3  # Iteraciones de apertura/cierre
-BALL_DETECTION_HOUGH_PARAM1 = 50  # Umbral Canny
-BALL_DETECTION_HOUGH_PARAM2 = 1  # Umbral acumulador
-BALL_DETECTION_MIN_RADIUS = 0  # Radio mínimo (px)
-BALL_DETECTION_MAX_RADIUS = 10  # Radio máximo (px)
+BALL_DETECTION_HOUGH_PARAM1 = 40  # Umbral Canny
+BALL_DETECTION_HOUGH_PARAM2 = 6  # Umbral acumulador
+BALL_DETECTION_MIN_RADIUS = 2  # Radio mínimo (px)
+BALL_DETECTION_MAX_RADIUS = 9  # Radio máximo (px)
