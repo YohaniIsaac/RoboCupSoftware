@@ -56,6 +56,12 @@ class SerialManager:
         self.running = False
         self.response_buffer = []  # Buffer para respuestas del Arduino
 
+        # Límite de tamaño de cola (medida de seguridad)
+        # Con "Last Command Wins" las colas no deberían crecer mucho
+        # Máximo ~4 robots × 2 comandos pendientes = 8 comandos razonable
+        self.MAX_QUEUE_SIZE = 10
+        self.queue_overflow_warned = False
+
     def connect(self):
         """Establece la conexión serial con el Arduino.
 
@@ -106,11 +112,49 @@ class SerialManager:
             self.is_connected = False
             log.info("Desconectado del puerto serial")
 
+    @staticmethod
+    def _extract_robot_id(command):
+        """Extrae el robot_id de un comando.
+
+        Args:
+            command (str): Comando en formato "R{id},{left},{right}\n"
+
+        Returns:
+            int or None: ID del robot o None si no se puede extraer
+        """
+        try:
+            if command.startswith('R'):
+                # Formato: R0,100,-100\n
+                robot_id_str = command[1:].split(',')[0]
+                return int(robot_id_str)
+        except (ValueError, IndexError):
+            pass
+        return None
+
+    def _remove_old_commands_for_robot(self, queue, robot_id):
+        """Elimina comandos viejos del mismo robot de una cola.
+
+        Args:
+            queue (list): Cola de comandos a limpiar
+            robot_id (int): ID del robot cuyos comandos viejos se eliminarán
+
+        Returns:
+            int: Número de comandos eliminados
+        """
+        original_len = len(queue)
+        # Mantener solo comandos de OTROS robots
+        queue[:] = [cmd for cmd in queue if self._extract_robot_id(cmd) != robot_id]
+        removed = original_len - len(queue)
+        return removed
+
     def send_command(self, command):
         r"""Envía un comando al Arduino de forma asíncrona.
 
         Agrega el comando a la cola de envío para ser procesado por el
         hilo de trabajo. Asegura que el comando termine con salto de línea.
+
+        IMPORTANTE: Si ya hay comandos en cola para el mismo robot,
+        se eliminan (solo se mantiene el comando más reciente por robot).
 
         Args:
             command (str): Comando a enviar al Arduino. Se añadirá '\n'
@@ -123,6 +167,7 @@ class SerialManager:
         Note:
             Esta función es thread-safe y no bloquea al llamador.
             El envío real se realiza de forma asíncrona.
+            Implementa "Last Command Wins" para evitar queue overflow.
         """
         if not self.is_connected:
             log.error("No hay conexión con Arduino")
@@ -133,7 +178,27 @@ class SerialManager:
             command += '\n'
 
         with self.lock:
+            # Extraer robot_id del nuevo comando
+            robot_id = self._extract_robot_id(command)
+
+            if robot_id is not None:
+                # Eliminar comandos viejos del mismo robot
+                removed = self._remove_old_commands_for_robot(self.command_queue, robot_id)
+                if removed > 0:
+                    log.debug("🗑️  Robot %d: %d comandos viejos eliminados (last wins)",
+                             robot_id, removed)
+
+            # Agregar nuevo comando
             self.command_queue.append(command)
+
+            # Advertencia si la cola crece demasiado (indica problema de rendimiento)
+            queue_size = len(self.command_queue)
+            if queue_size > self.MAX_QUEUE_SIZE and not self.queue_overflow_warned:
+                log.warning("⚠️  Cola NORMAL grande: %d comandos (límite sugerido: %d)",
+                           queue_size, self.MAX_QUEUE_SIZE)
+                self.queue_overflow_warned = True
+            elif queue_size <= self.MAX_QUEUE_SIZE // 2:
+                self.queue_overflow_warned = False  # Reset warning
 
         return True
 
@@ -143,9 +208,11 @@ class SerialManager:
         Sistema de 3 niveles de prioridad:
         - HIGH (alta): Detención de emergencia
           → Limpia TODAS las colas (normal + media)
+          → Elimina comandos viejos del mismo robot en cola alta
           → Se procesa INMEDIATAMENTE
         - MEDIUM (media): Entrada a rampa de desaceleración
           → Limpia solo cola normal
+          → Elimina comandos viejos del mismo robot en cola media
           → Se procesa antes que comandos normales
         - NORMAL: Movimiento regular (usar send_command())
 
@@ -160,6 +227,7 @@ class SerialManager:
         Note:
             - HIGH: Solo para detención de emergencia
             - MEDIUM: Para cambios críticos de velocidad (rampa)
+            - Implementa "Last Command Wins" en cada cola de prioridad
         """
         if not self.is_connected:
             log.error("No hay conexión con Arduino")
@@ -169,24 +237,40 @@ class SerialManager:
         if not command.endswith('\n'):
             command += '\n'
 
+        # Extraer robot_id para limpieza
+        robot_id = self._extract_robot_id(command)
+
         with self.lock:
             if priority == 'high':
-                # PRIORIDAD ALTA: Limpiar TODAS las colas (normal + media)
+                # ===== PRIORIDAD ALTA: FRENADO DE EMERGENCIA =====
+                # CRÍTICO: Debe detener TODO inmediatamente, sin condiciones
+                # Limpia TODAS las colas de TODOS los robots (comportamiento original)
                 total_cleared = len(self.command_queue) + len(self.medium_priority_queue)
                 if total_cleared > 0:
-                    log.debug("🚨 ALTA prioridad: %d comandos descartados", total_cleared)
+                    log.debug("🚨 EMERGENCIA: %d comandos descartados (seguridad)", total_cleared)
                     self.command_queue.clear()
                     self.medium_priority_queue.clear()
+
+                # Eliminar comandos viejos del MISMO robot en cola alta
+                if robot_id is not None:
+                    removed = self._remove_old_commands_for_robot(self.high_priority_queue, robot_id)
+                    if removed > 0:
+                        log.debug("🚨 Robot %d: %d comandos ALTA viejos eliminados", robot_id, removed)
 
                 # Agregar a cola de alta prioridad
                 self.high_priority_queue.append(command)
                 log.debug("⚡ ALTA prioridad encolado: %s", command.strip())
 
             elif priority == 'medium':
-                # PRIORIDAD MEDIA: Limpiar solo cola normal
-                if self.command_queue:
-                    log.debug("🔶 MEDIA prioridad: %d comandos normales descartados", len(self.command_queue))
-                    self.command_queue.clear()
+                # PRIORIDAD MEDIA: Entrada a rampa (desaceleración)
+                # Eliminar comandos del MISMO robot en colas normal + media
+                if robot_id is not None:
+                    removed_normal = self._remove_old_commands_for_robot(self.command_queue, robot_id)
+                    removed_medium = self._remove_old_commands_for_robot(self.medium_priority_queue, robot_id)
+                    total_removed = removed_normal + removed_medium
+                    if total_removed > 0:
+                        log.debug("🔶 Robot %d MEDIA: %d comandos eliminados (N=%d M=%d)",
+                                 robot_id, total_removed, removed_normal, removed_medium)
 
                 # Agregar a cola de media prioridad
                 self.medium_priority_queue.append(command)
@@ -194,6 +278,9 @@ class SerialManager:
 
             else:
                 log.warning("⚠️  Prioridad inválida '%s', usando 'high'", priority)
+                # Eliminar comandos viejos en cola alta
+                if robot_id is not None:
+                    self._remove_old_commands_for_robot(self.high_priority_queue, robot_id)
                 self.high_priority_queue.append(command)
 
         return True

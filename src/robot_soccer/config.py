@@ -205,22 +205,27 @@ BALL_DETECTION_MAX_RADIUS = 9  # Radio máximo (px)
 # =============================================================================
 
 # --- Velocidades de Rotación ---
-ROBOT_MIN_ROTATION_SPEED = 0.080  # Velocidad mínima cuando LEJOS del objetivo (0.0 - 1.0)
-                                  # REDUCIDA de 0.150 → 0.080 para evitar overshoot
-ROBOT_MAX_ROTATION_SPEED = 0.150  # Velocidad máxima de rotación (0.0 - 1.0)
-                                  # REDUCIDA de 0.200 → 0.150
-ROBOT_ROTATION_ARRIVAL_ANGLE_DEG = 25.0  # Ángulo donde empieza rampa de desaceleración (grados)
-                                         # AUMENTADO de 20.0 → 25.0 para rampa MÁS amplia
-ROBOT_ROTATION_NEAR_MIN = 0.020  # Velocidad mínima EN LA RAMPA (más bajo permitido)
-                                  # REDUCIDA de 0.030 → 0.020 para evitar overshoot
+# AJUSTADAS para latencia del sistema (~65ms: 40ms captura + 15ms proceso + 10ms RF)
+# A 25 FPS real (no 60 FPS), el robot se mueve significativamente entre frames
+ROBOT_MIN_ROTATION_SPEED = 0.060  # Velocidad mínima cuando LEJOS del objetivo (0.0 - 1.0)
+                                  # REDUCIDA de 0.080 → 0.060 para evitar overshoot con latencia
+ROBOT_MAX_ROTATION_SPEED = 0.100  # Velocidad máxima de rotación (0.0 - 1.0)
+                                  # REDUCIDA de 0.150 → 0.100 (crítico para latencia 65ms)
+ROBOT_ROTATION_ARRIVAL_ANGLE_DEG = 35.0  # Ángulo donde empieza rampa de desaceleración (grados)
+                                         # AUMENTADO de 25.0 → 35.0 para rampa MÁS amplia
+ROBOT_ROTATION_NEAR_MIN = 0.015  # Velocidad mínima EN LA RAMPA (más bajo permitido)
+                                  # REDUCIDA de 0.020 → 0.015 para evitar overshoot
                                   # Debe ser <= ROBOT_MIN_ROTATION_SPEED
 
 # --- Velocidades de Movimiento Lineal ---
-ROBOT_MIN_LINEAR_SPEED = 0.170  # Velocidad mínima cuando LEJOS del objetivo (0.0 - 1.0)
-ROBOT_MAX_LINEAR_SPEED = 0.170  # Velocidad máxima de movimiento (0.0 - 1.0)
-ROBOT_LINEAR_ARRIVAL_DISTANCE = 40  # Distancia donde empieza rampa de desaceleración (píxeles)
-                                     # Valores más altos = empieza a frenar antes
-ROBOT_LINEAR_NEAR_MIN = 0.050  # Velocidad mínima EN LA RAMPA (más bajo permitido)
+ROBOT_MIN_LINEAR_SPEED = 0.150  # Velocidad mínima cuando LEJOS del objetivo (0.0 - 1.0)
+                                # REDUCIDA de 0.170 → 0.150 para mejor control con latencia
+ROBOT_MAX_LINEAR_SPEED = 0.150  # Velocidad máxima de movimiento (0.0 - 1.0)
+                                # REDUCIDA de 0.170 → 0.150
+ROBOT_LINEAR_ARRIVAL_DISTANCE = 50  # Distancia donde empieza rampa de desaceleración (píxeles)
+                                     # AUMENTADO de 40 → 50: Valores más altos = empieza a frenar antes
+ROBOT_LINEAR_NEAR_MIN = 0.040  # Velocidad mínima EN LA RAMPA (más bajo permitido)
+                                # REDUCIDA de 0.050 → 0.040
                                 # Debe ser <= ROBOT_MIN_LINEAR_SPEED
 
 # --- Thresholds de Precisión ---

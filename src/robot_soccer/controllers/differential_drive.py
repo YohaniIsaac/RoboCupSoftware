@@ -87,14 +87,23 @@ class DifferentialDriveController:
         self.kp_pos = 0.008          # Reducido de 0.5 a 0.008
         self.ki_pos = 0.0001         # Reducido de 0.01 a 0.0001
         self.kd_pos = 0.05           # Reducido de 0.1 a 0.05
-        self.kp_angle = 0.25         # Aumentado de 0.15 a 0.25 para mejor tracking
+        # kp_angle: Control proporcional angular
+        # CRÍTICO: Valor alto causa oscilaciones en movimiento lineal con corrección simultánea
+        # Para rotación pura: usa PID completo (p + i + d)
+        # Para corrección durante movimiento: solo usa kp (sin i, sin d aquí)
+        self.kp_angle = 0.08         # REDUCIDO de 0.25 → 0.08 para corrección estable
         self.ki_angle = 0.001        # Reducido de 0.002 a 0.001 (menos integral windup)
-        self.kd_angle = 0.08         # Aumentado de 0.05 a 0.08 para mejor damping
+        self.kd_angle = 0.12         # AUMENTADO de 0.08 → 0.12 para damping fuerte
 
         # Compensación de latencia para predictive stopping
-        self.LATENCY_COMPENSATION_MS = 55  # ms totales de latencia (percepción + comm + firmware)
+        # Medición real: 25 FPS (40ms/frame) + procesamiento (15ms) + RF (10ms) = ~65ms
+        self.LATENCY_COMPENSATION_MS = 70  # ms totales de latencia (conservador)
         self.last_rotation_speed = 0.0  # Última velocidad angular enviada
         self.last_linear_speed = 0.0    # Última velocidad lineal enviada
+
+        # Corrección angular máxima durante movimiento lineal
+        # Evita que la corrección haga que un motor vaya muy lento (causa oscilaciones)
+        self.MAX_ANGULAR_CORRECTION = 0.04  # Máximo ±4% de correcc por robot
 
         # Umbrales de distancia (desde config.py)
         self.position_threshold = ROBOT_POSITION_THRESHOLD
@@ -214,7 +223,29 @@ class DifferentialDriveController:
                      int(dx), int(dy), distance)
             self._last_target = target_pos
 
-        # Si estamos suficientemente cerca del objetivo
+        # ===== PREDICTIVE STOPPING LINEAL =====
+        # Estimar dónde ESTARÁ el robot después de la latencia
+        latency_seconds = self.LATENCY_COMPENSATION_MS / 1000.0
+
+        # Estimar distancia adicional que recorrerá (velocidad actual * latencia)
+        # Asumimos ~200 px/s a velocidad 1.0 (depende del campo, ajustar si es necesario)
+        estimated_speed_px_per_sec = abs(self.last_linear_speed) * 200.0
+        predicted_additional_distance_px = estimated_speed_px_per_sec * latency_seconds
+
+        # Distancia PREDICHA (dónde estará el robot, no dónde está)
+        predicted_distance = distance - predicted_additional_distance_px
+
+        # Si la distancia PREDICHA está dentro del threshold, DETENER AHORA
+        if predicted_distance < self.position_threshold and self.last_linear_speed > 0:
+            log.info("🎯 Robot %d STOP PREDICTIVO LINEAL | Dist=%.1f px Predicha=%.1f px < Threshold=%d px",
+                     robot.id, distance, predicted_distance, self.position_threshold)
+            self._send_motor_commands(robot, 0, 0)
+            self.last_linear_speed = 0.0
+            if target_angle is not None:
+                return self.rotate_to_angle(robot, target_angle)
+            return True
+
+        # Si estamos suficientemente cerca del objetivo (verificación directa)
         if distance < self.position_threshold:
             log.info("🎯 Waypoint alcanzado: dist=%.1f px < threshold=%d px",
                     distance, self.position_threshold)
@@ -235,16 +266,23 @@ class DifferentialDriveController:
         # Calcular error de ángulo (normalizado entre -pi y pi)
         angle_error = _normalize_angle(target_heading - current_angle_rad)
 
-        # COMPORTAMIENTO SIMPLIFICADO: Primero orientar, luego mover
-        # FASE 1: Si NO estamos bien orientados, SOLO girar (sin moverse)
-        # Usar el MISMO threshold que rotate_to_angle para evitar loops infinitos
-        if abs(angle_error) > self.angle_threshold:
-            # Girar en su lugar hasta estar bien orientado
-            # NO propagar el return True de rotate_to_angle, solo estamos orientando
+        # ===== CONTROL HÍBRIDO: Girar en lugar vs Corregir mientras se mueve =====
+        # Umbral grande para decidir comportamiento (30° = conservador pero eficiente)
+        LARGE_ANGLE_ERROR_THRESHOLD = math.radians(30)  # 30 grados
+
+        # FASE 1: Error angular MUY grande (>30°) → Girar en lugar
+        # Evita movimientos inestables cuando el robot apunta en dirección muy incorrecta
+        if abs(angle_error) > LARGE_ANGLE_ERROR_THRESHOLD:
+            # Girar en su lugar hasta estar razonablemente orientado
+            angle_error_deg = math.degrees(angle_error)
+            log.debug("🔄 Robot %d | Error angular grande: %.1f° > 30° → Girando en lugar",
+                     robot.id, abs(angle_error_deg))
             self.rotate_to_angle(robot, math.degrees(target_heading))
             return False  # Todavía NO hemos llegado al waypoint
 
-        # FASE 2: Ya estamos bien orientados, ahora SÍ moverse
+        # FASE 2: Error angular pequeño (≤30°) → Moverse MIENTRAS corrige
+        # La función _calculate_differential_speeds() ajusta velocidades L/R
+        # para corregir la orientación durante el movimiento lineal
 
         # Implementar PID para la posición
         p_term = self.kp_pos * distance
@@ -303,18 +341,22 @@ class DifferentialDriveController:
             else:  # THRESHOLD
                 limits_info = "Límites[0.000-threshold]"
 
-            # Log
+            # Log con corrección angular simultánea
+            angle_error_deg = math.degrees(angle_error)
             if speed_changed:
-                log.info("🚗 Robot %d | Pos(%.1f,%.1f)→(%.1f,%.1f) Dist=%.1fpx | Zona=%s | Speed=%.3f %s | (L=%.3f R=%.3f)",
+                log.info("🚗 Robot %d | Pos(%.1f,%.1f)→(%.1f,%.1f) Dist=%.1fpx | Zona=%s | Speed=%.3f %s | Error∠=%.1f° | (L=%.3f R=%.3f)",
                         robot.id, robot.x, robot.y, target_pos[0], target_pos[1], distance,
-                        zone_linear, speed, limits_info, left_speed, right_speed)
+                        zone_linear, speed, limits_info, angle_error_deg, left_speed, right_speed)
             else:
-                log.info("⏱️  Robot %d | Pos(%.1f,%.1f)→(%.1f,%.1f) Dist=%.1fpx | Zona=%s | Speed=%.3f %s | (L=%.3f R=%.3f)",
+                log.info("⏱️  Robot %d | Pos(%.1f,%.1f)→(%.1f,%.1f) Dist=%.1fpx | Zona=%s | Speed=%.3f %s | Error∠=%.1f° | (L=%.3f R=%.3f)",
                         robot.id, robot.x, robot.y, target_pos[0], target_pos[1], distance,
-                        zone_linear, speed, limits_info, left_speed, right_speed)
+                        zone_linear, speed, limits_info, angle_error_deg, left_speed, right_speed)
 
             self.last_logged_linear_speed[robot.id] = speed
             self.last_periodic_log_time_linear[robot.id] = current_time
+
+        # Actualizar última velocidad lineal para predicción
+        self.last_linear_speed = speed
 
         # Enviar comandos a los motores
         self._send_motor_commands(robot, left_speed, right_speed)
@@ -649,33 +691,43 @@ class DifferentialDriveController:
         """Calcula las velocidades diferenciales para los motores.
 
         Ajusta las velocidades de los motores izquierdo y derecho para
-        lograr el movimiento lineal deseado con corrección angular.
+        lograr el movimiento lineal deseada con corrección angular LIMITADA.
+
+        IMPORTANTE: Diseñado para corrección suave durante movimiento,
+        NO para rotación pura (usa rotate_to_angle para eso).
 
         Args:
-            speed (float): Velocidad lineal deseada.
+            speed (float): Velocidad lineal deseada (0.0 - 1.0).
             angle_error (float): Error de ángulo en radianes.
 
         Returns:
             tuple: Tupla con velocidades (izquierda, derecha).
 
         Note:
-            Las velocidades se normalizan para mantener el rango válido
-            sin perder la proporción relativa entre motores.
+            - Limita corrección a MAX_ANGULAR_CORRECTION para evitar oscilaciones
+            - Mantiene velocidad lineal promedio cercana a 'speed'
+            - NO normaliza agresivamente (evita robot muy lento)
         """
-        # Factor de corrección basado en el error de ángulo
+        # Factor de corrección basado SOLO en proporcional (sin i, sin d)
+        # El kp_angle es bajo (0.08) para corrección suave
         correction = self.kp_angle * angle_error
+
+        # LIMITAR corrección para evitar un motor muy lento
+        # Ejemplo: Si speed=0.15 y MAX=0.04:
+        #   correction máx = ±0.04 → left=0.19, right=0.11 (razonable)
+        #   Sin límite con error 30°: correction=0.13 → left=0.28, right=0.02 (malo)
+        correction = max(-self.MAX_ANGULAR_CORRECTION,
+                        min(self.MAX_ANGULAR_CORRECTION, correction))
 
         # Calcular velocidades de los motores
         # INTERCAMBIADAS para coincidir con el sentido de rotación corregido
         left_speed = speed + correction
         right_speed = speed - correction
 
-        # Normalizar manteniendo la proporción
-        max_speed = max(abs(left_speed), abs(right_speed))
-        if max_speed > self.max_motor_speed:
-            factor = self.max_motor_speed / max_speed
-            left_speed *= factor
-            right_speed *= factor
+        # Clip individual (sin normalización que reduce velocidad total)
+        # Esto permite que un motor vaya al máximo mientras el otro ajusta
+        left_speed = max(-self.max_motor_speed, min(self.max_motor_speed, left_speed))
+        right_speed = max(-self.max_motor_speed, min(self.max_motor_speed, right_speed))
 
         return left_speed, right_speed
 
