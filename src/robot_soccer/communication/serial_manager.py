@@ -48,7 +48,9 @@ class SerialManager:
         self.timeout = timeout
         self.serial = None
         self.is_connected = False
-        self.command_queue = []
+        self.command_queue = []  # Cola NORMAL de comandos
+        self.medium_priority_queue = []  # Cola MEDIA (entrada a rampa)
+        self.high_priority_queue = []  # Cola ALTA (detención de emergencia)
         self.lock = threading.Lock()
         self.worker_thread = None
         self.running = False
@@ -135,6 +137,67 @@ class SerialManager:
 
         return True
 
+    def send_priority_command(self, command, priority='high'):
+        r"""Envía un comando con prioridad al Arduino.
+
+        Sistema de 3 niveles de prioridad:
+        - HIGH (alta): Detención de emergencia
+          → Limpia TODAS las colas (normal + media)
+          → Se procesa INMEDIATAMENTE
+        - MEDIUM (media): Entrada a rampa de desaceleración
+          → Limpia solo cola normal
+          → Se procesa antes que comandos normales
+        - NORMAL: Movimiento regular (usar send_command())
+
+        Args:
+            command (str): Comando a enviar. Se añadirá '\n' automáticamente.
+            priority (str): 'high' o 'medium'. Default: 'high'.
+
+        Returns:
+            bool: True si el comando se agregó correctamente,
+                False si no hay conexión activa.
+
+        Note:
+            - HIGH: Solo para detención de emergencia
+            - MEDIUM: Para cambios críticos de velocidad (rampa)
+        """
+        if not self.is_connected:
+            log.error("No hay conexión con Arduino")
+            return False
+
+        # Asegurar que el comando termine con salto de línea
+        if not command.endswith('\n'):
+            command += '\n'
+
+        with self.lock:
+            if priority == 'high':
+                # PRIORIDAD ALTA: Limpiar TODAS las colas (normal + media)
+                total_cleared = len(self.command_queue) + len(self.medium_priority_queue)
+                if total_cleared > 0:
+                    log.debug("🚨 ALTA prioridad: %d comandos descartados", total_cleared)
+                    self.command_queue.clear()
+                    self.medium_priority_queue.clear()
+
+                # Agregar a cola de alta prioridad
+                self.high_priority_queue.append(command)
+                log.debug("⚡ ALTA prioridad encolado: %s", command.strip())
+
+            elif priority == 'medium':
+                # PRIORIDAD MEDIA: Limpiar solo cola normal
+                if self.command_queue:
+                    log.debug("🔶 MEDIA prioridad: %d comandos normales descartados", len(self.command_queue))
+                    self.command_queue.clear()
+
+                # Agregar a cola de media prioridad
+                self.medium_priority_queue.append(command)
+                log.debug("🔶 MEDIA prioridad encolado: %s", command.strip())
+
+            else:
+                log.warning("⚠️  Prioridad inválida '%s', usando 'high'", priority)
+                self.high_priority_queue.append(command)
+
+        return True
+
     def send_command_sync(self, command, timeout=3.0, expected_lines=1):
         """Envía un comando y espera la(s) respuesta(s) de forma sincrónica.
 
@@ -205,28 +268,54 @@ class SerialManager:
     def _worker(self):
         """Hilo de trabajo para enviar comandos y recibir respuestas.
 
-        Procesa continuamente la cola de comandos, enviando cada comando
-        al Arduino y registrando las respuestas recibidas. Maneja errores
-        de comunicación y actualiza el estado de conexión según corresponda.
+        Procesa continuamente las colas de comandos con sistema de 3 prioridades:
+        1. ALTA (high_priority_queue): Detención de emergencia
+        2. MEDIA (medium_priority_queue): Entrada a rampa
+        3. NORMAL (command_queue): Movimiento regular
+
+        Orden de procesamiento: ALTA → MEDIA → NORMAL
 
         Note:
             Este método se ejecuta en un hilo separado y no debe ser
             llamado directamente. Es iniciado automáticamente por connect().
         """
         while self.running:
-            if not self.command_queue:
+            # Verificar si hay comandos en CUALQUIER cola
+            with self.lock:
+                has_high = len(self.high_priority_queue) > 0
+                has_medium = len(self.medium_priority_queue) > 0
+                has_normal = len(self.command_queue) > 0
+
+            if not has_high and not has_medium and not has_normal:
                 time.sleep(0.01)  # Pequeña pausa si no hay comandos
                 continue
 
+            # Obtener comando según prioridad (ALTA → MEDIA → NORMAL)
+            priority_level = 'normal'
             with self.lock:
-                if self.command_queue:
+                if self.high_priority_queue:
+                    # PRIORIDAD ALTA: procesar inmediatamente
+                    command = self.high_priority_queue.pop(0)
+                    priority_level = 'high'
+                elif self.medium_priority_queue:
+                    # PRIORIDAD MEDIA: procesar antes que normales
+                    command = self.medium_priority_queue.pop(0)
+                    priority_level = 'medium'
+                elif self.command_queue:
+                    # PRIORIDAD NORMAL: procesar solo si no hay otros
                     command = self.command_queue.pop(0)
+                    priority_level = 'normal'
                 else:
                     continue
 
             try:
                 self.serial.write(command.encode('utf-8'))
-                log.debug("Enviado: %s", command.strip())
+                if priority_level == 'high':
+                    log.debug("⚡ ALTA enviado: %s", command.strip())
+                elif priority_level == 'medium':
+                    log.debug("🔶 MEDIA enviado: %s", command.strip())
+                else:
+                    log.debug("Enviado: %s", command.strip())
 
                 # Leer todas las respuestas disponibles (no solo una línea)
                 # Comandos como "ping" pueden enviar múltiples líneas (~11)

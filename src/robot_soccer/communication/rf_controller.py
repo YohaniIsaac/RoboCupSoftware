@@ -7,6 +7,8 @@ de fútbol mediante comunicación por radiofrecuencia a través de Arduino.
 
 import logging
 import sys
+import time
+import math
 from pathlib import Path
 
 # Agregar path para importar módulos del proyecto
@@ -54,6 +56,18 @@ class RFController:
             self.calibration = None
             log.info("Calibración de motores deshabilitada")
 
+        # Guardar último comando por robot para evitar logs repetidos
+        self.last_commands = {}  # {robot_id: (left_val, right_val)}
+
+        # Rate limiter: Mínimo 15ms entre comandos al mismo robot
+        # (firmware tiene delay(10), más overhead de procesamiento)
+        self.last_send_time = {}  # {robot_id: timestamp}
+        self.MIN_COMMAND_INTERVAL = 0.015  # 15ms mínimo entre comandos
+
+        # Detección de zona de rampa para prioridad media
+        self.last_speed_magnitude = {}  # {robot_id: magnitude}
+        self.RAMP_DECELERATION_THRESHOLD = 0.15  # Reducción >15% indica entrada a rampa
+
     def initialize(self):
         """Inicializa la comunicación con el Arduino.
 
@@ -78,6 +92,11 @@ class RFController:
         Convierte las velocidades normalizadas a valores compatibles con
         Arduino y envía el comando correspondiente.
 
+        Implementa rate limiting para evitar saturar el buffer serial:
+        - Solo envía si han pasado MIN_COMMAND_INTERVAL (15ms) desde el último comando
+        - O si es un comando de detención (prioridad alta)
+        - O si el cambio es significativo (>= 5 en PWM)
+
         Args:
             robot_id (int): ID del robot (1-4).
             left_speed (float): Velocidad del motor izquierdo (-1.0 a 1.0).
@@ -93,23 +112,68 @@ class RFController:
 
         # Aplicar calibración individual si está habilitada
         if self.enable_calibration and self.calibration:
-            left_val, right_val = self.calibration.apply_calibration(
+            left_val_calibrated, right_val_calibrated = self.calibration.apply_calibration(
                 robot_id, left_val, right_val
             )
-            log.debug(
-                "Robot %i: Calibrado L=%d, R=%d (original: L=%.2f, R=%.2f)",
-                robot_id, left_val, right_val, left_speed, right_speed
-            )
+            left_val = left_val_calibrated
+            right_val = right_val_calibrated
+
+        # ===== RATE LIMITING =====
+        # Verificar si debemos enviar este comando
+        current_time = time.time()
+        last_cmd = self.last_commands.get(robot_id, (None, None))
+        last_time = self.last_send_time.get(robot_id, 0)
+
+        # Condiciones para ENVIAR:
+        is_stop_command = (left_val == 0 and right_val == 0)  # Detención tiene prioridad
+        is_significant_change = (
+            last_cmd[0] is None or
+            abs(left_val - last_cmd[0]) >= 5 or
+            abs(right_val - last_cmd[1]) >= 5
+        )
+        enough_time_passed = (current_time - last_time) >= self.MIN_COMMAND_INTERVAL
+
+        # Solo enviar si se cumple alguna condición
+        if not (is_stop_command or is_significant_change or enough_time_passed):
+            return True  # Ignorar comando (demasiado pronto y cambio pequeño)
+
+        # ===== LOGGING =====
+        # Solo loguear cuando se DETIENE el robot
+        if is_stop_command and last_cmd != (0, 0):
+            log.info("⏹️  Robot %i DETENIDO", robot_id)
+
+        # Actualizar comandos y tiempos
+        self.last_commands[robot_id] = (left_val, right_val)
+        self.last_send_time[robot_id] = current_time
 
         # Generar comando
         command = self.protocol.format_motor_command(robot_id, left_val, right_val)
 
-        # Enviar comando
-        success = self.serial_manager.send_command(command)
-        if success:
-            log.debug(
-                "Robot %i: Motores ajustados a L=%.2f, R=%.2f", robot_id, left_speed, right_speed
-            )
+        # ===== SISTEMA DE 3 PRIORIDADES =====
+        # Calcular magnitud de velocidad (para detectar desaceleración)
+        current_magnitude = math.sqrt(left_val**2 + right_val**2) / 127.0  # Normalizar a 0-1
+        last_magnitude = self.last_speed_magnitude.get(robot_id, current_magnitude)
+
+        # Detectar desaceleración significativa (entrada a rampa)
+        is_decelerating = (last_magnitude - current_magnitude) > self.RAMP_DECELERATION_THRESHOLD
+
+        # Actualizar magnitud para próxima iteración
+        self.last_speed_magnitude[robot_id] = current_magnitude
+
+        # PRIORIDAD ALTA: Detención (0, 0)
+        if is_stop_command:
+            success = self.serial_manager.send_priority_command(command, priority='high')
+            log.debug("🚨 ALTA prioridad (detención) para Robot %i", robot_id)
+
+        # PRIORIDAD MEDIA: Entrada a rampa (desaceleración >15%)
+        elif is_decelerating and not is_stop_command:
+            success = self.serial_manager.send_priority_command(command, priority='medium')
+            log.debug("🔶 MEDIA prioridad (rampa) para Robot %i: %.2f → %.2f",
+                     robot_id, last_magnitude, current_magnitude)
+
+        # PRIORIDAD NORMAL: Movimiento regular
+        else:
+            success = self.serial_manager.send_command(command)
 
         return success
 
