@@ -1,5 +1,6 @@
 import logging
 import math
+import time
 
 from robot_soccer.config import (
     ROBOT_MIN_ROTATION_SPEED,
@@ -111,6 +112,75 @@ class DifferentialDriveController:
         self.angle_near = math.radians(ROBOT_ROTATION_ARRIVAL_ANGLE_DEG)  # Donde empieza rampa
         self.rotation_near_min = ROBOT_ROTATION_NEAR_MIN  # MIN en la rampa
 
+        # Factores de compensación para asimetría de calibración
+        # Se calculan por robot cuando se obtiene su calibración
+        self.rotation_asymmetry_factors = {}  # {robot_id: (cw_factor, ccw_factor)}
+
+        # Para logging de cambios de velocidad
+        self.last_logged_rotation_speed = {}  # {robot_id: speed}
+
+        # Para logging periódico de velocidad (cada 250ms)
+        self.last_periodic_log_time = {}  # {robot_id: timestamp}
+        self.last_periodic_log_time_linear = {}  # {robot_id: timestamp} para movimiento lineal
+        self.PERIODIC_LOG_INTERVAL = 0.25  # 250ms entre logs periódicos
+        self.last_logged_linear_speed = {}  # {robot_id: speed} para movimiento lineal
+
+    def _calculate_rotation_compensation(self, robot_id):
+        """Calcula factores de compensación para asimetría en rotación.
+
+        Cuando un robot tiene calibración asimétrica (ej: motor_left=1.0, motor_right=0.79),
+        gira más rápido en una dirección que en la otra. Esta función calcula factores
+        de compensación para balancear las velocidades de rotación en ambas direcciones.
+
+        Args:
+            robot_id: ID del robot
+
+        Returns:
+            tuple: (cw_compensation, ccw_compensation)
+                   Factores multiplicadores para giro horario y antihorario
+        """
+        if not self.rf_controller or not hasattr(self.rf_controller, 'calibration'):
+            return (1.0, 1.0)  # Sin calibración = sin compensación
+
+        if self.rf_controller.calibration is None:
+            return (1.0, 1.0)
+
+        # Obtener calibración del robot
+        max_left, max_right, _ = self.rf_controller.calibration.get_calibration(robot_id)
+
+        # Si ambos motores son iguales, no hay asimetría
+        if abs(max_left - max_right) < 0.01:
+            return (1.0, 1.0)
+
+        # Identificar cuál motor es más débil
+        # El motor más débil limita la velocidad de giro cuando va "adelante"
+        #
+        # CCW (antihorario, angle_error > 0):
+        #   Motor IZQ adelante, motor DER atrás
+        #   → Limitado por max_left (motor que empuja adelante)
+        #
+        # CW (horario, angle_error < 0):
+        #   Motor IZQ atrás, motor DER adelante
+        #   → Limitado por max_right (motor que empuja adelante)
+        #
+        # Compensar el lado más débil inversamente
+        weaker_motor = min(max_left, max_right)
+        stronger_motor = max(max_left, max_right)
+
+        if max_left < max_right:
+            # Motor izquierdo es más débil → CCW (izq adelante) es más lento
+            ccw_compensation = stronger_motor / weaker_motor  # Aumentar CCW
+            cw_compensation = 1.0  # CW normal
+        else:
+            # Motor derecho es más débil → CW (der adelante) es más lento
+            cw_compensation = stronger_motor / weaker_motor  # Aumentar CW
+            ccw_compensation = 1.0  # CCW normal
+
+        log.debug("Robot %d: Compensación rotación CW=%.3f, CCW=%.3f (cal: L=%.2f R=%.2f)",
+                 robot_id, cw_compensation, ccw_compensation, max_left, max_right)
+
+        return (cw_compensation, ccw_compensation)
+
     def move_to_position(self, robot, target_pos, target_angle=None):
         """Calcula y envía comandos para mover el robot a una posición específica.
 
@@ -204,6 +274,48 @@ class DifferentialDriveController:
             speed, angle_error
         )
 
+        # ===== LOGGING PERIÓDICO MOVIMIENTO LINEAL =====
+        current_time = time.time()
+        last_logged_linear = self.last_logged_linear_speed.get(robot.id, None)
+        last_periodic_time_linear = self.last_periodic_log_time_linear.get(robot.id, 0)
+
+        speed_changed = (last_logged_linear is None or abs(speed - last_logged_linear) >= 0.01)
+        periodic_log_due = (current_time - last_periodic_time_linear) >= self.PERIODIC_LOG_INTERVAL
+
+        if speed_changed or periodic_log_due:
+            # Determinar zona
+            if distance <= self.position_threshold:
+                zone_linear = "THRESHOLD"
+            elif distance <= self.distance_near:
+                zone_linear = "RAMPA"
+            else:
+                zone_linear = "LEJOS"
+
+            # Determinar límites esperados
+            if zone_linear == "LEJOS":
+                expected_min = self.min_motor_speed
+                expected_max = self.max_smooth_speed
+                limits_info = f"Límites[{expected_min:.3f}-{expected_max:.3f}]"
+            elif zone_linear == "RAMPA":
+                expected_min = self.linear_near_min
+                expected_max = self.min_motor_speed
+                limits_info = f"Límites[{expected_min:.3f}-{expected_max:.3f}]"
+            else:  # THRESHOLD
+                limits_info = "Límites[0.000-threshold]"
+
+            # Log
+            if speed_changed:
+                log.info("🚗 Robot %d | Pos(%.1f,%.1f)→(%.1f,%.1f) Dist=%.1fpx | Zona=%s | Speed=%.3f %s | (L=%.3f R=%.3f)",
+                        robot.id, robot.x, robot.y, target_pos[0], target_pos[1], distance,
+                        zone_linear, speed, limits_info, left_speed, right_speed)
+            else:
+                log.info("⏱️  Robot %d | Pos(%.1f,%.1f)→(%.1f,%.1f) Dist=%.1fpx | Zona=%s | Speed=%.3f %s | (L=%.3f R=%.3f)",
+                        robot.id, robot.x, robot.y, target_pos[0], target_pos[1], distance,
+                        zone_linear, speed, limits_info, left_speed, right_speed)
+
+            self.last_logged_linear_speed[robot.id] = speed
+            self.last_periodic_log_time_linear[robot.id] = current_time
+
         # Enviar comandos a los motores
         self._send_motor_commands(robot, left_speed, right_speed)
 
@@ -245,6 +357,25 @@ class DifferentialDriveController:
         # Convertir error a radianes
         angle_error = math.radians(angle_error_deg)
 
+        # ===== DETECCIÓN DE CRUCE DEL OBJETIVO =====
+        # Si el error cambió de signo, significa que CRUZAMOS el objetivo
+        # Esto ocurre cuando el robot va demasiado rápido y salta por encima del threshold
+        if hasattr(robot, '_last_angle_error_sign'):
+            current_sign = 1 if angle_error >= 0 else -1
+            if robot._last_angle_error_sign != current_sign and robot._last_angle_error_sign != 0:
+                # CRUZAMOS el objetivo! Detener inmediatamente
+                log.info("🎯 Robot %d CRUCE DE OBJETIVO | Actual=%.1f° Target=%.1f° Error cambió: %.1f° → %.1f°",
+                         robot.id, current_normalized, target_normalized,
+                         math.degrees(self.last_error_angle), angle_error_deg)
+                self._send_motor_commands(robot, 0, 0)
+                self.last_rotation_speed = 0.0
+                self.last_logged_rotation_speed[robot.id] = 0.0
+                robot._last_angle_error_sign = 0
+                return True
+
+        # Guardar signo del error para próxima iteración
+        robot._last_angle_error_sign = 1 if angle_error >= 0 else -1
+
         # ===== PREDICTIVE STOPPING =====
         # Estimar dónde ESTARÁ el robot después de la latencia
         # Si el robot está girando a last_rotation_speed, en LATENCY_COMPENSATION_MS
@@ -270,16 +401,22 @@ class DifferentialDriveController:
         # Si el error PREDICHO está dentro del threshold, DETENER AHORA
         # (anticipando que llegará al objetivo después de la latencia)
         if abs(predicted_error) < self.angle_threshold:
-            log.debug("🎯 Predictive stop: error actual=%.1f° predicho=%.1f° < threshold=%.1f°",
-                     angle_error_deg, predicted_error_deg, math.degrees(self.angle_threshold))
+            log.info("🎯 Robot %d STOP PREDICTIVO | Actual=%.1f° Target=%.1f° Error=%.1f° Predicho=%.1f° < Threshold=%.1f°",
+                     robot.id, current_normalized, target_normalized, angle_error_deg,
+                     predicted_error_deg, math.degrees(self.angle_threshold))
             self._send_motor_commands(robot, 0, 0)
             self.last_rotation_speed = 0.0
+            self.last_logged_rotation_speed[robot.id] = 0.0
             return True
 
         # Si el error ACTUAL ya está dentro, también detener
         if abs(angle_error) < self.angle_threshold:
+            log.info("🎯 Robot %d STOP DIRECTO | Actual=%.1f° Target=%.1f° Error=%.1f° < Threshold=%.1f°",
+                     robot.id, current_normalized, target_normalized, angle_error_deg,
+                     math.degrees(self.angle_threshold))
             self._send_motor_commands(robot, 0, 0)
             self.last_rotation_speed = 0.0
+            self.last_logged_rotation_speed[robot.id] = 0.0
             return True
 
         # Implementar PID para el ángulo
@@ -311,7 +448,41 @@ class DifferentialDriveController:
         pid_rotation_speed = p_term + i_term + d_term
 
         # Aplicar perfil de velocidad suave para rotación
+        rotation_speed_before_profile = abs(pid_rotation_speed)
         rotation_speed = self._apply_rotation_profile(pid_rotation_speed, abs(angle_error))
+
+        # Log cuando entra en rampa por primera vez
+        angle_error_abs = abs(angle_error)
+        in_ramp_zone = angle_error_abs <= self.angle_near and angle_error_abs > self.angle_threshold
+
+        # Solo loguear una vez cuando entra a rampa (detectar transición)
+        if not hasattr(robot, '_was_in_ramp'):
+            robot._was_in_ramp = False
+
+        if in_ramp_zone and not robot._was_in_ramp:
+            # Primera vez que entra en rampa
+            log.info("📉 Robot %d ENTRA EN RAMPA | Actual=%.1f° Target=%.1f° Error=%.1f° | Speed antes=%.3f",
+                    robot.id, current_normalized, target_normalized, angle_error_deg,
+                    abs(rotation_speed))
+            robot._was_in_ramp = True
+        elif not in_ramp_zone:
+            # Salió de rampa, resetear flag
+            robot._was_in_ramp = False
+
+        # ===== COMPENSACIÓN DE ASIMETRÍA POR CALIBRACIÓN =====
+        # Si el robot tiene motores con diferente potencia, compensar la velocidad de giro
+        if robot.id not in self.rotation_asymmetry_factors:
+            self.rotation_asymmetry_factors[robot.id] = self._calculate_rotation_compensation(robot.id)
+
+        cw_comp, ccw_comp = self.rotation_asymmetry_factors[robot.id]
+
+        # Aplicar compensación según dirección
+        if angle_error > 0:
+            # CCW (antihorario)
+            rotation_speed *= ccw_comp
+        else:
+            # CW (horario)
+            rotation_speed *= cw_comp
 
         # Mantener el signo de la rotación
         if angle_error < 0:
@@ -330,6 +501,55 @@ class DifferentialDriveController:
 
         # Guardar velocidad de rotación para predictive stopping en la próxima iteración
         self.last_rotation_speed = rotation_speed
+
+        # ===== LOGGING DETALLADO =====
+        current_time = time.time()
+        last_logged_speed = self.last_logged_rotation_speed.get(robot.id, None)
+        last_periodic_time = self.last_periodic_log_time.get(robot.id, 0)
+
+        speed_changed = (last_logged_speed is None or
+                        abs(abs(rotation_speed) - abs(last_logged_speed)) >= 0.01)
+        periodic_log_due = (current_time - last_periodic_time) >= self.PERIODIC_LOG_INTERVAL
+
+        # Determinar zona
+        angle_error_abs = abs(angle_error)
+        if angle_error_abs <= self.angle_threshold:
+            zone = "THRESHOLD"
+        elif angle_error_abs <= self.angle_near:
+            zone = "RAMPA"
+        else:
+            zone = "LEJOS"
+
+        # Log cuando cambia velocidad O cada 250ms
+        if speed_changed or periodic_log_due:
+            # Verificar límites
+            speed_abs = abs(rotation_speed)
+            limits_info = ""
+
+            # Comparar con límites configurados
+            if zone == "LEJOS":
+                expected_min = self.min_rotation_speed
+                expected_max = self.max_rotation_speed
+                limits_info = f"Límites[{expected_min:.3f}-{expected_max:.3f}]"
+            elif zone == "RAMPA":
+                expected_min = self.rotation_near_min
+                expected_max = self.min_rotation_speed
+                limits_info = f"Límites[{expected_min:.3f}-{expected_max:.3f}]"
+            else:  # THRESHOLD
+                limits_info = "Límites[0.000-threshold]"
+
+            # Log tipo según razón
+            if speed_changed:
+                log.info("🔄 Robot %d | Actual=%.1f° Target=%.1f° Error=%.1f° | Zona=%s | Speed=%.3f %s | (L=%.3f R=%.3f)",
+                        robot.id, current_normalized, target_normalized, angle_error_deg,
+                        zone, speed_abs, limits_info, left_speed, right_speed)
+            else:
+                log.info("⏱️  Robot %d | Actual=%.1f° Target=%.1f° Error=%.1f° | Zona=%s | Speed=%.3f %s | (L=%.3f R=%.3f)",
+                        robot.id, current_normalized, target_normalized, angle_error_deg,
+                        zone, speed_abs, limits_info, left_speed, right_speed)
+
+            self.last_logged_rotation_speed[robot.id] = rotation_speed
+            self.last_periodic_log_time[robot.id] = current_time
 
         # Enviar comandos a los motores
         self._send_motor_commands(robot, left_speed, right_speed)

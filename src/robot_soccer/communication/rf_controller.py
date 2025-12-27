@@ -163,13 +163,14 @@ class RFController:
         # PRIORIDAD ALTA: Detención (0, 0)
         if is_stop_command:
             success = self.serial_manager.send_priority_command(command, priority='high')
-            log.debug("🚨 ALTA prioridad (detención) para Robot %i", robot_id)
+            log.info("🚨 ALTA prioridad (detención) para Robot %i", robot_id)
 
         # PRIORIDAD MEDIA: Entrada a rampa (desaceleración >15%)
         elif is_decelerating and not is_stop_command:
             success = self.serial_manager.send_priority_command(command, priority='medium')
-            log.debug("🔶 MEDIA prioridad (rampa) para Robot %i: %.2f → %.2f",
-                     robot_id, last_magnitude, current_magnitude)
+            log.info("🔶 MEDIA prioridad (rampa) para Robot %i: mag %.2f → %.2f (Δ=%.2f%%)",
+                     robot_id, last_magnitude, current_magnitude,
+                     (last_magnitude - current_magnitude) * 100)
 
         # PRIORIDAD NORMAL: Movimiento regular
         else:

@@ -209,15 +209,15 @@ ROBOT_MIN_ROTATION_SPEED = 0.080  # Velocidad mínima cuando LEJOS del objetivo 
                                   # REDUCIDA de 0.150 → 0.080 para evitar overshoot
 ROBOT_MAX_ROTATION_SPEED = 0.150  # Velocidad máxima de rotación (0.0 - 1.0)
                                   # REDUCIDA de 0.200 → 0.150
-ROBOT_ROTATION_ARRIVAL_ANGLE_DEG = 20.0  # Ángulo donde empieza rampa de desaceleración (grados)
-                                         # AUMENTADO de 8.0 → 20.0 para rampa más amplia
-ROBOT_ROTATION_NEAR_MIN = 0.030  # Velocidad mínima EN LA RAMPA (más bajo permitido)
-                                  # REDUCIDA de 0.050 → 0.030
+ROBOT_ROTATION_ARRIVAL_ANGLE_DEG = 25.0  # Ángulo donde empieza rampa de desaceleración (grados)
+                                         # AUMENTADO de 20.0 → 25.0 para rampa MÁS amplia
+ROBOT_ROTATION_NEAR_MIN = 0.020  # Velocidad mínima EN LA RAMPA (más bajo permitido)
+                                  # REDUCIDA de 0.030 → 0.020 para evitar overshoot
                                   # Debe ser <= ROBOT_MIN_ROTATION_SPEED
 
 # --- Velocidades de Movimiento Lineal ---
-ROBOT_MIN_LINEAR_SPEED = 0.210  # Velocidad mínima cuando LEJOS del objetivo (0.0 - 1.0)
-ROBOT_MAX_LINEAR_SPEED = 0.230  # Velocidad máxima de movimiento (0.0 - 1.0)
+ROBOT_MIN_LINEAR_SPEED = 0.170  # Velocidad mínima cuando LEJOS del objetivo (0.0 - 1.0)
+ROBOT_MAX_LINEAR_SPEED = 0.170  # Velocidad máxima de movimiento (0.0 - 1.0)
 ROBOT_LINEAR_ARRIVAL_DISTANCE = 40  # Distancia donde empieza rampa de desaceleración (píxeles)
                                      # Valores más altos = empieza a frenar antes
 ROBOT_LINEAR_NEAR_MIN = 0.050  # Velocidad mínima EN LA RAMPA (más bajo permitido)
@@ -226,5 +226,5 @@ ROBOT_LINEAR_NEAR_MIN = 0.050  # Velocidad mínima EN LA RAMPA (más bajo permit
 # --- Thresholds de Precisión ---
 ROBOT_POSITION_THRESHOLD = 15  # Distancia para considerar waypoint alcanzado (píxeles)
                                # AUMENTADO de 12 → 15 para evitar oscilaciones
-ROBOT_ANGLE_THRESHOLD_DEG = 10  # Error angular aceptable (grados)
-                                # AUMENTADO de 7 → 10 para evitar overshoot/oscilaciones
+ROBOT_ANGLE_THRESHOLD_DEG = 7  # Error angular aceptable (grados)
+                               # REDUCIDO de 10 → 7 para detener antes y evitar overshoot

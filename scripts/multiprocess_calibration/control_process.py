@@ -323,7 +323,7 @@ def draw_robot_view(frame, robot, robot_id, target_waypoint):
 
 def create_control_panel(params, robot, robot_id, robot_available, target_waypoint, movement_active):
     """Crea panel de información."""
-    panel = np.zeros((680, 650, 3), dtype=np.uint8)
+    panel = np.zeros((920, 650, 3), dtype=np.uint8)  # Aumentado de 680 a 920 para más espacio
 
     # Título
     cv2.putText(panel, "CALIBRACION VELOCIDAD (MP)", (10, 30),
@@ -350,12 +350,6 @@ def create_control_panel(params, robot, robot_id, robot_available, target_waypoi
     y += 25
     cv2.putText(panel, f"Min LEJOS: {params['min_linear_speed']:.3f} (a/d)", (20, y),
                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-    y += 25
-    cv2.putText(panel, f"Min RAMPA: {params['linear_near_min']:.3f}", (20, y),
-               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
-    y += 25
-    cv2.putText(panel, f"Rampa inicia: {params['linear_arrival_distance']}px", (20, y),
-               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
 
     y += 40
     cv2.putText(panel, "=== VELOCIDAD ROTACION ===", (10, y),
@@ -367,11 +361,31 @@ def create_control_panel(params, robot, robot_id, robot_available, target_waypoi
     cv2.putText(panel, f"Min LEJOS: {params['min_rotation_speed']:.3f} (z/c)", (20, y),
                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
     y += 25
-    cv2.putText(panel, f"Min RAMPA: {params['rotation_near_min']:.3f}", (20, y),
-               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+    cv2.putText(panel, f"Min RAMPA: {params['rotation_near_min']:.3f} (7/8)", (20, y),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 200, 150), 1)
     y += 25
-    cv2.putText(panel, f"Rampa inicia: {params['rotation_arrival_angle']:.1f}deg", (20, y),
-               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+    cv2.putText(panel, f"Rampa inicia: {params['rotation_arrival_angle']:.1f}deg (3/4)", (20, y),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 200, 150), 1)
+
+    y += 40
+    cv2.putText(panel, "=== RAMPA LINEAL ===", (10, y),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 150, 255), 2)
+    y += 30
+    cv2.putText(panel, f"Inicia rampa: {params['linear_arrival_distance']}px (1/2)", (20, y),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 200, 150), 1)
+    y += 25
+    cv2.putText(panel, f"Min en rampa: {params['linear_near_min']:.3f} (5/6)", (20, y),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 200, 150), 1)
+
+    y += 40
+    cv2.putText(panel, "=== THRESHOLDS ===", (10, y),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.6, (150, 255, 150), 2)
+    y += 30
+    cv2.putText(panel, f"Posicion: {params['position_threshold']}px (9/0)", (20, y),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 200, 150), 1)
+    y += 25
+    cv2.putText(panel, f"Angular: {params['angle_threshold']}deg (-/=)", (20, y),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 200, 150), 1)
 
     y += 40
     cv2.putText(panel, "=== CONTROLES ===", (10, y),
@@ -494,6 +508,68 @@ def process_key(key, params, controller, robot, target_waypoint, movement_active
         result['action'] = 'update_params'
         log.info(f"min_rotation_speed: {params['min_rotation_speed']:.3f}")
 
+    # === NUEVOS CONTROLES: PARÁMETROS DE RAMPA Y THRESHOLDS ===
+
+    # Inicio de rampa lineal (distancia en píxeles, incremento ±5px)
+    elif key == ord('1'):
+        params['linear_arrival_distance'] = min(200, params['linear_arrival_distance'] + 5)
+        result['action'] = 'update_params'
+        log.info(f"📏 linear_arrival_distance: {params['linear_arrival_distance']}px")
+    elif key == ord('2'):
+        params['linear_arrival_distance'] = max(10, params['linear_arrival_distance'] - 5)
+        result['action'] = 'update_params'
+        log.info(f"📏 linear_arrival_distance: {params['linear_arrival_distance']}px")
+
+    # Inicio de rampa angular (grados, incremento ±2°)
+    elif key == ord('3'):
+        params['rotation_arrival_angle'] = min(90, params['rotation_arrival_angle'] + 2)
+        result['action'] = 'update_params'
+        log.info(f"📐 rotation_arrival_angle: {params['rotation_arrival_angle']:.1f}°")
+    elif key == ord('4'):
+        params['rotation_arrival_angle'] = max(5, params['rotation_arrival_angle'] - 2)
+        result['action'] = 'update_params'
+        log.info(f"📐 rotation_arrival_angle: {params['rotation_arrival_angle']:.1f}°")
+
+    # Velocidad mínima en rampa lineal (incremento ±0.005)
+    elif key == ord('5'):
+        params['linear_near_min'] = min(params['min_linear_speed'], params['linear_near_min'] + 0.005)
+        result['action'] = 'update_params'
+        log.info(f"🐌 linear_near_min: {params['linear_near_min']:.3f}")
+    elif key == ord('6'):
+        params['linear_near_min'] = max(0.010, params['linear_near_min'] - 0.005)
+        result['action'] = 'update_params'
+        log.info(f"🐌 linear_near_min: {params['linear_near_min']:.3f}")
+
+    # Velocidad mínima en rampa angular (incremento ±0.005)
+    elif key == ord('7'):
+        params['rotation_near_min'] = min(params['min_rotation_speed'], params['rotation_near_min'] + 0.005)
+        result['action'] = 'update_params'
+        log.info(f"🐌 rotation_near_min: {params['rotation_near_min']:.3f}")
+    elif key == ord('8'):
+        params['rotation_near_min'] = max(0.010, params['rotation_near_min'] - 0.005)
+        result['action'] = 'update_params'
+        log.info(f"🐌 rotation_near_min: {params['rotation_near_min']:.3f}")
+
+    # Threshold de posición (píxeles, incremento ±2px)
+    elif key == ord('9'):
+        params['position_threshold'] = min(50, params['position_threshold'] + 2)
+        result['action'] = 'update_params'
+        log.info(f"🎯 position_threshold: {params['position_threshold']}px")
+    elif key == ord('0'):
+        params['position_threshold'] = max(5, params['position_threshold'] - 2)
+        result['action'] = 'update_params'
+        log.info(f"🎯 position_threshold: {params['position_threshold']}px")
+
+    # Threshold angular (grados, incremento ±1°)
+    elif key == ord('-'):
+        params['angle_threshold'] = max(1, params['angle_threshold'] - 1)
+        result['action'] = 'update_params'
+        log.info(f"🎯 angle_threshold: {params['angle_threshold']:.1f}°")
+    elif key == ord('='):
+        params['angle_threshold'] = min(30, params['angle_threshold'] + 1)
+        result['action'] = 'update_params'
+        log.info(f"🎯 angle_threshold: {params['angle_threshold']:.1f}°")
+
     return result
 
 
@@ -515,6 +591,8 @@ def save_to_config(params):
         'ROBOT_MAX_ROTATION_SPEED': f"{params['max_rotation_speed']:.3f}",
         'ROBOT_ROTATION_ARRIVAL_ANGLE_DEG': f"{params['rotation_arrival_angle']:.1f}",
         'ROBOT_ROTATION_NEAR_MIN': f"{params['rotation_near_min']:.3f}",
+        'ROBOT_POSITION_THRESHOLD': f"{params['position_threshold']}",
+        'ROBOT_ANGLE_THRESHOLD_DEG': f"{params['angle_threshold']}",
     }
 
     new_lines = []

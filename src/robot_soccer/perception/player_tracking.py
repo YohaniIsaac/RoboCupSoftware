@@ -19,7 +19,7 @@ log = logging.getLogger(__name__)
 ##############################
 
 
-def deteccion_jugadores_aruco_tag(frame, use_camera=False):
+def deteccion_jugadores_aruco_tag(frame, use_camera=False, allowed_ids=None):
     """Detecta jugadores mediante marcadores ArUco y calcula su posición y orientación.
 
     Esta función procesa una imagen para identificar marcadores ArUco que representan
@@ -32,6 +32,9 @@ def deteccion_jugadores_aruco_tag(frame, use_camera=False):
             Debe ser una matriz numpy con forma (height, width, 3).
         use_camera (bool): Si True usa diccionario DICT_6X6_1000 (cámara física),
             si False usa DICT_7X7_1000 (simulación). Default: False.
+        allowed_ids (list or set, optional): Lista/set de IDs válidos de marcadores.
+            Si se especifica, solo se detectarán marcadores con estos IDs.
+            Default: None (detecta todos los IDs).
 
     Returns:
         tuple: Una tupla conteniendo:
@@ -53,7 +56,26 @@ def deteccion_jugadores_aruco_tag(frame, use_camera=False):
         - Las esquinas se calculan rotadas según la orientación del marcador
         - Si no se detectan marcadores, retorna la imagen original y una lista vacía
     """
+    # Convertir a escala de grises
     gray = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
+
+    # ===== PRE-PROCESAMIENTO PARA MEJORAR DETECCIÓN EN MOVIMIENTO =====
+    if use_camera:  # Solo aplicar en cámara real (puede causar problemas en simulación)
+        # 1. Sharpening para contrarrestar motion blur
+        kernel_sharpen = np.array([[-1, -1, -1],
+                                   [-1,  9, -1],
+                                   [-1, -1, -1]])
+        gray = cv.filter2D(gray, -1, kernel_sharpen)
+
+        # 2. CLAHE (Contrast Limited Adaptive Histogram Equalization)
+        # Mejora contraste local sin amplificar ruido
+        clahe = cv.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        gray = clahe.apply(gray)
+
+        # 3. Denoise ligero (bilateral filter preserva bordes)
+        gray = cv.bilateralFilter(gray, 5, 50, 50)
+
+        log.debug("Pre-procesamiento aplicado: sharpening + CLAHE + denoise")
 
     # Seleccionar diccionario según el modo
     if use_camera:
@@ -64,26 +86,68 @@ def deteccion_jugadores_aruco_tag(frame, use_camera=False):
         log.debug("Usando diccionario DICT_7X7_1000 (simulación)")
 
     parameters = cv.aruco.DetectorParameters()
-    # Parámetros más permisivos para detectar marcadores 4x4
-    parameters.adaptiveThreshWinSizeMin = 3
-    parameters.adaptiveThreshWinSizeMax = 23
+
+    # ===== PARÁMETROS OPTIMIZADOS PARA DETECCIÓN EN MOVIMIENTO =====
+    # 1. Adaptive threshold: Ventanas más grandes para manejar blur
+    parameters.adaptiveThreshWinSizeMin = 5  # Aumentado de 3
+    parameters.adaptiveThreshWinSizeMax = 51  # Aumentado de 23 (más tolerante)
     parameters.adaptiveThreshWinSizeStep = 10
-    parameters.minMarkerPerimeterRate = 0.03
-    parameters.maxMarkerPerimeterRate = 4.0
+
+    # 2. Perímetro del marcador: Más tolerante
+    parameters.minMarkerPerimeterRate = 0.01  # Reducido de 0.03 (permite marcadores más pequeños)
+    parameters.maxMarkerPerimeterRate = 6.0   # Aumentado de 4.0 (permite marcadores más grandes)
+
+    # 3. Detección de esquinas: Más agresiva
+    parameters.cornerRefinementMethod = cv.aruco.CORNER_REFINE_SUBPIX  # Refinamiento subpixel
+    parameters.cornerRefinementWinSize = 3  # Ventana pequeña para refinamiento
+    parameters.cornerRefinementMaxIterations = 50  # Más iteraciones
+    parameters.cornerRefinementMinAccuracy = 0.01  # Más tolerante
+
+    # 4. Umbral de bits erróneos: Más permisivo (crítico para motion blur)
+    parameters.errorCorrectionRate = 0.8  # Permite hasta 80% de corrección de errores
+
+    # 5. Perspectiva: Más tolerante a deformaciones
+    parameters.perspectiveRemovePixelPerCell = 6  # Más píxeles por celda
+    parameters.perspectiveRemoveIgnoredMarginPerCell = 0.10  # Ignorar 10% del margen
+
+    # 6. Detección de marcadores: Más agresiva
+    parameters.minDistanceToBorder = 1  # Reducido para detectar cerca de bordes
+    parameters.markerBorderBits = 1  # Marcadores 5x5 tienen 1 bit de borde
+
+    # 7. Umbral de detección: Más permisivo
+    parameters.minOtsuStdDev = 2.0  # Reducido para aceptar más candidatos
+    parameters.polygonalApproxAccuracyRate = 0.08  # Más tolerante en aproximación
+
+    log.debug("Parámetros ArUco optimizados para detección en movimiento")
 
     detector = cv.aruco.ArucoDetector(aruco_dict, parameters)
 
     corners, ids, _ = detector.detectMarkers(gray)
 
+    # Convertir allowed_ids a set para búsqueda rápida
+    if allowed_ids is not None:
+        allowed_ids_set = set(allowed_ids) if not isinstance(allowed_ids, set) else allowed_ids
+    else:
+        allowed_ids_set = None
+
     # Log de depuración
     if ids is not None:
-        log.debug("Detectados %d marcadores: IDs = %s", len(ids), ids.flatten())
+        detected_ids = ids.flatten()
+        log.debug("Detectados %d marcadores: IDs = %s", len(ids), detected_ids)
     else:
         log.debug("No se detectaron marcadores")
+
     datos = []
 
     if ids is not None:
         for corner, aruco_id in zip(corners, ids):
+            identificador = aruco_id[0]
+
+            # ===== FILTRO DE IDs PERMITIDOS =====
+            # Solo procesar marcadores con IDs válidos
+            if allowed_ids_set is not None and identificador not in allowed_ids_set:
+                continue  # Saltar este marcador silenciosamente
+
             # corners[i] tiene la forma [4, 1, 2], con 4 esquinas, 1 array por esquina y 2 coordenadas (x, y)
             corner_points = corner.reshape(
                 4, 2

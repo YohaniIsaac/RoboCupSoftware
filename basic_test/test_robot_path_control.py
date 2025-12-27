@@ -135,8 +135,8 @@ def detect_robots(camera_id=None):
         frame = cv2.warpPerspective(frame, matrix,
                                      (CAMERA_PERSPECTIVE_WIDTH, CAMERA_PERSPECTIVE_HEIGHT))
 
-    # Detectar robots
-    frame_out, robots = deteccion_jugadores_aruco_tag(frame, use_camera=True)
+    # Detectar robots (solo IDs 0-3 permitidos)
+    frame_out, robots = deteccion_jugadores_aruco_tag(frame, use_camera=True, allowed_ids={0, 1, 2, 3})
 
     if len(robots) == 0:
         log.warning("⚠️  No se detectaron robots")
@@ -289,8 +289,8 @@ def control_robot(robot, path, rf_controller, camera_id=2, max_time=30):
                 frame = cv2.warpPerspective(frame, matrix,
                                            (CAMERA_PERSPECTIVE_WIDTH, CAMERA_PERSPECTIVE_HEIGHT))
 
-            # Detectar robots
-            frame_out, robots = deteccion_jugadores_aruco_tag(frame, use_camera=True)
+            # Detectar robots (solo IDs 0-3 permitidos)
+            frame_out, robots = deteccion_jugadores_aruco_tag(frame, use_camera=True, allowed_ids={0, 1, 2, 3})
 
             # Buscar el robot controlado
             robot_found = False
