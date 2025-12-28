@@ -89,8 +89,7 @@ class RFController:
     def set_motors(self, robot_id, left_speed, right_speed):
         """Establece las velocidades de los motores de un robot.
 
-        Convierte las velocidades normalizadas a valores compatibles con
-        Arduino y envía el comando correspondiente.
+        Recibe valores PWM directos y envía el comando correspondiente.
 
         Implementa rate limiting para evitar saturar el buffer serial:
         - Solo envía si han pasado MIN_COMMAND_INTERVAL (15ms) desde el último comando
@@ -99,16 +98,15 @@ class RFController:
 
         Args:
             robot_id (int): ID del robot (1-4).
-            left_speed (float): Velocidad del motor izquierdo (-1.0 a 1.0).
-            right_speed (float): Velocidad del motor derecho (-1.0 a 1.0).
+            left_speed (int): Velocidad del motor izquierdo en PWM (-255 a 255).
+            right_speed (int): Velocidad del motor derecho en PWM (-255 a 255).
 
         Returns:
             bool: True si el comando se envió correctamente, False en caso contrario.
         """
-        # Convertir velocidades normalizadas (-1 a 1) a valores para Arduino (-127 a 127)
-        # Limitado a este rango debido a la conversión uint8_t en el transmisor RF
-        left_val = int(left_speed * 127)
-        right_val = int(right_speed * 127)
+        # Los valores ya vienen en PWM (-255 a 255), asegurar que estén en rango
+        left_val = int(max(-255, min(255, left_speed)))
+        right_val = int(max(-255, min(255, right_speed)))
 
         # Aplicar calibración individual si está habilitada
         if self.enable_calibration and self.calibration:
@@ -151,7 +149,7 @@ class RFController:
 
         # ===== SISTEMA DE 3 PRIORIDADES =====
         # Calcular magnitud de velocidad (para detectar desaceleración)
-        current_magnitude = math.sqrt(left_val**2 + right_val**2) / 127.0  # Normalizar a 0-1
+        current_magnitude = math.sqrt(left_val**2 + right_val**2) / 255.0  # Normalizar a 0-1
         last_magnitude = self.last_speed_magnitude.get(robot_id, current_magnitude)
 
         # Detectar desaceleración significativa (entrada a rampa)
@@ -296,3 +294,15 @@ class RFController:
                 connections['robot_4'] = True
 
         return connections
+
+    def update_robot_calibration(self, robot_id, max_left, max_right, bias):
+        """Actualiza la calibración de un robot en tiempo real.
+
+        Args:
+            robot_id (int): ID del robot (ArUco marker ID: 0-3)
+            max_left (float): Factor de calibración motor izquierdo (0.0-1.0)
+            max_right (float): Factor de calibración motor derecho (0.0-1.0)
+            bias (float): Corrección de sesgo (-0.3 a 0.3)
+        """
+        if self.enable_calibration and self.calibration:
+            self.calibration.set_calibration(robot_id, max_left, max_right, bias)

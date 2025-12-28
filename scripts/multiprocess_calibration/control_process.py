@@ -21,6 +21,7 @@ ROOT_DIR = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(ROOT_DIR / "src"))
 
 from robot_soccer.controllers.differential_drive import DifferentialDriveController
+from robot_soccer.controllers.robot_calibration import RobotCalibration
 from robot_soccer.communication.rf_controller import RFController
 from robot_soccer.config import (
     ROBOT_POSITION_THRESHOLD,
@@ -33,6 +34,8 @@ from robot_soccer.config import (
     ROBOT_MIN_ROTATION_SPEED,
     ROBOT_ROTATION_ARRIVAL_ANGLE_DEG,
     ROBOT_ROTATION_NEAR_MIN,
+    MOTOR_DEAD_ZONE_PWM,
+    MOTOR_MIN_MOVEMENT_PWM,
 )
 
 log = logging.getLogger(__name__)
@@ -90,6 +93,11 @@ def control_loop(robot_positions_pipe, frame_pipe, robot_id, serial_port):
     except Exception as e:
         log.warning(f"⚠️  Error RF: {e}")
 
+    # Cargar calibración del robot
+    robot_calibration = RobotCalibration()
+    max_speed_left, max_speed_right, bias = robot_calibration.get_calibration(robot_id)
+    log.info(f"📊 Calibración Robot {robot_id}: L={max_speed_left:.2f}, R={max_speed_right:.2f}, Bias={bias:.3f}")
+
     # Parámetros de calibración
     params = {
         'max_linear_speed': ROBOT_MAX_LINEAR_SPEED,
@@ -102,6 +110,11 @@ def control_loop(robot_positions_pipe, frame_pipe, robot_id, serial_port):
         'rotation_near_min': ROBOT_ROTATION_NEAR_MIN,
         'position_threshold': ROBOT_POSITION_THRESHOLD,
         'angle_threshold': ROBOT_ANGLE_THRESHOLD_DEG,
+        # Calibración de motores
+        'calib_max_speed_left': max_speed_left,
+        'calib_max_speed_right': max_speed_right,
+        'calib_bias': bias,
+        'robot_id': robot_id,  # Para guardar calibración
     }
 
     # Controlador
@@ -174,7 +187,7 @@ def control_loop(robot_positions_pipe, frame_pipe, robot_id, serial_port):
             elif robot and rf_controller and not robot_stopped:
                 # Si NO hay movimiento activo, detener el robot UNA SOLA VEZ
                 firmware_id = robot.id + 1
-                rf_controller.set_motors(firmware_id, 0.0, 0.0)
+                rf_controller.set_motors(firmware_id, 0, 0)
                 robot_stopped = True  # Marcar que ya detuvimos
 
             # Dibujar interfaz
@@ -205,7 +218,7 @@ def control_loop(robot_positions_pipe, frame_pipe, robot_id, serial_port):
                 # Detener robot INMEDIATAMENTE al cancelar
                 if robot and rf_controller:
                     firmware_id = robot.id + 1
-                    rf_controller.set_motors(firmware_id, 0.0, 0.0)
+                    rf_controller.set_motors(firmware_id, 0, 0)
                 target_waypoint = None
                 movement_active = False
                 robot_stopped = True
@@ -234,7 +247,7 @@ def control_loop(robot_positions_pipe, frame_pipe, robot_id, serial_port):
                             # PAUSADO: Detener robot INMEDIATAMENTE
                             if rf_controller:
                                 firmware_id = robot.id + 1
-                                rf_controller.set_motors(firmware_id, 0.0, 0.0)
+                                rf_controller.set_motors(firmware_id, 0, 0)
                                 robot_stopped = True
                             log.info("⏸️  Movimiento PAUSADO - Robot detenido")
                             log.info("📍 Robot(%d, %d) → Target(%d, %d) | dx=%d dy=%d dist=%.1f",
@@ -245,6 +258,7 @@ def control_loop(robot_positions_pipe, frame_pipe, robot_id, serial_port):
                         log.warning("⚠️  Primero crea un waypoint con las flechas")
             elif result['action'] == 'save':
                 save_to_config(params)
+                save_to_calibration(params)
 
             # Actualizar referencias
             if result.get('waypoint') is not None:
@@ -257,7 +271,7 @@ def control_loop(robot_positions_pipe, frame_pipe, robot_id, serial_port):
         # Detener robot
         if robot and rf_controller:
             firmware_id = robot.id + 1
-            rf_controller.set_motors(firmware_id, 0.0, 0.0)
+            rf_controller.set_motors(firmware_id, 0, 0)
             log.info("⏹️  Robot detenido")
 
         cv2.destroyAllWindows()
@@ -284,6 +298,17 @@ def _update_controller(controller, params):
     # Thresholds
     controller.position_threshold = params['position_threshold']
     controller.angle_threshold = math.radians(params['angle_threshold'])
+
+    # Calibración de motores L/R
+    robot_id = params['robot_id']
+    if controller.rf_controller:
+        controller.rf_controller.update_robot_calibration(
+            robot_id,
+            params['calib_max_speed_left'],
+            params['calib_max_speed_right'],
+            params['calib_bias']
+        )
+        log.debug(f"🔧 Calibración actualizada en RF: L={params['calib_max_speed_left']:.3f}, R={params['calib_max_speed_right']:.3f}")
 
 
 def draw_robot_view(frame, robot, robot_id, target_waypoint):
@@ -326,7 +351,7 @@ def create_control_panel(params, robot, robot_id, robot_available, target_waypoi
     panel = np.zeros((920, 650, 3), dtype=np.uint8)  # Aumentado de 680 a 920 para más espacio
 
     # Título
-    cv2.putText(panel, "CALIBRACION VELOCIDAD (MP)", (10, 30),
+    cv2.putText(panel, "CALIBRACION PWM (0-255)", (10, 30),
                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
 
     y = 65
@@ -340,41 +365,52 @@ def create_control_panel(params, robot, robot_id, robot_available, target_waypoi
     cv2.putText(panel, f"RF: {'CONECTADO' if robot_available else 'DESCONECTADO'}",
                (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.6, rf_color, 2)
 
+    # Referencias de motor DC
+    y += 40
+    cv2.putText(panel, "=== REFERENCIAS MOTOR DC ===", (10, y),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 100, 100), 2)
+    y += 25
+    cv2.putText(panel, f"Dead zone: PWM < {MOTOR_DEAD_ZONE_PWM}", (20, y),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 100, 100), 1)
+    y += 20
+    cv2.putText(panel, f"Movimiento: PWM >= {MOTOR_MIN_MOVEMENT_PWM}", (20, y),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.45, (100, 255, 100), 1)
+
     # Parámetros
-    y += 45
-    cv2.putText(panel, "=== VELOCIDAD LINEAL ===", (10, y),
+    y += 40
+    cv2.putText(panel, "=== VELOCIDAD LINEAL (PWM) ===", (10, y),
                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (100, 200, 255), 2)
     y += 30
-    cv2.putText(panel, f"Max: {params['max_linear_speed']:.3f} (w/s)", (20, y),
+    cv2.putText(panel, f"Max: {params['max_linear_speed']} PWM (w/s)", (20, y),
                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
     y += 25
-    cv2.putText(panel, f"Min LEJOS: {params['min_linear_speed']:.3f} (a/d)", (20, y),
+    cv2.putText(panel, f"Min LEJOS: {params['min_linear_speed']} PWM (a/d)", (20, y),
                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
 
     y += 40
-    cv2.putText(panel, "=== VELOCIDAD ROTACION ===", (10, y),
+    cv2.putText(panel, "=== VELOCIDAD ROTACION (PWM) ===", (10, y),
                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (100, 255, 200), 2)
     y += 30
-    cv2.putText(panel, f"Max: {params['max_rotation_speed']:.3f} (q/e)", (20, y),
+    cv2.putText(panel, f"Max: {params['max_rotation_speed']} PWM (q/e)", (20, y),
                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
     y += 25
-    cv2.putText(panel, f"Min LEJOS: {params['min_rotation_speed']:.3f} (z/c)", (20, y),
+    cv2.putText(panel, f"Min LEJOS: {params['min_rotation_speed']} PWM (z/c)", (20, y),
                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
     y += 25
-    cv2.putText(panel, f"Min RAMPA: {params['rotation_near_min']:.3f} (7/8)", (20, y),
+    cv2.putText(panel, f"Min rampa: {params['rotation_near_min']} PWM (7/8)", (20, y),
                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 200, 150), 1)
     y += 25
-    cv2.putText(panel, f"Rampa inicia: {params['rotation_arrival_angle']:.1f}deg (3/4)", (20, y),
+    cv2.putText(panel, f"Inicia: {params['rotation_arrival_angle']:.1f}deg (3/4)", (20, y),
                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 200, 150), 1)
 
     y += 40
     cv2.putText(panel, "=== RAMPA LINEAL ===", (10, y),
                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 150, 255), 2)
     y += 30
-    cv2.putText(panel, f"Inicia rampa: {params['linear_arrival_distance']}px (1/2)", (20, y),
+    cv2.putText(panel, f"Inicia: {params['linear_arrival_distance']}px (1/2)", (20, y),
                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 200, 150), 1)
     y += 25
-    cv2.putText(panel, f"Min en rampa: {params['linear_near_min']:.3f} (5/6)", (20, y),
+    cv2.putText(panel, f"Min rampa: {params['linear_near_min']} PWM (5/6)", (20, y),
                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 200, 150), 1)
 
     y += 40
@@ -386,6 +422,20 @@ def create_control_panel(params, robot, robot_id, robot_available, target_waypoi
     y += 25
     cv2.putText(panel, f"Angular: {params['angle_threshold']}deg (-/=)", (20, y),
                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 200, 150), 1)
+
+    y += 40
+    cv2.putText(panel, "=== CALIBRACION MOTORES L/R ===", (10, y),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 180, 100), 2)
+    y += 30
+    cv2.putText(panel, f"Motor Left:  {params['calib_max_speed_left']:.3f} ([/])", (20, y),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 255, 200), 1)
+    y += 25
+    cv2.putText(panel, f"Motor Right: {params['calib_max_speed_right']:.3f} (;/')", (20, y),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 255, 200), 1)
+    y += 25
+    ratio = params['calib_max_speed_right'] / params['calib_max_speed_left'] if params['calib_max_speed_left'] > 0 else 0
+    cv2.putText(panel, f"Ratio R/L: {ratio:.3f}", (20, y),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (150, 200, 255), 1)
 
     y += 40
     cv2.putText(panel, "=== CONTROLES ===", (10, y),
@@ -472,103 +522,121 @@ def process_key(key, params, controller, robot, target_waypoint, movement_active
         log.info("➡️  Waypoint → (%d, %d)", target_waypoint[0], target_waypoint[1])
         result['waypoint'] = target_waypoint
 
-    # Ajustes de velocidad lineal (incremento fijo 0.01)
+    # Ajustes de velocidad lineal (±1 PWM)
     elif key == ord('w'):
-        params['max_linear_speed'] = min(1.0, params['max_linear_speed'] + 0.01)
+        params['max_linear_speed'] = min(255, params['max_linear_speed'] + 1)
         result['action'] = 'update_params'
-        log.info(f"max_linear_speed: {params['max_linear_speed']:.3f}")
+        log.info(f"max_linear_speed: {params['max_linear_speed']} PWM")
     elif key == ord('s'):
-        params['max_linear_speed'] = max(0.0, params['max_linear_speed'] - 0.01)
+        params['max_linear_speed'] = max(0, params['max_linear_speed'] - 1)
         result['action'] = 'update_params'
-        log.info(f"max_linear_speed: {params['max_linear_speed']:.3f}")
+        log.info(f"max_linear_speed: {params['max_linear_speed']} PWM")
     elif key == ord('a'):
-        params['min_linear_speed'] = max(0.0, params['min_linear_speed'] - 0.01)
+        params['min_linear_speed'] = max(0, params['min_linear_speed'] - 1)
         result['action'] = 'update_params'
-        log.info(f"min_linear_speed: {params['min_linear_speed']:.3f}")
+        log.info(f"min_linear_speed: {params['min_linear_speed']} PWM")
     elif key == ord('d'):
-        params['min_linear_speed'] = min(1.0, params['min_linear_speed'] + 0.01)
+        params['min_linear_speed'] = min(255, params['min_linear_speed'] + 1)
         result['action'] = 'update_params'
-        log.info(f"min_linear_speed: {params['min_linear_speed']:.3f}")
+        log.info(f"min_linear_speed: {params['min_linear_speed']} PWM")
 
-    # Ajustes de velocidad rotación (incremento fijo 0.01)
+    # Ajustes de velocidad rotación (±1 PWM)
     elif key == ord('q'):
-        params['max_rotation_speed'] = min(1.0, params['max_rotation_speed'] + 0.01)
+        params['max_rotation_speed'] = min(255, params['max_rotation_speed'] + 1)
         result['action'] = 'update_params'
-        log.info(f"max_rotation_speed: {params['max_rotation_speed']:.3f}")
+        log.info(f"max_rotation_speed: {params['max_rotation_speed']} PWM")
     elif key == ord('e'):
-        params['max_rotation_speed'] = max(0.0, params['max_rotation_speed'] - 0.01)
+        params['max_rotation_speed'] = max(0, params['max_rotation_speed'] - 1)
         result['action'] = 'update_params'
-        log.info(f"max_rotation_speed: {params['max_rotation_speed']:.3f}")
+        log.info(f"max_rotation_speed: {params['max_rotation_speed']} PWM")
     elif key == ord('z'):
-        params['min_rotation_speed'] = max(0.0, params['min_rotation_speed'] - 0.01)
+        params['min_rotation_speed'] = max(0, params['min_rotation_speed'] - 1)
         result['action'] = 'update_params'
-        log.info(f"min_rotation_speed: {params['min_rotation_speed']:.3f}")
+        log.info(f"min_rotation_speed: {params['min_rotation_speed']} PWM")
     elif key == ord('c'):
-        params['min_rotation_speed'] = min(1.0, params['min_rotation_speed'] + 0.01)
+        params['min_rotation_speed'] = min(255, params['min_rotation_speed'] + 1)
         result['action'] = 'update_params'
-        log.info(f"min_rotation_speed: {params['min_rotation_speed']:.3f}")
+        log.info(f"min_rotation_speed: {params['min_rotation_speed']} PWM")
 
-    # === NUEVOS CONTROLES: PARÁMETROS DE RAMPA Y THRESHOLDS ===
+    # === PARÁMETROS DE RAMPA Y THRESHOLDS ===
 
-    # Inicio de rampa lineal (distancia en píxeles, incremento ±5px)
+    # Inicio de rampa lineal (±1px)
     elif key == ord('1'):
-        params['linear_arrival_distance'] = min(200, params['linear_arrival_distance'] + 5)
+        params['linear_arrival_distance'] = min(200, params['linear_arrival_distance'] + 1)
         result['action'] = 'update_params'
-        log.info(f"📏 linear_arrival_distance: {params['linear_arrival_distance']}px")
+        log.info(f"linear_arrival_distance: {params['linear_arrival_distance']}px")
     elif key == ord('2'):
-        params['linear_arrival_distance'] = max(10, params['linear_arrival_distance'] - 5)
+        params['linear_arrival_distance'] = max(10, params['linear_arrival_distance'] - 1)
         result['action'] = 'update_params'
-        log.info(f"📏 linear_arrival_distance: {params['linear_arrival_distance']}px")
+        log.info(f"linear_arrival_distance: {params['linear_arrival_distance']}px")
 
-    # Inicio de rampa angular (grados, incremento ±2°)
+    # Inicio de rampa angular (±1°)
     elif key == ord('3'):
-        params['rotation_arrival_angle'] = min(90, params['rotation_arrival_angle'] + 2)
+        params['rotation_arrival_angle'] = min(90, params['rotation_arrival_angle'] + 1)
         result['action'] = 'update_params'
-        log.info(f"📐 rotation_arrival_angle: {params['rotation_arrival_angle']:.1f}°")
+        log.info(f"rotation_arrival_angle: {params['rotation_arrival_angle']:.1f}°")
     elif key == ord('4'):
-        params['rotation_arrival_angle'] = max(5, params['rotation_arrival_angle'] - 2)
+        params['rotation_arrival_angle'] = max(5, params['rotation_arrival_angle'] - 1)
         result['action'] = 'update_params'
-        log.info(f"📐 rotation_arrival_angle: {params['rotation_arrival_angle']:.1f}°")
+        log.info(f"rotation_arrival_angle: {params['rotation_arrival_angle']:.1f}°")
 
-    # Velocidad mínima en rampa lineal (incremento ±0.005)
+    # Velocidad mínima en rampa lineal (±1 PWM)
     elif key == ord('5'):
-        params['linear_near_min'] = min(params['min_linear_speed'], params['linear_near_min'] + 0.005)
+        params['linear_near_min'] = min(params['min_linear_speed'], params['linear_near_min'] + 1)
         result['action'] = 'update_params'
-        log.info(f"🐌 linear_near_min: {params['linear_near_min']:.3f}")
+        log.info(f"linear_near_min: {params['linear_near_min']} PWM")
     elif key == ord('6'):
-        params['linear_near_min'] = max(0.010, params['linear_near_min'] - 0.005)
+        params['linear_near_min'] = max(MOTOR_DEAD_ZONE_PWM, params['linear_near_min'] - 1)
         result['action'] = 'update_params'
-        log.info(f"🐌 linear_near_min: {params['linear_near_min']:.3f}")
+        log.info(f"linear_near_min: {params['linear_near_min']} PWM")
 
-    # Velocidad mínima en rampa angular (incremento ±0.005)
+    # Velocidad mínima en rampa angular (±1 PWM)
     elif key == ord('7'):
-        params['rotation_near_min'] = min(params['min_rotation_speed'], params['rotation_near_min'] + 0.005)
+        params['rotation_near_min'] = min(params['min_rotation_speed'], params['rotation_near_min'] + 1)
         result['action'] = 'update_params'
-        log.info(f"🐌 rotation_near_min: {params['rotation_near_min']:.3f}")
+        log.info(f"rotation_near_min: {params['rotation_near_min']} PWM")
     elif key == ord('8'):
-        params['rotation_near_min'] = max(0.010, params['rotation_near_min'] - 0.005)
+        params['rotation_near_min'] = max(MOTOR_DEAD_ZONE_PWM, params['rotation_near_min'] - 1)
         result['action'] = 'update_params'
-        log.info(f"🐌 rotation_near_min: {params['rotation_near_min']:.3f}")
+        log.info(f"rotation_near_min: {params['rotation_near_min']} PWM")
 
-    # Threshold de posición (píxeles, incremento ±2px)
+    # Threshold de posición (±1px)
     elif key == ord('9'):
-        params['position_threshold'] = min(50, params['position_threshold'] + 2)
+        params['position_threshold'] = min(50, params['position_threshold'] + 1)
         result['action'] = 'update_params'
-        log.info(f"🎯 position_threshold: {params['position_threshold']}px")
+        log.info(f"position_threshold: {params['position_threshold']}px")
     elif key == ord('0'):
-        params['position_threshold'] = max(5, params['position_threshold'] - 2)
+        params['position_threshold'] = max(5, params['position_threshold'] - 1)
         result['action'] = 'update_params'
-        log.info(f"🎯 position_threshold: {params['position_threshold']}px")
+        log.info(f"position_threshold: {params['position_threshold']}px")
 
-    # Threshold angular (grados, incremento ±1°)
+    # Threshold angular (±1°)
     elif key == ord('-'):
         params['angle_threshold'] = max(1, params['angle_threshold'] - 1)
         result['action'] = 'update_params'
-        log.info(f"🎯 angle_threshold: {params['angle_threshold']:.1f}°")
+        log.info(f"angle_threshold: {params['angle_threshold']:.1f}°")
     elif key == ord('='):
         params['angle_threshold'] = min(30, params['angle_threshold'] + 1)
         result['action'] = 'update_params'
-        log.info(f"🎯 angle_threshold: {params['angle_threshold']:.1f}°")
+        log.info(f"angle_threshold: {params['angle_threshold']:.1f}°")
+
+    # === CALIBRACIÓN DE MOTORES L/R (incremento ±0.01) ===
+    elif key == ord('['):
+        params['calib_max_speed_left'] = max(0.0, params['calib_max_speed_left'] - 0.01)
+        result['action'] = 'update_params'
+        log.info(f"⚙️  calib_max_speed_left: {params['calib_max_speed_left']:.3f}")
+    elif key == ord(']'):
+        params['calib_max_speed_left'] = min(1.0, params['calib_max_speed_left'] + 0.01)
+        result['action'] = 'update_params'
+        log.info(f"⚙️  calib_max_speed_left: {params['calib_max_speed_left']:.3f}")
+    elif key == ord(';'):
+        params['calib_max_speed_right'] = max(0.0, params['calib_max_speed_right'] - 0.01)
+        result['action'] = 'update_params'
+        log.info(f"⚙️  calib_max_speed_right: {params['calib_max_speed_right']:.3f}")
+    elif key == ord("'"):
+        params['calib_max_speed_right'] = min(1.0, params['calib_max_speed_right'] + 0.01)
+        result['action'] = 'update_params'
+        log.info(f"⚙️  calib_max_speed_right: {params['calib_max_speed_right']:.3f}")
 
     return result
 
@@ -583,16 +651,16 @@ def save_to_config(params):
         lines = f.readlines()
 
     replacements = {
-        'ROBOT_MIN_LINEAR_SPEED': f"{params['min_linear_speed']:.3f}",
-        'ROBOT_MAX_LINEAR_SPEED': f"{params['max_linear_speed']:.3f}",
-        'ROBOT_LINEAR_ARRIVAL_DISTANCE': f"{params['linear_arrival_distance']}",
-        'ROBOT_LINEAR_NEAR_MIN': f"{params['linear_near_min']:.3f}",
-        'ROBOT_MIN_ROTATION_SPEED': f"{params['min_rotation_speed']:.3f}",
-        'ROBOT_MAX_ROTATION_SPEED': f"{params['max_rotation_speed']:.3f}",
-        'ROBOT_ROTATION_ARRIVAL_ANGLE_DEG': f"{params['rotation_arrival_angle']:.1f}",
-        'ROBOT_ROTATION_NEAR_MIN': f"{params['rotation_near_min']:.3f}",
-        'ROBOT_POSITION_THRESHOLD': f"{params['position_threshold']}",
-        'ROBOT_ANGLE_THRESHOLD_DEG': f"{params['angle_threshold']}",
+        'ROBOT_MIN_LINEAR_SPEED': f"{params['min_linear_speed']}",  # PWM (int)
+        'ROBOT_MAX_LINEAR_SPEED': f"{params['max_linear_speed']}",  # PWM (int)
+        'ROBOT_LINEAR_ARRIVAL_DISTANCE': f"{params['linear_arrival_distance']}",  # píxeles (int)
+        'ROBOT_LINEAR_NEAR_MIN': f"{params['linear_near_min']}",  # PWM (int)
+        'ROBOT_MIN_ROTATION_SPEED': f"{params['min_rotation_speed']}",  # PWM (int)
+        'ROBOT_MAX_ROTATION_SPEED': f"{params['max_rotation_speed']}",  # PWM (int)
+        'ROBOT_ROTATION_ARRIVAL_ANGLE_DEG': f"{params['rotation_arrival_angle']:.1f}",  # grados (float)
+        'ROBOT_ROTATION_NEAR_MIN': f"{params['rotation_near_min']}",  # PWM (int)
+        'ROBOT_POSITION_THRESHOLD': f"{params['position_threshold']}",  # píxeles (int)
+        'ROBOT_ANGLE_THRESHOLD_DEG': f"{params['angle_threshold']}",  # grados (int)
     }
 
     new_lines = []
@@ -615,3 +683,19 @@ def save_to_config(params):
         f.writelines(new_lines)
 
     log.info("✅ Parámetros guardados")
+
+
+def save_to_calibration(params):
+    """Guarda calibración de motores L/R al archivo robot_calibration.json."""
+    robot_id = params['robot_id']
+    max_speed_left = params['calib_max_speed_left']
+    max_speed_right = params['calib_max_speed_right']
+    bias = params['calib_bias']
+
+    log.info(f"💾 Guardando calibración Robot {robot_id} a robot_calibration.json...")
+
+    robot_calibration = RobotCalibration()
+    robot_calibration.set_calibration(robot_id, max_speed_left, max_speed_right, bias)
+    robot_calibration.save()
+
+    log.info(f"✅ Calibración guardada: L={max_speed_left:.3f}, R={max_speed_right:.3f}, Bias={bias:.3f}")

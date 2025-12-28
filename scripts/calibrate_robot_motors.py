@@ -154,25 +154,25 @@ class RobotMotorCalibrator:
         """Aplica calibración manualmente a las velocidades.
 
         Args:
-            left_speed: Velocidad motor izquierdo (-127 a 127)
-            right_speed: Velocidad motor derecho (-127 a 127)
+            left_speed: Velocidad motor izquierdo en PWM (-255 a 255)
+            right_speed: Velocidad motor derecho en PWM (-255 a 255)
 
         Returns:
-            Tupla (left_calibrated, right_calibrated)
+            Tupla (left_calibrated, right_calibrated) en PWM (-255 a 255)
         """
         # Aplicar factores
         left_cal = left_speed * self.max_left
         right_cal = right_speed * self.max_right
 
         # Aplicar bias cuando va recto
-        if abs(left_speed - right_speed) < 20:
-            bias_value = self.bias * 127
+        if abs(left_speed - right_speed) < 40:  # Ajustado para PWM 255
+            bias_value = self.bias * 255
             left_cal += bias_value
             right_cal -= bias_value
 
-        # Limitar a rango válido (-127 a 127)
-        left_cal = max(-127, min(127, int(left_cal)))
-        right_cal = max(-127, min(127, int(right_cal)))
+        # Limitar a rango válido PWM (-255 a 255)
+        left_cal = max(-255, min(255, int(left_cal)))
+        right_cal = max(-255, min(255, int(right_cal)))
 
         return (left_cal, right_cal)
 
@@ -180,8 +180,8 @@ class RobotMotorCalibrator:
         """Envía comando de motor con calibración aplicada.
 
         Args:
-            left_speed: Velocidad base (-127 a 127)
-            right_speed: Velocidad base (-127 a 127)
+            left_speed: Velocidad base en PWM (-255 a 255)
+            right_speed: Velocidad base en PWM (-255 a 255)
         """
         if not self.rf_controller:
             return
@@ -189,21 +189,17 @@ class RobotMotorCalibrator:
         # Aplicar calibración manualmente
         left_cal, right_cal = self.apply_calibration_manually(left_speed, right_speed)
 
-        # Normalizar a -1.0 a 1.0 para enviar
-        left_norm = left_cal / 127.0
-        right_norm = right_cal / 127.0
-
         # Convertir robot_id de Python (0-3) a firmware (1-4)
         firmware_id = self.robot_id + 1
-        self.rf_controller.set_motors(firmware_id, left_norm, right_norm)
+        self.rf_controller.set_motors(firmware_id, left_cal, right_cal)
 
     def stop_robot(self):
         """Detiene el robot."""
         if self.rf_controller:
             # Convertir robot_id de Python (0-3) a firmware (1-4)
             firmware_id = self.robot_id + 1
-            # Enviar velocidad 0 en lugar del comando S,id (que no existe en firmware)
-            self.rf_controller.set_motors(firmware_id, 0.0, 0.0)
+            # Enviar velocidad 0 PWM
+            self.rf_controller.set_motors(firmware_id, 0, 0)
         self.current_left_speed = 0
         self.current_right_speed = 0
 
@@ -448,44 +444,44 @@ class RobotMotorCalibrator:
             self.stop_robot()
             print("⏹️  Detenido")
 
-        # Flechas - Movimiento temporal (duración fija)
+        # Flechas - Movimiento temporal (duración fija) - Valores en PWM 255
         elif key in [82, 0]:  # Flecha arriba (82 en Linux, puede variar)
-            self.current_left_speed = 100
-            self.current_right_speed = 100
+            self.current_left_speed = 200
+            self.current_right_speed = 200
             self.movement_active = True
             current_time = time.time()
             self.movement_end_time = current_time + self.movement_duration
-            self.send_motor_command(100, 100)
+            self.send_motor_command(200, 200)
             self.last_command_time = current_time  # Actualizar para throttling
             print(f"⬆️  Adelante ({self.movement_duration}s)")
 
         elif key in [84, 1]:  # Flecha abajo
-            self.current_left_speed = -100
-            self.current_right_speed = -100
+            self.current_left_speed = -200
+            self.current_right_speed = -200
             self.movement_active = True
             current_time = time.time()
             self.movement_end_time = current_time + self.movement_duration
-            self.send_motor_command(-100, -100)
+            self.send_motor_command(-200, -200)
             self.last_command_time = current_time  # Actualizar para throttling
             print(f"⬇️  Atrás ({self.movement_duration}s)")
 
         elif key in [81, 2]:  # Flecha izquierda
-            self.current_left_speed = -80
-            self.current_right_speed = 80
+            self.current_left_speed = -160
+            self.current_right_speed = 160
             self.movement_active = True
             current_time = time.time()
             self.movement_end_time = current_time + self.movement_duration
-            self.send_motor_command(-80, 80)
+            self.send_motor_command(-160, 160)
             self.last_command_time = current_time  # Actualizar para throttling
             print(f"⬅️  Girar izquierda ({self.movement_duration}s)")
 
         elif key in [83, 3]:  # Flecha derecha
-            self.current_left_speed = 80
-            self.current_right_speed = -80
+            self.current_left_speed = 160
+            self.current_right_speed = -160
             self.movement_active = True
             current_time = time.time()
             self.movement_end_time = current_time + self.movement_duration
-            self.send_motor_command(80, -80)
+            self.send_motor_command(160, -160)
             self.last_command_time = current_time  # Actualizar para throttling
             print(f"➡️  Girar derecha ({self.movement_duration}s)")
 

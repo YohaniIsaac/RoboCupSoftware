@@ -204,32 +204,50 @@ BALL_DETECTION_MAX_RADIUS = 9  # Radio máximo (px)
 # Parámetros de Control de Movimiento del Robot
 # =============================================================================
 
-# --- Velocidades de Rotación ---
+# --- REFERENCIAS DE MOTOR DC ---
+# Los motores DC tienen un "dead zone" donde PWM muy bajo no genera suficiente
+# torque para vencer la fricción estática.
+MOTOR_DEAD_ZONE_PWM = 30         # PWM < 30: Motor probablemente NO se mueve (dead zone)
+MOTOR_MIN_MOVEMENT_PWM = 50      # PWM ≥ 50: Movimiento confiable del motor
+MOTOR_MAX_PWM = 255              # PWM máximo absoluto del motor
+
+# --- Velocidades de Rotación (en PWM: 0-255) ---
+# IMPORTANTE: Con corrección angular y calibración asimétrica (L=1.0, R=0.79),
+# las velocidades efectivas pueden reducirse ~20-40%. Por eso los mínimos deben
+# ser suficientemente altos para superar el dead zone del motor (~30 PWM).
+#
 # AJUSTADAS para latencia del sistema (~65ms: 40ms captura + 15ms proceso + 10ms RF)
 # A 25 FPS real (no 60 FPS), el robot se mueve significativamente entre frames
-ROBOT_MIN_ROTATION_SPEED = 0.060  # Velocidad mínima cuando LEJOS del objetivo (0.0 - 1.0)
-                                  # REDUCIDA de 0.080 → 0.060 para evitar overshoot con latencia
-ROBOT_MAX_ROTATION_SPEED = 0.100  # Velocidad máxima de rotación (0.0 - 1.0)
-                                  # REDUCIDA de 0.150 → 0.100 (crítico para latencia 65ms)
-ROBOT_ROTATION_ARRIVAL_ANGLE_DEG = 35.0  # Ángulo donde empieza rampa de desaceleración (grados)
-                                         # AUMENTADO de 25.0 → 35.0 para rampa MÁS amplia
-ROBOT_ROTATION_NEAR_MIN = 0.015  # Velocidad mínima EN LA RAMPA (más bajo permitido)
-                                  # REDUCIDA de 0.020 → 0.015 para evitar overshoot
-                                  # Debe ser <= ROBOT_MIN_ROTATION_SPEED
+ROBOT_MIN_ROTATION_SPEED = 18  # Velocidad mínima cuando LEJOS del objetivo (PWM)
+ROBOT_MAX_ROTATION_SPEED = 23  # Velocidad máxima de rotación (PWM)
+ROBOT_ROTATION_ARRIVAL_ANGLE_DEG = 25.0  # Ángulo donde empieza rampa de desaceleración (grados)
+ROBOT_ROTATION_NEAR_MIN = 18  # Velocidad mínima EN LA RAMPA (PWM)
+                                  # Debe ser <= ROBOT_MIN_ROTATION_SPEED y >= MOTOR_MIN_MOVEMENT_PWM
 
-# --- Velocidades de Movimiento Lineal ---
-ROBOT_MIN_LINEAR_SPEED = 0.150  # Velocidad mínima cuando LEJOS del objetivo (0.0 - 1.0)
-                                # REDUCIDA de 0.170 → 0.150 para mejor control con latencia
-ROBOT_MAX_LINEAR_SPEED = 0.150  # Velocidad máxima de movimiento (0.0 - 1.0)
-                                # REDUCIDA de 0.170 → 0.150
-ROBOT_LINEAR_ARRIVAL_DISTANCE = 50  # Distancia donde empieza rampa de desaceleración (píxeles)
-                                     # AUMENTADO de 40 → 50: Valores más altos = empieza a frenar antes
-ROBOT_LINEAR_NEAR_MIN = 0.040  # Velocidad mínima EN LA RAMPA (más bajo permitido)
-                                # REDUCIDA de 0.050 → 0.040
-                                # Debe ser <= ROBOT_MIN_LINEAR_SPEED
+# --- Velocidades de Movimiento Lineal (en PWM: 0-255) ---
+# Con corrección angular (MAX_ANGULAR_CORRECTION_PWM) y calibración (R×0.79),
+# el motor más lento puede perder ~35% de velocidad. Por eso MIN debe ser ≥90
+# para asegurar que incluso después de corrección y calibración se supere el dead zone.
+#
+# Ejemplo: Speed=90 PWM → Con corrección: L=80, R=100
+#          → Con calibración: L=80, R=79 → AMBOS > 50 PWM ✓
+ROBOT_MIN_LINEAR_SPEED = 10  # Velocidad mínima cuando LEJOS (PWM)
+ROBOT_MAX_LINEAR_SPEED = 21  # Velocidad máxima de movimiento (PWM)
+ROBOT_LINEAR_ARRIVAL_DISTANCE = 51  # Distancia donde empieza rampa de desaceleración (píxeles)
+ROBOT_LINEAR_NEAR_MIN = 65  # Velocidad mínima EN LA RAMPA (PWM)
+                                  # Debe ser <= ROBOT_MIN_LINEAR_SPEED y >= MOTOR_MIN_MOVEMENT_PWM
+
+# --- Umbral de Inicio de Movimiento Lineal ---
+# Ángulo máximo donde el robot puede comenzar a moverse linealmente mientras corrige
+# FASE 1: Si error angular > umbral → Gira en lugar (solo rotación, sin avance)
+# FASE 2: Si error angular ≤ umbral → Se mueve linealmente mientras corrige ángulo
+ROBOT_LINEAR_START_ANGLE_THRESHOLD_DEG = 30.0  # Grados (30° = conservador, 45° = agresivo)
+
+# --- Corrección Angular (en PWM) ---
+# Límite máximo de diferencia PWM entre motores para corrección angular durante movimiento lineal
+# Antes: 0.04 (4% de velocidad normalizada) → Ahora: 10 PWM directo
+MAX_ANGULAR_CORRECTION_PWM = 10  # Máximo ±10 PWM de diferencia L/R para corrección angular
 
 # --- Thresholds de Precisión ---
-ROBOT_POSITION_THRESHOLD = 15  # Distancia para considerar waypoint alcanzado (píxeles)
-                               # AUMENTADO de 12 → 15 para evitar oscilaciones
+ROBOT_POSITION_THRESHOLD = 16  # Distancia para considerar waypoint alcanzado (píxeles)
 ROBOT_ANGLE_THRESHOLD_DEG = 7  # Error angular aceptable (grados)
-                               # REDUCIDO de 10 → 7 para detener antes y evitar overshoot
