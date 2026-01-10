@@ -17,7 +17,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 # pylint: disable=wrong-import-position
 from .serial_manager import SerialManager
 from .command_protocol import RobotCommandProtocol
-from ..controllers.robot_calibration import get_calibration_manager
+from ..controllers.robot_calibration_multipoint import (
+    get_calibration_manager_multipoint as get_calibration_manager
+)
 
 log = logging.getLogger(__name__)
 
@@ -35,7 +37,7 @@ class RFController:
         logger (Logger): Logger para registrar eventos y errores.
     """
 
-    def __init__(self, port="/dev/ttyUSB0", enable_calibration=True):
+    def __init__(self, port="/dev/ttyUSB0", enable_calibration=True, min_command_interval=0.015):
         """Inicializa el controlador RF.
 
         Args:
@@ -43,6 +45,9 @@ class RFController:
                 Defaults to '/dev/ttyUSB0'.
             enable_calibration (bool): Si es True, aplica calibración individual por robot.
                 Defaults to True.
+            min_command_interval (float): Tiempo mínimo en segundos entre comandos al mismo robot.
+                Defaults to 0.015 (15ms). Usar valores menores (ej: 0.005) para calibración
+                de motores con movimiento ultra-fluido.
         """
         self.serial_manager = SerialManager(port=port)
         self.protocol = RobotCommandProtocol()
@@ -59,10 +64,12 @@ class RFController:
         # Guardar último comando por robot para evitar logs repetidos
         self.last_commands = {}  # {robot_id: (left_val, right_val)}
 
-        # Rate limiter: Mínimo 15ms entre comandos al mismo robot
+        # Rate limiter configurable: Mínimo entre comandos al mismo robot
         # (firmware tiene delay(10), más overhead de procesamiento)
+        # Para calibración, puede reducirse a 5ms para movimiento más fluido
         self.last_send_time = {}  # {robot_id: timestamp}
-        self.MIN_COMMAND_INTERVAL = 0.015  # 15ms mínimo entre comandos
+        self.MIN_COMMAND_INTERVAL = min_command_interval
+        log.debug(f"Rate limiting: {self.MIN_COMMAND_INTERVAL*1000:.1f}ms entre comandos")
 
         # Detección de zona de rampa para prioridad media
         self.last_speed_magnitude = {}  # {robot_id: magnitude}
@@ -91,6 +98,9 @@ class RFController:
 
         Recibe valores PWM directos y envía el comando correspondiente.
 
+        IMPORTANTE: El firmware acepta int8_t (-127 a 127), NO -255 a 255.
+        Los valores se limitan automáticamente al rango correcto.
+
         Implementa rate limiting para evitar saturar el buffer serial:
         - Solo envía si han pasado MIN_COMMAND_INTERVAL (15ms) desde el último comando
         - O si es un comando de detención (prioridad alta)
@@ -98,15 +108,15 @@ class RFController:
 
         Args:
             robot_id (int): ID del robot (1-4).
-            left_speed (int): Velocidad del motor izquierdo en PWM (-255 a 255).
-            right_speed (int): Velocidad del motor derecho en PWM (-255 a 255).
+            left_speed (int): Velocidad del motor izquierdo en PWM (-127 a 127).
+            right_speed (int): Velocidad del motor derecho en PWM (-127 a 127).
 
         Returns:
             bool: True si el comando se envió correctamente, False en caso contrario.
         """
-        # Los valores ya vienen en PWM (-255 a 255), asegurar que estén en rango
-        left_val = int(max(-255, min(255, left_speed)))
-        right_val = int(max(-255, min(255, right_speed)))
+        # Los valores ya vienen en PWM (-127 a 127), asegurar que estén en rango
+        left_val = int(max(-127, min(127, left_speed)))
+        right_val = int(max(-127, min(127, right_speed)))
 
         # Aplicar calibración individual si está habilitada
         if self.enable_calibration and self.calibration:
@@ -296,7 +306,12 @@ class RFController:
         return connections
 
     def update_robot_calibration(self, robot_id, max_left, max_right, bias):
+        # pylint: disable=unused-argument
         """Actualiza la calibración de un robot en tiempo real.
+
+        OBSOLETO: Este método era para calibración single-point.
+        El sistema multipoint usa 10 puntos y se configura mediante
+        set_calibration_point() con índices específicos.
 
         Args:
             robot_id (int): ID del robot (ArUco marker ID: 0-3)
@@ -304,5 +319,9 @@ class RFController:
             max_right (float): Factor de calibración motor derecho (0.0-1.0)
             bias (float): Corrección de sesgo (-0.3 a 0.3)
         """
-        if self.enable_calibration and self.calibration:
-            self.calibration.set_calibration(robot_id, max_left, max_right, bias)
+        # Método deprecado - el sistema multipoint no soporta set_calibration()
+        # Para actualizar calibración, usar: calibration.set_calibration_point(robot_id, index, ...)
+        log.warning(
+            "update_robot_calibration() está deprecado en sistema multipoint. "
+            "Usar set_calibration_point() en su lugar."
+        )

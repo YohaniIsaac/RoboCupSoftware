@@ -1,0 +1,280 @@
+{
+  "_comment": "Calibración multi-punto de motores - 5 puntos por robot",
+  "_instructions": "Calibrar en 30, 50, 80, 110, 127 PWM. Dead-zone en PWM mínimo por motor.",
+  "_format": {
+    "deadzone_left": "PWM mínimo para mover motor izquierdo (0-40)",
+    "deadzone_right": "PWM mínimo para mover motor derecho (0-40)",
+    "calibration_points": [
+      {
+        "pwm": "Velocidad PWM",
+        "max_left": "Factor motor izq (0.5-2.0)",
+        "max_right": "Factor motor der (0.5-2.0)",
+        "bias": "Corrección deriva (-0.5 a 0.5)"
+      }
+    ]
+  },
+  "0": {
+    "deadzone_left": 0,
+    "deadzone_right": 40,
+    "calibration_points": [
+      {
+        "pwm": -80,
+        "max_left": 1.0,
+        "max_right": 1.0,
+        "bias": 0.0
+      },
+      {
+        "pwm": -65,
+        "max_left": 1.0,
+        "max_right": 1.0,
+        "bias": 0.0
+      },
+      {
+        "pwm": -50,
+        "max_left": 1.0,
+        "max_right": 1.0,
+        "bias": 0.0
+      },
+      {
+        "pwm": -35,
+        "max_left": 1.0,
+        "max_right": 1.0,
+        "bias": 0.0
+      },
+      {
+        "pwm": -20,
+        "max_left": 0.95,
+        "max_right": 0.95,
+        "bias": -0.004
+      },
+      {
+        "pwm": 20,
+        "max_left": 1.0,
+        "max_right": 1.0,
+        "bias": 0.01
+      },
+      {
+        "pwm": 35,
+        "max_left": 0.96,
+        "max_right": 1.0,
+        "bias": 0.032
+      },
+      {
+        "pwm": 50,
+        "max_left": 1.0,
+        "max_right": 1.0,
+        "bias": 0.043
+      },
+      {
+        "pwm": 65,
+        "max_left": 1.0,
+        "max_right": 1.0,
+        "bias": 0.06
+      },
+      {
+        "pwm": 80,
+        "max_left": 1.0,
+        "max_right": 1.0,
+        "bias": 0.0
+      }
+    ]
+  },
+  "1": {
+    "deadzone_left": 0,
+    "deadzone_right": 0,
+    "calibration_points": [
+      {
+        "pwm": -80,
+        "max_left": 1.0,
+        "max_right": 1.0,
+        "bias": 0.0
+      },
+      {
+        "pwm": -65,
+        "max_left": 1.0,
+        "max_right": 1.0,
+        "bias": 0.0
+      },
+      {
+        "pwm": -50,
+        "max_left": 1.0,
+        "max_right": 1.0,
+        "bias": 0.0
+      },
+      {
+        "pwm": -35,
+        "max_left": 1.0,
+        "max_right": 1.0,
+        "bias": 0.0
+      },
+      {
+        "pwm": -20,
+        "max_left": 1.0,
+        "max_right": 1.0,
+        "bias": 0.0
+      },
+      {
+        "pwm": 20,
+        "max_left": 1.0,
+        "max_right": 1.0,
+        "bias": 0.0
+      },
+      {
+        "pwm": 35,
+        "max_left": 1.0,
+        "max_right": 1.0,
+        "bias": 0.0
+      },
+      {
+        "pwm": 50,
+        "max_left": 1.0,
+        "max_right": 1.0,
+        "bias": 0.0
+      },
+      {
+        "pwm": 65,
+        "max_left": 1.0,
+        "max_right": 1.0,
+        "bias": 0.0
+      },
+      {
+        "pwm": 80,
+        "max_left": 1.0,
+        "max_right": 1.0,
+        "bias": 0.0
+      }
+    ]
+  },
+  "2": {
+    "deadzone_left": 0,
+    "deadzone_right": 0,
+    "calibration_points": [
+      {
+        "pwm": -80,
+        "max_left": 1.0,
+        "max_right": 1.0,
+        "bias": 0.0
+      },
+      {
+        "pwm": -65,
+        "max_left": 1.0,
+        "max_right": 1.0,
+        "bias": 0.0
+      },
+      {
+        "pwm": -50,
+        "max_left": 1.0,
+        "max_right": 1.0,
+        "bias": 0.0
+      },
+      {
+        "pwm": -35,
+        "max_left": 1.0,
+        "max_right": 1.0,
+        "bias": 0.0
+      },
+      {
+        "pwm": -20,
+        "max_left": 1.0,
+        "max_right": 1.0,
+        "bias": 0.0
+      },
+      {
+        "pwm": 20,
+        "max_left": 1.0,
+        "max_right": 1.0,
+        "bias": 0.0
+      },
+      {
+        "pwm": 35,
+        "max_left": 1.0,
+        "max_right": 1.0,
+        "bias": 0.0
+      },
+      {
+        "pwm": 50,
+        "max_left": 1.0,
+        "max_right": 1.0,
+        "bias": 0.0
+      },
+      {
+        "pwm": 65,
+        "max_left": 1.0,
+        "max_right": 1.0,
+        "bias": 0.0
+      },
+      {
+        "pwm": 80,
+        "max_left": 1.0,
+        "max_right": 1.0,
+        "bias": 0.0
+      }
+    ]
+  },
+  "3": {
+    "deadzone_left": 0,
+    "deadzone_right": 0,
+    "calibration_points": [
+      {
+        "pwm": -80,
+        "max_left": 1.0,
+        "max_right": 1.0,
+        "bias": 0.0
+      },
+      {
+        "pwm": -65,
+        "max_left": 1.0,
+        "max_right": 1.0,
+        "bias": 0.0
+      },
+      {
+        "pwm": -50,
+        "max_left": 1.0,
+        "max_right": 1.0,
+        "bias": 0.0
+      },
+      {
+        "pwm": -35,
+        "max_left": 1.0,
+        "max_right": 1.0,
+        "bias": 0.0
+      },
+      {
+        "pwm": -20,
+        "max_left": 1.0,
+        "max_right": 1.0,
+        "bias": 0.0
+      },
+      {
+        "pwm": 20,
+        "max_left": 1.0,
+        "max_right": 1.0,
+        "bias": 0.0
+      },
+      {
+        "pwm": 35,
+        "max_left": 1.0,
+        "max_right": 1.0,
+        "bias": 0.0
+      },
+      {
+        "pwm": 50,
+        "max_left": 1.0,
+        "max_right": 1.0,
+        "bias": 0.0
+      },
+      {
+        "pwm": 65,
+        "max_left": 1.0,
+        "max_right": 1.0,
+        "bias": 0.0
+      },
+      {
+        "pwm": 80,
+        "max_left": 1.0,
+        "max_right": 1.0,
+        "bias": 0.0
+      }
+    ]
+  }
+}
