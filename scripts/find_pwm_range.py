@@ -30,7 +30,7 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT_DIR / "src"))
 
-from robot_soccer.perception.aruco_detector import ArucoDetector
+from robot_soccer.perception.player_tracking import deteccion_jugadores_aruco_tag
 from robot_soccer.communication.rf_controller import RFController
 from robot_soccer.utils.camera_utils import get_camera_index
 
@@ -109,8 +109,8 @@ def main():
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
     cap.set(cv2.CAP_PROP_FPS, 30)
 
-    # Inicializar detector ArUco
-    aruco_detector = ArucoDetector()
+    # IDs permitidos (solo detectar robot target)
+    allowed_ids = {robot_id}
 
     # Inicializar RF controller
     rf_controller = RFController(port=args.port, enable_calibration=False, min_command_interval=0.005)
@@ -137,22 +137,31 @@ def main():
                 log.warning("⚠️  No se pudo leer frame de cámara")
                 break
 
-            # Detectar robots
-            robot_positions = aruco_detector.detect_robots(frame)
-            frame_display = aruco_detector.draw_robots(frame, robot_positions)
+            # Detectar robots usando ArUco
+            frame_display, robots_data = deteccion_jugadores_aruco_tag(
+                frame,
+                use_camera=True,
+                allowed_ids=allowed_ids
+            )
 
             # Info del robot target
-            robot_detected = robot_id in robot_positions
+            robot_detected = False
+            robot_pos = None
+            for robot in robots_data:
+                if robot['id'] == robot_id:
+                    robot_detected = True
+                    robot_pos = robot
+                    break
+
             current_time = time.time()
 
             if robot_detected:
                 last_detection_time = current_time
                 detection_count += 1
-                robot_pos = robot_positions[robot_id]
                 robot_info = (
                     f"Robot {robot_id}: DETECTADO | "
                     f"Pos: ({robot_pos['x']:.0f}, {robot_pos['y']:.0f}) | "
-                    f"Ángulo: {robot_pos['angle']:.1f}°"
+                    f"Ángulo: {robot_pos['angulo']:.1f}°"
                 )
                 color = (0, 255, 0)  # Verde
             else:
