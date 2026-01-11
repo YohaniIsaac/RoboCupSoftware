@@ -20,7 +20,7 @@ from robot_soccer.utils.camera_utils import get_camera_index  # pylint: disable=
 
 # Importar desde el mismo directorio
 # pylint: disable=import-error,wrong-import-position,wrong-import-order
-from multiprocess_calibration.perception_process import perception_loop
+from multiprocess_calibration.perception_process_pwm_range import perception_loop_pwm_range
 from multiprocess_calibration.control_process_pwm_range import control_loop_pwm_range
 
 log = logging.getLogger(__name__)
@@ -50,17 +50,17 @@ def run_pwm_range_finder(robot_id, serial_port='/dev/ttyUSB0', camera_id=None):
 
         # Crear pipes de comunicación
         robot_positions_send, robot_positions_recv = multiprocessing.Pipe()
-        frame_send, frame_recv = multiprocessing.Pipe()
+        # frame_pipe eliminado - no se envían frames en modo ultra-rápido
 
         # Lista de procesos
         processes = []
 
-        # PROCESO 1: Percepción
-        log.info("\n🎥 Inicializando proceso de percepción...")
+        # PROCESO 1: Percepción Ultra-Rápida
+        log.info("\n🎥 Inicializando proceso de percepción ultra-rápida...")
         p1 = multiprocessing.Process(
-            target=perception_loop,
-            args=(robot_positions_send, frame_send, camera_id),
-            name="Perception"
+            target=perception_loop_pwm_range,
+            args=(robot_positions_send, robot_id, camera_id),  # Pasar robot_id, sin frame_pipe
+            name="PerceptionFast"
         )
         processes.append(p1)
 
@@ -68,7 +68,7 @@ def run_pwm_range_finder(robot_id, serial_port='/dev/ttyUSB0', camera_id=None):
         log.info("🎮 Inicializando proceso de control...")
         p2 = multiprocessing.Process(
             target=control_loop_pwm_range,
-            args=(robot_positions_recv, frame_recv, robot_id, serial_port),
+            args=(robot_positions_recv, None, robot_id, serial_port),  # frame_recv=None
             name="ControlPWMRange"
         )
         processes.append(p2)
@@ -80,8 +80,10 @@ def run_pwm_range_finder(robot_id, serial_port='/dev/ttyUSB0', camera_id=None):
             log.info("   ✓ %s iniciado (PID: %d)", proc.name, proc.pid)
 
         log.info("\n" + "=" * 70)
-        log.info("Sistema en ejecución.")
+        log.info("Sistema en ejecución (modo ULTRA-RÁPIDO).")
         log.info("Usa ESPACIO/BACKSPACE para mover, ↑/↓ para ajustar PWM.")
+        log.info("Estadísticas de detección se mostrarán en tiempo real.")
+        log.info("FPS objetivo: 28-40 (mejora 2-3x vs estándar)")
         log.info("Presiona 'ESC' en la ventana para detener.")
         log.info("=" * 70)
         log.info("")

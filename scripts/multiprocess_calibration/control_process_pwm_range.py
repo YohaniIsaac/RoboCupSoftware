@@ -68,9 +68,21 @@ def control_loop_pwm_range(robot_positions_pipe, frame_pipe, robot_id, serial_po
     pwm_min_temp = pwm_min_saved
     pwm_max_temp = pwm_max_saved
 
-    # Estadísticas
-    detection_count = 0
-    last_detection_time = 0
+    # Estadísticas de SESIÓN (reseteadas al presionar ESPACIO)
+    session_stats = {
+        'active': False,
+        'frames_analyzed': 0,
+        'frames_detected': 0,
+        'detection_rate': 0.0,
+        'start_time': 0
+    }
+
+    # Estadísticas GLOBALES (acumuladas desde inicio)
+    global_stats = {
+        'total_detections': 0,
+        'last_detection_time': 0,
+        'avg_fps': 0.0
+    }
 
     def send_motor_command(left_speed, right_speed):
         """Envía comando de motor."""
@@ -94,35 +106,93 @@ def control_loop_pwm_range(robot_positions_pipe, frame_pipe, robot_id, serial_po
                     # Detener
                     send_motor_command(0, 0)
                     movement_active = False
-                    print(f"⏹️  Movimiento completado ({time_elapsed:.2f}s)")
+
+                    # Mostrar resumen de sesión
+                    if session_stats['active']:
+                        print(f"⏹️  Movimiento completado ({time_elapsed:.2f}s)")
+                        print("📊 RESUMEN DE SESIÓN:")
+                        print(f"   Frames analizados: {session_stats['frames_analyzed']}")
+                        print(f"   Frames detectados: {session_stats['frames_detected']}")
+                        print(f"   Tasa detección: {session_stats['detection_rate']*100:.1f}%")
+                        print(f"   FPS promedio: {global_stats['avg_fps']:.1f}")
+
+                        # Marcar sesión como inactiva
+                        session_stats['active'] = False
+                    else:
+                        print(f"⏹️  Movimiento completado ({time_elapsed:.2f}s)")
 
             # ===== RECIBIR DATOS DE PERCEPCIÓN =====
-            robot_positions = {}
-            frame_display = None
+            perception_data = None
+            robot_detected = False
+            robot_data = None
+            perception_stats = None
 
-            # Recibir posiciones (non-blocking)
+            # Recibir datos de percepción (non-blocking)
             if robot_positions_pipe.poll():
-                robot_positions = robot_positions_pipe.recv()
+                perception_data = robot_positions_pipe.recv()
+                robot_detected = perception_data.get('robot_detected', False)
+                robot_data = perception_data.get('robot_data', None)
+                perception_stats = perception_data.get('stats', {})
 
-            # Recibir frame (non-blocking)
-            if frame_pipe.poll():
-                frame_display = frame_pipe.recv()
+                # Actualizar estadísticas globales
+                global_stats['avg_fps'] = perception_stats.get('fps', 0.0)
+                if robot_detected:
+                    global_stats['total_detections'] += 1
+                    global_stats['last_detection_time'] = current_time
 
-            # Si no hay frame, esperar al siguiente ciclo
-            if frame_display is None:
-                time.sleep(0.001)
-                continue
+                # Actualizar estadísticas de sesión (si hay movimiento activo)
+                if session_stats['active']:
+                    session_stats['frames_analyzed'] = perception_stats.get('frames_analyzed', 0)
+                    session_stats['frames_detected'] = perception_stats.get('frames_detected', 0)
+                    session_stats['detection_rate'] = perception_stats.get('detection_rate', 0.0)
 
-            # Verificar detección del robot
-            robot_detected = robot_id in robot_positions
-            if robot_detected:
-                last_detection_time = current_time
-                detection_count += 1
-                robot_pos = robot_positions[robot_id]
+            # ===== CREAR FRAME DE VISUALIZACIÓN =====
+            # Crear frame simple si no hay frame_pipe (modo ultra-rápido)
+            if frame_pipe is None:
+                frame_height = 480
+                frame_width = 640
+                frame_display = np.zeros((frame_height, frame_width, 3), dtype=np.uint8)
+
+                # Dibujar robot si detectado (solo un rectángulo simple)
+                if robot_detected and robot_data:
+                    x = robot_data['x']
+                    y = robot_data['y']
+                    angle_rad = np.radians(robot_data['angle'])
+
+                    # Rectángulo simple del robot
+                    size = 40
+                    color_robot = (0, 255, 0) if movement_active else (100, 255, 100)
+                    cv2.rectangle(frame_display, (x-size//2, y-size//2),
+                                (x+size//2, y+size//2), color_robot, 2)
+
+                    # Línea de orientación
+                    end_x = int(x + 50 * np.cos(angle_rad))
+                    end_y = int(y + 50 * np.sin(angle_rad))
+                    cv2.line(frame_display, (x, y), (end_x, end_y), color_robot, 2)
+
+                    # ID del robot
+                    cv2.putText(frame_display, f"Robot {robot_id}", (x+15, y-15),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, color_robot, 1)
+                else:
+                    # No detectado - mostrar mensaje
+                    cv2.putText(frame_display, "Robot no detectado",
+                               (frame_width//2 - 100, frame_height//2),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+            else:
+                # Modo estándar: recibir frame del proceso de percepción
+                if frame_pipe.poll():
+                    frame_display = frame_pipe.recv()
+                else:
+                    # Si no hay frame, esperar
+                    time.sleep(0.001)
+                    continue
+
+            # ===== INFO DEL ROBOT =====
+            if robot_detected and robot_data:
                 robot_info = (
                     f"Robot {robot_id}: DETECTADO | "
-                    f"Pos: ({robot_pos['x']:.0f}, {robot_pos['y']:.0f}) | "
-                    f"Ángulo: {robot_pos['angulo']:.1f}°"
+                    f"Pos: ({robot_data['x']:.0f}, {robot_data['y']:.0f}) | "
+                    f"Ángulo: {robot_data['angle']:.1f}°"
                 )
                 color = (0, 255, 0)  # Verde
             else:
@@ -130,7 +200,7 @@ def control_loop_pwm_range(robot_positions_pipe, frame_pipe, robot_id, serial_po
                 color = (0, 0, 255)  # Rojo
 
             # ===== PANEL DE INFORMACIÓN =====
-            panel_height = 220
+            panel_height = 280  # Aumentado de 220 para nuevas estadísticas
             panel = np.zeros((panel_height, frame_display.shape[1], 3), dtype=np.uint8)
 
             # Información del robot
@@ -162,10 +232,30 @@ def control_loop_pwm_range(robot_positions_pipe, frame_pipe, robot_id, serial_po
             cv2.putText(panel, range_text, (10, 160),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (100, 255, 100), 2)
 
-            # Estadísticas y controles
-            time_since_detection = current_time - last_detection_time if last_detection_time > 0 else 999
-            stats = f"Detecciones: {detection_count} | Ultima: {time_since_detection:.1f}s | g=Guardar rango"
-            cv2.putText(panel, stats, (10, 190),
+            # FPS de percepción (NUEVO)
+            fps_text = f"FPS Percepcion: {global_stats['avg_fps']:.1f} (objetivo: 28-40)"
+            fps_color = (0, 255, 0) if global_stats['avg_fps'] >= 28 else (0, 165, 255)
+            cv2.putText(panel, fps_text, (10, 190),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, fps_color, 2)
+
+            # Estadísticas de sesión (NUEVO)
+            if session_stats['active'] and session_stats['frames_analyzed'] > 0:
+                session_text = (
+                    f"SESION ACTUAL: {session_stats['frames_detected']}/{session_stats['frames_analyzed']} frames "
+                    f"({session_stats['detection_rate']*100:.1f}% deteccion)"
+                )
+                cv2.putText(panel, session_text, (10, 220),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+            else:
+                cv2.putText(panel, "Presiona ESPACIO para iniciar sesion", (10, 220),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.6, (150, 150, 150), 1)
+
+            # Estadísticas globales y controles
+            time_since_detection = (current_time - global_stats['last_detection_time']
+                                  if global_stats['last_detection_time'] > 0 else 999)
+            stats = (f"Total: {global_stats['total_detections']} det. | "
+                    f"Ultima: {time_since_detection:.1f}s | g=Guardar")
+            cv2.putText(panel, stats, (10, 250),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (150, 150, 150), 1)
 
             # Combinar panel y frame
@@ -188,6 +278,14 @@ def control_loop_pwm_range(robot_positions_pipe, frame_pipe, robot_id, serial_po
                 send_motor_command(current_left_speed, current_right_speed)
                 print(f"▶️  Movimiento ADELANTE | PWM: {current_pwm} | Duración: {movement_duration}s")
 
+                # Resetear estadísticas de sesión
+                session_stats['active'] = True
+                session_stats['frames_analyzed'] = 0
+                session_stats['frames_detected'] = 0
+                session_stats['detection_rate'] = 0.0
+                session_stats['start_time'] = time.time()
+                print("📊 Estadísticas de sesión reseteadas")
+
             elif key == 8:  # BACKSPACE - atrás
                 movement_active = True
                 movement_direction = -1
@@ -197,11 +295,27 @@ def control_loop_pwm_range(robot_positions_pipe, frame_pipe, robot_id, serial_po
                 send_motor_command(current_left_speed, current_right_speed)
                 print(f"◀️  Movimiento ATRAS | PWM: {current_pwm} | Duración: {movement_duration}s")
 
+                # Resetear estadísticas de sesión
+                session_stats['active'] = True
+                session_stats['frames_analyzed'] = 0
+                session_stats['frames_detected'] = 0
+                session_stats['detection_rate'] = 0.0
+                session_stats['start_time'] = time.time()
+                print("📊 Estadísticas de sesión reseteadas")
+
             elif key == ord('x'):  # X - Detener
                 if movement_active:
                     send_motor_command(0, 0)
                     movement_active = False
                     print("🛑 Movimiento detenido manualmente")
+
+                    # Finalizar sesión si estaba activa
+                    if session_stats['active']:
+                        print("📊 RESUMEN DE SESIÓN (interrumpida):")
+                        print(f"   Frames analizados: {session_stats['frames_analyzed']}")
+                        print(f"   Frames detectados: {session_stats['frames_detected']}")
+                        print(f"   Tasa detección: {session_stats['detection_rate']*100:.1f}%")
+                        session_stats['active'] = False
 
             elif key == 82:  # ↑
                 current_pwm = min(127, current_pwm + 5)
