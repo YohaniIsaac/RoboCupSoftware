@@ -1,24 +1,23 @@
 #!/usr/bin/env python3
 """Script de calibración multi-punto BIDIRECCIONAL de motores por robot.
 
-Este script permite calibrar motores con CALIBRACIÓN BIDIRECCIONAL:
-cada dirección (adelante/atrás) tiene su propia curva de calibración para
-compensar la respuesta asimétrica de motores DC montados en orientación opuesta.
+Este script permite calibrar motores con CALIBRACIÓN BIDIRECCIONAL PERSONALIZADA:
+- Cada dirección (adelante/atrás) tiene su propia curva de calibración
+- Cada robot tiene sus PUNTOS PERSONALIZADOS basados en su rango PWM útil
+- Compensa la respuesta asimétrica de motores DC montados en orientación opuesta
 
-CALIBRACIÓN EN 10 PUNTOS (5 adelante + 5 atrás):
-ATRÁS (reversa):
-  -80 PWM:  Velocidad máxima atrás
-  -65 PWM:  Velocidad media-alta atrás
-  -50 PWM:  Velocidad media-baja atrás
-  -35 PWM:  Velocidad baja atrás
-  -20 PWM:  Velocidad mínima atrás
+PUNTOS PERSONALIZADOS POR ROBOT:
+Los puntos de calibración se generan automáticamente basados en el rango PWM
+determinado con 'calibrate_robot_pwm_range.py'. Por ejemplo:
 
-ADELANTE:
-  +20 PWM:  Velocidad mínima adelante
-  +35 PWM:  Velocidad baja adelante
-  +50 PWM:  Velocidad media-baja adelante
-  +65 PWM:  Velocidad media-alta adelante
-  +80 PWM:  Velocidad máxima adelante
+Robot 0: Rango [15, 60] → Puntos: -60, -48, -37, -26, -15, 15, 26, 37, 48, 60
+Robot 1: Rango [20, 75] → Puntos: -75, -60, -45, -32, -20, 20, 32, 45, 60, 75
+
+Cada robot tiene 10 puntos (5 adelante + 5 atrás) distribuidos uniformemente
+en SU RANGO ÚTIL, garantizando:
+✓ Todos los puntos son útiles (no hay desperdicio)
+✓ Cobertura completa del rango operativo
+✓ Mejor distribución de puntos de calibración
 
 CALIBRACIÓN POR RUEDA:
 - Cada rueda usa su calibración según su dirección de giro
@@ -78,47 +77,56 @@ Controles:
     ESC: Salir sin guardar
 
 Workflow recomendado:
-    0. CALIBRAR DEAD-ZONE PRIMERO (opcional pero recomendado):
+    PASO PREVIO - DETERMINAR RANGO PWM (OBLIGATORIO):
+    0a. Ejecuta: python scripts/calibrate_robot_pwm_range.py --robot-id X
+    0b. Encuentra PWM_min: Más bajo donde el robot se mueve bien
+    0c. Encuentra PWM_max: Más alto donde la cámara detecta al robot
+    0d. Ajusta rango con n/m (min) y ,/. (max), presiona 'g' para guardar
+    0e. Los 10 puntos de calibración se generan automáticamente
+
+    PASO 1 - CALIBRAR DEAD-ZONE (opcional pero recomendado):
        - Presiona 't' para entrar en modo de prueba de dead-zone
        - Motor izquierdo: Usa 7/8 hasta encontrar PWM mínimo de movimiento
        - Motor derecho: Usa 9/0 hasta encontrar PWM mínimo de movimiento
        - Anota estos valores y ajústalos con z/x (izq) y c/v (der)
        - Presiona 't' para volver a modo multi-punto
 
-    CALIBRACIÓN ADELANTE (Puntos 6-10):
-    1. Punto 6 (+20 PWM) - Velocidad mínima adelante
+    PASO 2 - CALIBRACIÓN ADELANTE (últimos 5 puntos):
+    1. Primer punto adelante (ej: +15 PWM) - Velocidad mínima adelante
        - Presiona ↑ para mover adelante
        - Ajusta bias (e/d) hasta que vaya recto
        - Ajusta max_left/max_right (q/a/w/s) si un motor va más rápido
 
-    2. Punto 7 (+35 PWM), 8 (+50 PWM), 9 (+65 PWM), 10 (+80 PWM)
+    2. Siguientes puntos adelante (usa PgDn para avanzar)
        - Calibra cada punto moviéndote hacia adelante
        - Ajusta bias si se desvía
        - Verifica que vaya recto en TODOS los puntos
 
-    CALIBRACIÓN ATRÁS (Puntos 1-5):
-    3. Punto 5 (-20 PWM) - Velocidad mínima atrás
+    PASO 3 - CALIBRACIÓN ATRÁS (primeros 5 puntos):
+    3. Último punto atrás (ej: -15 PWM) - Velocidad mínima atrás
        - Presiona ↓ para mover atrás
        - Ajusta bias (e/d) hasta que vaya recto
        - La calibración es INDEPENDIENTE de adelante
 
-    4. Punto 4 (-35 PWM), 3 (-50 PWM), 2 (-65 PWM), 1 (-80 PWM)
+    4. Siguientes puntos atrás (usa PgUp para retroceder)
        - Calibra cada punto moviéndote hacia atrás
        - Ajusta bias si se desvía
        - Verifica que vaya recto en TODOS los puntos
 
-    5. PROBAR GIROS:
+    PASO 4 - PROBAR GIROS:
        - En cada punto, presiona ← o → para girar
        - El giro debe ser simétrico (cada rueda usa su calibración)
        - Rueda que va adelante usa calibración ADELANTE
        - Rueda que va atrás usa calibración ATRÁS
 
-    6. Presionar ENTER para guardar los 10 puntos + dead-zone
+    PASO 5 - GUARDAR:
+    5. Presionar ENTER para guardar los 10 puntos + dead-zone
 
 Objetivo:
-    - Robot va recto ADELANTE a cualquier velocidad (20-80 PWM)
-    - Robot va recto ATRÁS a cualquier velocidad (20-80 PWM)
+    - Robot va recto ADELANTE a cualquier velocidad en su rango personalizado
+    - Robot va recto ATRÁS a cualquier velocidad en su rango personalizado
     - Giros son simétricos gracias a calibración bidireccional por rueda
+    - Todos los robots tienen comportamiento normalizado dentro de sus rangos
 """
 import sys
 import logging

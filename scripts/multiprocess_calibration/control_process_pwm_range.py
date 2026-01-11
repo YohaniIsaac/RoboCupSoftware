@@ -18,6 +18,7 @@ sys.path.insert(0, str(ROOT_DIR / "src"))
 
 # pylint: disable=wrong-import-position
 from robot_soccer.communication.rf_controller import RFController
+from robot_soccer.controllers.robot_calibration_multipoint import RobotCalibrationMultipoint
 
 log = logging.getLogger(__name__)
 
@@ -32,6 +33,11 @@ def control_loop_pwm_range(robot_positions_pipe, frame_pipe, robot_id, serial_po
         serial_port: Puerto serial para comunicación RF
     """
     log.info(f"🎮 Proceso de búsqueda PWM iniciado para Robot ID {robot_id}")
+
+    # Inicializar calibration manager
+    calibration = RobotCalibrationMultipoint()
+    pwm_min_saved, pwm_max_saved = calibration.get_pwm_range(robot_id)
+    log.info(f"📊 Rango PWM actual en JSON: [{pwm_min_saved}, {pwm_max_saved}]")
 
     # Inicializar RF controller
     rf_controller = None
@@ -57,6 +63,10 @@ def control_loop_pwm_range(robot_positions_pipe, frame_pipe, robot_id, serial_po
     movement_start_time = 0
     current_left_speed = 0
     current_right_speed = 0
+
+    # Rango PWM temporal (para determinar antes de guardar)
+    pwm_min_temp = pwm_min_saved
+    pwm_max_temp = pwm_max_saved
 
     # Estadísticas
     detection_count = 0
@@ -120,7 +130,7 @@ def control_loop_pwm_range(robot_positions_pipe, frame_pipe, robot_id, serial_po
                 color = (0, 0, 255)  # Rojo
 
             # ===== PANEL DE INFORMACIÓN =====
-            panel_height = 180
+            panel_height = 220
             panel = np.zeros((panel_height, frame_display.shape[1], 3), dtype=np.uint8)
 
             # Información del robot
@@ -142,15 +152,20 @@ def control_loop_pwm_range(robot_positions_pipe, frame_pipe, robot_id, serial_po
                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, status_color, 2)
 
             # Parámetros actuales
-            cv2.putText(panel, f"PWM: {current_pwm}  (↑/↓: ±5, w/s: ±1)", (10, 100),
+            cv2.putText(panel, f"PWM actual: {current_pwm}  (↑/↓: ±5, w/s: ±1)", (10, 100),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
             cv2.putText(panel, f"Duracion: {movement_duration:.1f}s  (+/-: ±0.5s, [/]: ±0.1s)", (10, 130),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
-            # Estadísticas
+            # Rango PWM (temporal - no guardado aún)
+            range_text = f"Rango: [{pwm_min_temp}, {pwm_max_temp}]  (n/m: PWM_min, ,/.: PWM_max)"
+            cv2.putText(panel, range_text, (10, 160),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (100, 255, 100), 2)
+
+            # Estadísticas y controles
             time_since_detection = current_time - last_detection_time if last_detection_time > 0 else 999
-            stats = f"Detecciones: {detection_count} | Ultima: {time_since_detection:.1f}s"
-            cv2.putText(panel, stats, (10, 160),
+            stats = f"Detecciones: {detection_count} | Ultima: {time_since_detection:.1f}s | g=Guardar rango"
+            cv2.putText(panel, stats, (10, 190),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (150, 150, 150), 1)
 
             # Combinar panel y frame
@@ -220,6 +235,40 @@ def control_loop_pwm_range(robot_positions_pipe, frame_pipe, robot_id, serial_po
                 movement_duration = max(0.1, movement_duration - 0.1)
                 print(f"⏱️  Duración: {movement_duration:.1f}s")
 
+            # Ajustar rango PWM temporal
+            elif key == ord('n'):  # PWM_min -1
+                pwm_min_temp = max(5, pwm_min_temp - 1)
+                print(f"📉 PWM_min: {pwm_min_temp}")
+
+            elif key == ord('m'):  # PWM_min +1
+                pwm_min_temp = min(pwm_max_temp - 1, pwm_min_temp + 1)
+                print(f"📈 PWM_min: {pwm_min_temp}")
+
+            elif key == ord(','):  # PWM_max -1
+                pwm_max_temp = max(pwm_min_temp + 1, pwm_max_temp - 1)
+                print(f"📉 PWM_max: {pwm_max_temp}")
+
+            elif key == ord('.'):  # PWM_max +1
+                pwm_max_temp = min(127, pwm_max_temp + 1)
+                print(f"📈 PWM_max: {pwm_max_temp}")
+
+            elif key == ord('r'):  # Usar current_pwm como referencia
+                print(f"\n💡 Sugerencias basadas en PWM actual ({current_pwm}):")
+                print(f"   PWM_min sugerido: {max(5, current_pwm - 50)}")
+                print(f"   PWM_max sugerido: {min(127, current_pwm + 50)}")
+                print("   Usa n/m para ajustar PWM_min, ,/. para PWM_max\n")
+
+            elif key == ord('g'):  # Guardar rango
+                if pwm_min_temp >= pwm_max_temp:
+                    print(f"❌ Error: PWM_min ({pwm_min_temp}) debe ser menor que PWM_max ({pwm_max_temp})")
+                else:
+                    print(f"\n💾 Guardando rango PWM: [{pwm_min_temp}, {pwm_max_temp}]")
+                    calibration.set_pwm_range(robot_id, pwm_min_temp, pwm_max_temp)
+                    calibration.save()
+                    print(f"✅ Rango guardado para Robot {robot_id}")
+                    print(f"⚠️  Los puntos de calibración fueron regenerados con valores neutros")
+                    print(f"   Ejecuta 'calibrate_robot_motors_multipoint.py --robot-id {robot_id}' para calibrar\n")
+
             time.sleep(0.001)
 
     except KeyboardInterrupt:
@@ -239,7 +288,19 @@ def control_loop_pwm_range(robot_positions_pipe, frame_pipe, robot_id, serial_po
         print("=" * 70)
         print(f"Último PWM probado: {current_pwm}")
         print(f"Total de detecciones: {detection_count}")
-        print("\n💡 Recomendación:")
-        print("   Prueba aumentando PWM hasta que la cámara deje de detectar")
-        print("   al robot de forma consistente. Ese será tu PWM_max útil.")
+        print(f"Rango temporal: [{pwm_min_temp}, {pwm_max_temp}]")
+
+        # Verificar si el rango fue guardado
+        current_saved_min, current_saved_max = calibration.get_pwm_range(robot_id)
+        if (current_saved_min, current_saved_max) == (pwm_min_temp, pwm_max_temp):
+            print(f"✅ Rango GUARDADO en JSON")
+        else:
+            print(f"⚠️  Rango NO guardado (presiona 'g' para guardar)")
+
+        print("\n💡 Proceso sugerido:")
+        print("   1. Encuentra PWM_min: PWM más bajo donde el robot se mueve consistentemente")
+        print("   2. Encuentra PWM_max: PWM más alto donde la cámara detecta al robot")
+        print("   3. Ajusta rango con n/m (min) y ,/. (max)")
+        print("   4. Presiona 'g' para guardar")
+        print("   5. Calibra con: calibrate_robot_motors_multipoint.py --robot-id " + str(robot_id))
         print("=" * 70 + "\n")

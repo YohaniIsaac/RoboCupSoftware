@@ -69,7 +69,11 @@ def control_loop_motors_multipoint(robot_positions_pipe, frame_pipe, robot_id, s
 
     # Estado de calibración
     current_point_index = 0  # Índice del punto actual (0-9 para 10 puntos bidireccionales)
-    calibration_points = DEFAULT_CALIBRATION_POINTS.copy()
+    # Obtener puntos personalizados del robot (basados en su rango PWM)
+    calibration_points = calibration.get_calibration_points_pwm(robot_id)
+    pwm_min, pwm_max = calibration.get_pwm_range(robot_id)
+    log.info(f"Robot {robot_id}: Usando puntos personalizados en rango [{pwm_min}, {pwm_max}]")
+    log.info(f"Puntos: {calibration_points}")
 
     # Cargar valores existentes o inicializar neutros
     deadzone_left, deadzone_right = calibration.get_deadzone(robot_id)

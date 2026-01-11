@@ -10,10 +10,57 @@ from typing import Dict, Tuple, List, Optional
 
 logger = logging.getLogger(__name__)
 
-# Puntos de calibración predefinidos (PWM)
+# Puntos de calibración predefinidos (PWM) - SOLO PARA FALLBACK
 # Calibración bidireccional: adelante y atrás por separado
 # Cada rueda usa su calibración según su dirección de giro
+# NOTA: Estos puntos son solo para retrocompatibilidad.
+#       Cada robot debería tener su rango personalizado (pwm_min, pwm_max)
 DEFAULT_CALIBRATION_POINTS = [-80, -65, -50, -35, -20, 20, 35, 50, 65, 80]
+
+# Rango PWM por defecto (si no se ha determinado con find_pwm_range)
+DEFAULT_PWM_MIN = 20
+DEFAULT_PWM_MAX = 80
+
+
+def generate_calibration_points(pwm_min: int, pwm_max: int, num_points: int = 5) -> List[int]:
+    """Genera puntos de calibración uniformemente distribuidos en el rango útil.
+
+    Genera num_points para adelante y num_points para atrás (total 2*num_points).
+
+    Args:
+        pwm_min: PWM mínimo útil (positivo, ej: 15)
+        pwm_max: PWM máximo útil (positivo, ej: 65)
+        num_points: Número de puntos por dirección (default: 5)
+
+    Returns:
+        Lista de puntos PWM ordenados: [negativo_max, ..., negativo_min, positivo_min, ..., positivo_max]
+
+    Example:
+        >>> generate_calibration_points(15, 60, 5)
+        [-60, -48, -37, -26, -15, 15, 26, 37, 48, 60]
+    """
+    if pwm_min >= pwm_max:
+        raise ValueError(f"pwm_min ({pwm_min}) debe ser menor que pwm_max ({pwm_max})")
+
+    if num_points < 2:
+        raise ValueError(f"num_points debe ser al menos 2, recibido: {num_points}")
+
+    # Generar puntos positivos (adelante) uniformemente espaciados
+    positive_points = []
+    step = (pwm_max - pwm_min) / (num_points - 1)
+    for i in range(num_points):
+        point = int(round(pwm_min + i * step))
+        positive_points.append(point)
+
+    # Generar puntos negativos (atrás) - mismos valores pero negativos, en orden inverso
+    negative_points = [-p for p in reversed(positive_points)]
+
+    # Combinar: negativos primero (más negativo a menos negativo), luego positivos
+    all_points = negative_points + positive_points
+
+    logger.debug("Puntos generados para rango [%d, %d]: %s", pwm_min, pwm_max, all_points)
+
+    return all_points
 
 
 class CalibrationPoint:
@@ -105,12 +152,19 @@ class RobotCalibrationMultipoint:
                         bias=cal_data.get('bias_correction', 0.0)
                     )]
 
+                # Obtener rango PWM personalizado del robot (si existe)
+                pwm_min = cal_data.get('pwm_min', DEFAULT_PWM_MIN)
+                pwm_max = cal_data.get('pwm_max', DEFAULT_PWM_MAX)
+
+                # Generar puntos esperados basados en el rango del robot
+                expected_points = generate_calibration_points(pwm_min, pwm_max, num_points=5)
+
                 # MIGRACIÓN AUTOMÁTICA: Si los puntos del JSON no coinciden con los esperados,
                 # crear estructura completa con valores neutros donde falten
                 points_dict = {p.pwm: p for p in points}  # Diccionario por PWM
                 migrated_points = []
 
-                for expected_pwm in DEFAULT_CALIBRATION_POINTS:
+                for expected_pwm in expected_points:
                     if expected_pwm in points_dict:
                         # Punto existe en JSON, usar valores guardados
                         migrated_points.append(points_dict[expected_pwm])
@@ -128,8 +182,13 @@ class RobotCalibrationMultipoint:
                 self.calibrations[robot_id] = {
                     'deadzone_left': cal_data.get('deadzone_left', 0),
                     'deadzone_right': cal_data.get('deadzone_right', 0),
+                    'pwm_min': pwm_min,
+                    'pwm_max': pwm_max,
                     'points': migrated_points  # Ya están en orden correcto
                 }
+
+                logger.info("Robot %s: Rango PWM [%d, %d], %d puntos de calibración",
+                           robot_id, pwm_min, pwm_max, len(migrated_points))
 
             logger.info("Calibraciones multi-punto cargadas para %d robots",
                        len(self.calibrations))
@@ -142,27 +201,38 @@ class RobotCalibrationMultipoint:
     def _create_default_file(self):
         """Crea archivo de calibración con valores por defecto."""
         default_data = {
-            "_comment": "Calibración bidireccional de motores - 10 puntos por robot (5 adelante + 5 atrás)",
-            "_instructions": "Calibrar en ±20, ±35, ±50, ±65, ±80 PWM. Dead-zone en PWM mínimo por motor.",
+            "_comment": "Calibración bidireccional de motores - Puntos personalizados por robot",
+            "_instructions": (
+                "1. Usa 'find_pwm_range.py' para determinar pwm_min/pwm_max de cada robot. "
+                "2. Los puntos se generan automáticamente en ese rango. "
+                "3. Calibra cada punto para movimiento recto."
+            ),
             "_bidirectional": "Cada rueda usa su calibración según dirección de giro (adelante/atrás)",
             "_format": {
+                "pwm_min": "PWM mínimo útil (cámara detecta al robot)",
+                "pwm_max": "PWM máximo útil (cámara detecta al robot)",
                 "deadzone_left": "PWM mínimo para mover motor izquierdo (0-40)",
                 "deadzone_right": "PWM mínimo para mover motor derecho (0-40)",
                 "calibration_points": [
-                    {"pwm": "Velocidad PWM (puede ser negativa)", "max_left": "Factor motor izq (0.5-2.0)",
+                    {"pwm": "Velocidad PWM (negativa=atrás)", "max_left": "Factor motor izq (0.5-2.0)",
                      "max_right": "Factor motor der (0.5-2.0)", "bias": "Corrección deriva (-0.5 a 0.5)"}
                 ]
             }
         }
 
-        # Crear valores neutros para 4 robots
+        # Crear valores neutros para 4 robots con puntos generados dinámicamente
         for i in range(4):
+            # Usar rango por defecto
+            points = generate_calibration_points(DEFAULT_PWM_MIN, DEFAULT_PWM_MAX, num_points=5)
+
             default_data[str(i)] = {
+                "pwm_min": DEFAULT_PWM_MIN,
+                "pwm_max": DEFAULT_PWM_MAX,
                 "deadzone_left": 0,
                 "deadzone_right": 0,
                 "calibration_points": [
                     {"pwm": pwm, "max_left": 1.0, "max_right": 1.0, "bias": 0.0}
-                    for pwm in DEFAULT_CALIBRATION_POINTS
+                    for pwm in points
                 ]
             }
 
@@ -183,6 +253,8 @@ class RobotCalibrationMultipoint:
             # Actualizar calibraciones
             for robot_id, cal in self.calibrations.items():
                 existing_data[robot_id] = {
+                    'pwm_min': cal.get('pwm_min', DEFAULT_PWM_MIN),
+                    'pwm_max': cal.get('pwm_max', DEFAULT_PWM_MAX),
                     'deadzone_left': cal['deadzone_left'],
                     'deadzone_right': cal['deadzone_right'],
                     'calibration_points': [p.to_dict() for p in cal['points']]
@@ -415,9 +487,86 @@ class RobotCalibrationMultipoint:
         """Resetea la calibración de un robot a valores neutros."""
         self._init_robot_calibration(robot_id)
 
-    def get_calibration_points_pwm(self) -> List[int]:
-        """Obtiene la lista de valores PWM de los puntos de calibración."""
-        return DEFAULT_CALIBRATION_POINTS.copy()
+    def get_pwm_range(self, robot_id: int) -> Tuple[int, int]:
+        """Obtiene el rango PWM útil de un robot.
+
+        Args:
+            robot_id: ID del robot (0-3)
+
+        Returns:
+            Tupla (pwm_min, pwm_max)
+        """
+        robot_key = str(robot_id)
+        if robot_key not in self.calibrations:
+            logger.warning("Robot %d no tiene calibración, usando rango por defecto", robot_id)
+            return (DEFAULT_PWM_MIN, DEFAULT_PWM_MAX)
+
+        return (
+            self.calibrations[robot_key].get('pwm_min', DEFAULT_PWM_MIN),
+            self.calibrations[robot_key].get('pwm_max', DEFAULT_PWM_MAX)
+        )
+
+    def set_pwm_range(self, robot_id: int, pwm_min: int, pwm_max: int):
+        """Establece el rango PWM útil de un robot y regenera puntos de calibración.
+
+        IMPORTANTE: Esto regenera todos los puntos con valores neutros.
+        Debes recalibrar el robot después de cambiar el rango.
+
+        Args:
+            robot_id: ID del robot (0-3)
+            pwm_min: PWM mínimo útil (positivo)
+            pwm_max: PWM máximo útil (positivo)
+        """
+        robot_key = str(robot_id)
+
+        # Validar rango
+        if pwm_min >= pwm_max:
+            logger.error("pwm_min (%d) debe ser menor que pwm_max (%d)", pwm_min, pwm_max)
+            return
+
+        if pwm_min < 5 or pwm_max > 127:
+            logger.error("Rango PWM debe estar entre 5 y 127")
+            return
+
+        # Generar nuevos puntos
+        new_points_pwm = generate_calibration_points(pwm_min, pwm_max, num_points=5)
+        new_points = [
+            CalibrationPoint(pwm=pwm, max_left=1.0, max_right=1.0, bias=0.0)
+            for pwm in new_points_pwm
+        ]
+
+        # Inicializar calibración si no existe
+        if robot_key not in self.calibrations:
+            self._init_robot_calibration(robot_id)
+
+        # Actualizar rango y puntos
+        self.calibrations[robot_key]['pwm_min'] = pwm_min
+        self.calibrations[robot_key]['pwm_max'] = pwm_max
+        self.calibrations[robot_key]['points'] = new_points
+
+        logger.info("Robot %d: Rango PWM actualizado a [%d, %d], %d puntos regenerados",
+                   robot_id, pwm_min, pwm_max, len(new_points))
+        logger.warning("Robot %d: Puntos regenerados con valores neutros - RECALIBRAR", robot_id)
+
+    def get_calibration_points_pwm(self, robot_id: int = None) -> List[int]:
+        """Obtiene la lista de valores PWM de los puntos de calibración.
+
+        Args:
+            robot_id: ID del robot (0-3). Si es None, retorna puntos por defecto.
+
+        Returns:
+            Lista de valores PWM de los puntos de calibración
+        """
+        if robot_id is None:
+            return DEFAULT_CALIBRATION_POINTS.copy()
+
+        robot_key = str(robot_id)
+        if robot_key not in self.calibrations:
+            logger.warning("Robot %d no tiene calibración, usando puntos por defecto", robot_id)
+            return DEFAULT_CALIBRATION_POINTS.copy()
+
+        # Retornar puntos específicos del robot
+        return [p.pwm for p in self.calibrations[robot_key]['points']]
 
 
 # Instancia global singleton
