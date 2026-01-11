@@ -45,17 +45,43 @@ Salida en `markers_output/` (5.5cm x 5.5cm, hojas 2x2).
 
 ---
 
-### ⚙️ calibrate_robot_motors.py
-Calibra motores de cada robot para compensar diferencias físicas.
+### ⚙️ Calibración de Motores (2 Pasos)
+
+#### Paso 1: calibrate_robot_pwm_range.py
+Determina el rango PWM útil [min, max] de cada robot.
 
 ```bash
-python scripts/calibrate_robot_motors.py --robot-id 0
+python scripts/calibrate_robot_pwm_range.py --robot-id 0
 ```
 
+**Objetivo:** Encontrar PWM_min (mínimo para moverse) y PWM_max (máximo donde la cámara detecta).
+
 **Controles:**
-- **Q/A** → max_speed_left | **W/S** → max_speed_right | **E/D** → bias_correction
-- **Flechas** → Probar movimiento | **ENTER** → Guardar
-- Guarda en `src/robot_soccer/config/robot_calibration.json`
+- **ESPACIO/BACKSPACE** → Mover adelante/atrás
+- **↑/↓** o **W/S** → Ajustar PWM de prueba
+- **N/M** → Ajustar PWM_min | **,/.** → Ajustar PWM_max
+- **G** → Guardar rango en JSON
+
+#### Paso 2: calibrate_robot_motors_multipoint.py
+Calibración bidireccional de 10 puntos (5 adelante + 5 atrás).
+
+```bash
+python scripts/calibrate_robot_motors_multipoint.py --robot-id 0
+```
+
+**Características:**
+- Puntos personalizados basados en el rango PWM de cada robot
+- Calibración bidireccional (adelante/atrás independientes)
+- Dead-zone individual por motor
+
+**Controles:**
+- **PgUp/PgDn** → Navegar entre puntos
+- **Q/A**, **W/S** → Ajustar velocidad máxima izq/der (grueso)
+- **E/D** → Ajustar corrección de bias (grueso)
+- **1-6** → Ajustes finos
+- **Z/X**, **C/V** → Ajustar dead-zone
+- **Flechas** → Probar movimiento | **ENTER** → Guardar calibración completa
+- Guarda en `src/robot_soccer/config/robot_calibration_multipoint.json`
 
 ---
 
@@ -67,7 +93,9 @@ python scripts/calibrate_robot_motors.py --robot-id 0
 3. Calibrar pelota:
    - Ejecutar FASE 1 (Color HSV) → presionar **N**
    - Ajustar FASE 2 (Detección) → presionar **ENTER** para guardar
-4. Calibrar motores de cada robot (`--robot-id 0, 1, 2, 3`)
+4. Calibrar motores de cada robot (`--robot-id 0, 1, 2, 3`):
+   - **Paso 1:** `calibrate_robot_pwm_range.py` → Determinar rango PWM útil → presionar **G** para guardar
+   - **Paso 2:** `calibrate_robot_motors_multipoint.py` → Calibrar 10 puntos → presionar **ENTER** para guardar
 5. Probar con `python examples/test_perception.py`
 
 ---

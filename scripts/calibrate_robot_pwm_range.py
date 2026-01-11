@@ -1,21 +1,32 @@
 #!/usr/bin/env python3
-"""Script para encontrar el rango PWM útil de cada robot.
+"""Script de calibración - PASO 1: Determinar rango PWM útil de cada robot.
 
-Este script permite probar diferentes valores PWM y ver si la cámara
-puede detectar al robot a esa velocidad. Útil para determinar el
-rango operativo real antes de calibrar.
+Este es el primer paso del proceso de calibración de motores. Permite
+determinar el rango PWM donde el robot se mueve adecuadamente y la cámara
+puede detectarlo consistentemente.
 
 Uso:
-    python scripts/find_pwm_range.py --robot-id 0
+    python scripts/calibrate_robot_pwm_range.py --robot-id 0
 
 Controles:
+    MOVIMIENTO:
     ESPACIO     : Iniciar movimiento hacia adelante
     BACKSPACE   : Iniciar movimiento hacia atrás
     x           : Detener movimiento manualmente
-    ↑/↓         : Ajustar PWM ±5
-    w/s         : Ajustar PWM ±1 (fino)
-    +/-         : Ajustar duración ±0.5s
-    [/]         : Ajustar duración ±0.1s (fino)
+
+    AJUSTAR PWM DE PRUEBA:
+    ↑/↓         : PWM ±5
+    w/s         : PWM ±1 (fino)
+
+    AJUSTAR RANGO PWM (para guardar):
+    n/m         : PWM_min ±1
+    ,/.         : PWM_max ±1
+    r           : Sugerencias basadas en PWM actual
+    g           : Guardar rango en JSON
+
+    OTROS:
+    +/-         : Duración ±0.5s
+    [/]         : Duración ±0.1s (fino)
     ESC         : Salir
 """
 
@@ -39,13 +50,13 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 # Importar módulo multiprocessing
 # pylint: disable=import-error,wrong-import-position
-from multiprocess_calibration.find_pwm_range_mp import run_pwm_range_finder
+from multiprocess_calibration.calibrate_pwm_range_mp import run_pwm_range_finder
 
 
 def main():
     """Función principal."""
     parser = argparse.ArgumentParser(
-        description='Encuentra el rango PWM útil para calibración'
+        description='Calibración - Paso 1: Determinar rango PWM útil de cada robot'
     )
     parser.add_argument(
         '--robot-id',
@@ -70,11 +81,11 @@ def main():
     args = parser.parse_args()
 
     print("\n" + "=" * 70)
-    print("BÚSQUEDA DE RANGO PWM ÚTIL")
+    print("CALIBRACIÓN - PASO 1: DETERMINACIÓN DE RANGO PWM ÚTIL")
     print("=" * 70)
     print("\nObjetivo:")
-    print("  Determinar el PWM máximo donde la cámara puede detectar")
-    print("  al robot de forma consistente durante el movimiento.")
+    print("  Determinar el rango PWM [min, max] donde el robot se mueve")
+    print("  adecuadamente y la cámara puede detectarlo consistentemente.")
     print("\nProceso:")
     print("  1. Empieza con PWM bajo (20-30)")
     print("  2. Mueve el robot con ESPACIO (adelante) o BACKSPACE (atrás)")
