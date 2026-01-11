@@ -5,7 +5,6 @@ Contiene constantes y variables compartidas entre diferentes módulos.
 
 from pathlib import Path
 
-
 BALL_CAPTURE_DISTANCE = 25
 
 # ==========================================
@@ -251,3 +250,28 @@ MAX_ANGULAR_CORRECTION_PWM = 10  # Máximo ±10 PWM de diferencia L/R para corre
 # --- Thresholds de Precisión ---
 ROBOT_POSITION_THRESHOLD = 16  # Distancia para considerar waypoint alcanzado (píxeles)
 ROBOT_ANGLE_THRESHOLD_DEG = 7  # Error angular aceptable (grados)
+
+# =============================================================================
+# Parámetros de Control PID
+# =============================================================================
+
+# --- PID de Posición (Control Lineal) ---
+# Controla qué tan bien el robot sigue una trayectoria hacia un waypoint
+# - Kp (Proporcional): Respuesta inmediata al error de posición
+# - Ki (Integral): Corrige error acumulado (evita offset permanente)
+# - Kd (Derivativo): Reduce overshoot y oscilaciones
+PID_POSITION_KP = 0.008      # Ganancia proporcional de posición
+PID_POSITION_KI = 0.0001     # Ganancia integral de posición
+PID_POSITION_KD = 0.05       # Ganancia derivativa de posición
+
+# --- PID Angular (Control de Orientación) ---
+# Controla qué tan bien el robot mantiene/corrige su orientación
+# - kp_angle: CRÍTICO - Valor alto causa oscilaciones durante movimiento lineal
+# - ki_angle: Corrige desviaciones acumuladas (bias del robot)
+# - kd_angle: Damping para reducir oscilaciones (muy importante)
+#
+# NOTA: Para rotación pura se usa PID completo (P+I+D)
+#       Para corrección durante movimiento lineal, principalmente usa P
+PID_ANGLE_KP = 0.08          # Ganancia proporcional angular
+PID_ANGLE_KI = 0.001         # Ganancia integral angular (evitar windup)
+PID_ANGLE_KD = 0.12          # Ganancia derivativa angular (damping fuerte)
