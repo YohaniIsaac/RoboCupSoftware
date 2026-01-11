@@ -4,13 +4,18 @@ Este proceso maneja la UI y control RF para determinar el PWM máximo
 que la cámara puede detectar consistentemente.
 """
 
+import logging
 import sys
 import time
-import logging
+from io import BytesIO
 from pathlib import Path
 
 import cv2
+import matplotlib
+import matplotlib.pyplot as plt
 import numpy as np
+
+matplotlib.use('Agg')  # Backend sin GUI
 
 # Agregar src al path
 ROOT_DIR = Path(__file__).parent.parent.parent
@@ -74,7 +79,8 @@ def control_loop_pwm_range(robot_positions_pipe, frame_pipe, robot_id, serial_po
         'frames_analyzed': 0,
         'frames_detected': 0,
         'detection_rate': 0.0,
-        'start_time': 0
+        'start_time': 0,
+        'detection_timeline': []  # Lista de timestamps cuando se detectó
     }
 
     # Estadísticas GLOBALES (acumuladas desde inicio)
@@ -90,6 +96,111 @@ def control_loop_pwm_range(robot_positions_pipe, frame_pipe, robot_id, serial_po
             return
         firmware_id = robot_id + 1
         rf_controller.set_motors(firmware_id, left_speed, right_speed)
+
+    def show_detection_graph(detections, total_duration):
+        """Genera gráfico matplotlib y lo muestra con OpenCV.
+
+        Usa backend Agg (sin GUI) + BytesIO + cv2.imshow para evitar conflictos.
+
+        Args:
+            detections: Lista de timestamps (en segundos desde inicio)
+            total_duration: Duración total del movimiento (segundos)
+        """
+        # Crear figura con matplotlib
+        fig, ax = plt.subplots(figsize=(10, 5))
+
+        if total_duration <= 0 or not detections:
+            # Sin detecciones
+            ax.text(0.5, 0.5, 'Sin detecciones', ha='center', va='center',
+                   fontsize=14, color='red')
+            ax.set_xlim(0, 1)
+            ax.set_ylim(0, 1)
+            ax.axis('off')
+        else:
+            # Crear timeline continuo de detecciones
+            # Cada punto representa un frame detectado
+            detections_sorted = sorted(detections)
+
+            # Marcar cada detección como punto en y=1
+            ax.scatter(detections_sorted, [1]*len(detections_sorted),
+                      c='green', s=50, alpha=0.6, marker='|', linewidths=2)
+
+            # Calcular densidad de detección con ventana deslizante
+            window_size = 0.1  # 100ms de ventana
+            time_points = np.linspace(0, total_duration, 500)
+            density = []
+
+            for t in time_points:
+                # Contar detecciones en ventana [t-window/2, t+window/2]
+                count = sum(1 for d in detections_sorted
+                           if t - window_size/2 <= d <= t + window_size/2)
+                # Normalizar por tamaño de ventana para obtener tasa
+                rate = count / window_size if window_size > 0 else 0
+                density.append(rate)
+
+            # Crear segundo eje para la curva de densidad
+            ax2 = ax.twinx()
+            ax2.plot(time_points, density, color='blue', linewidth=2, alpha=0.7, label='Densidad')
+            ax2.fill_between(time_points, density, alpha=0.2, color='blue')
+            ax2.set_ylabel('Detecciones/segundo', fontsize=10, color='blue')
+            ax2.tick_params(axis='y', labelcolor='blue')
+
+            # Análisis temporal (tercios)
+            tercio = total_duration / 3
+            inicio = sum(1 for t in detections if t < tercio)
+            medio = sum(1 for t in detections if tercio <= t < 2*tercio)
+            final = sum(1 for t in detections if t >= 2*tercio)
+
+            # Líneas de división de tercios
+            ax.axvline(tercio, color='red', linestyle='--', alpha=0.4, linewidth=1.5)
+            ax.axvline(2*tercio, color='red', linestyle='--', alpha=0.4, linewidth=1.5)
+
+            # Etiquetas de tercios (en la parte superior)
+            ax.text(tercio/2, 0.95, f'INICIO: {inicio} det.',
+                   ha='center', va='top', fontsize=9,
+                   bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.7),
+                   transform=ax.get_xaxis_transform())
+            ax.text(tercio + tercio/2, 0.95, f'MEDIO: {medio} det.',
+                   ha='center', va='top', fontsize=9,
+                   bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.7),
+                   transform=ax.get_xaxis_transform())
+            ax.text(2*tercio + tercio/2, 0.95, f'FINAL: {final} det.',
+                   ha='center', va='top', fontsize=9,
+                   bbox=dict(boxstyle='round', facecolor='lightgreen', alpha=0.7),
+                   transform=ax.get_xaxis_transform())
+
+            # Configurar ejes
+            ax.set_xlabel('Tiempo (segundos)', fontsize=10)
+            ax.set_ylabel('Detección (puntos verdes)', fontsize=10, color='green')
+            det_rate = len(detections)/total_duration
+            title = (f'Timeline de Detecciones - {len(detections)} detecciones en '
+                    f'{total_duration:.2f}s ({det_rate:.1f} det/s promedio)')
+            ax.set_title(title, fontsize=11, fontweight='bold')
+            ax.set_xlim(0, total_duration)
+            ax.set_ylim(0, 1.2)
+            ax.set_yticks([])  # Ocultar ticks del eje Y principal
+            ax.grid(True, alpha=0.3, axis='x')
+            ax.tick_params(axis='y', labelcolor='green')
+
+        fig.tight_layout()
+
+        # Guardar a buffer BytesIO (en memoria)
+        buf = BytesIO()
+        fig.savefig(buf, format='png', dpi=100)
+        buf.seek(0)
+
+        # Convertir a numpy array y decodificar con OpenCV
+        img_arr = np.frombuffer(buf.getvalue(), dtype=np.uint8)
+        img = cv2.imdecode(img_arr, cv2.IMREAD_COLOR)
+
+        # Cerrar figura para liberar memoria
+        plt.close(fig)
+        buf.close()
+
+        # Mostrar con OpenCV (que ya funciona bien)
+        cv2.imshow('Timeline de Detecciones', img)
+        cv2.waitKey(0)
+        cv2.destroyWindow('Timeline de Detecciones')
 
     try:
         while True:
@@ -109,12 +220,25 @@ def control_loop_pwm_range(robot_positions_pipe, frame_pipe, robot_id, serial_po
 
                     # Mostrar resumen de sesión
                     if session_stats['active']:
-                        print(f"⏹️  Movimiento completado ({time_elapsed:.2f}s)")
-                        print("📊 RESUMEN DE SESIÓN:")
+                        print(f"\n⏹️  Movimiento completado ({time_elapsed:.2f}s)")
+                        print("=" * 70)
+                        print("📊 RESUMEN DE SESIÓN")
+                        print("=" * 70)
                         print(f"   Frames analizados: {session_stats['frames_analyzed']}")
                         print(f"   Frames detectados: {session_stats['frames_detected']}")
                         print(f"   Tasa detección: {session_stats['detection_rate']*100:.1f}%")
                         print(f"   FPS promedio: {global_stats['avg_fps']:.1f}")
+                        print("=" * 70 + "\n")
+
+                        # Generar y mostrar gráfico de timeline
+                        if len(session_stats['detection_timeline']) > 0:
+                            show_detection_graph(
+                                session_stats['detection_timeline'],
+                                time_elapsed
+                            )
+                            print("📊 Gráfico de timeline generado - cierra la ventana para continuar")
+                        else:
+                            print("⚠️  Sin detecciones para graficar\n")
 
                         # Marcar sesión como inactiva
                         session_stats['active'] = False
@@ -145,6 +269,11 @@ def control_loop_pwm_range(robot_positions_pipe, frame_pipe, robot_id, serial_po
                     session_stats['frames_analyzed'] = perception_stats.get('frames_analyzed', 0)
                     session_stats['frames_detected'] = perception_stats.get('frames_detected', 0)
                     session_stats['detection_rate'] = perception_stats.get('detection_rate', 0.0)
+
+                    # Guardar timestamp de detección para timeline
+                    if robot_detected:
+                        elapsed = current_time - session_stats['start_time']
+                        session_stats['detection_timeline'].append(elapsed)
 
             # ===== CREAR FRAME DE VISUALIZACIÓN =====
             # Crear frame simple si no hay frame_pipe (modo ultra-rápido)
@@ -284,6 +413,7 @@ def control_loop_pwm_range(robot_positions_pipe, frame_pipe, robot_id, serial_po
                 session_stats['frames_detected'] = 0
                 session_stats['detection_rate'] = 0.0
                 session_stats['start_time'] = time.time()
+                session_stats['detection_timeline'] = []
                 print("📊 Estadísticas de sesión reseteadas")
 
             elif key == 8:  # BACKSPACE - atrás
@@ -301,6 +431,7 @@ def control_loop_pwm_range(robot_positions_pipe, frame_pipe, robot_id, serial_po
                 session_stats['frames_detected'] = 0
                 session_stats['detection_rate'] = 0.0
                 session_stats['start_time'] = time.time()
+                session_stats['detection_timeline'] = []
                 print("📊 Estadísticas de sesión reseteadas")
 
             elif key == ord('x'):  # X - Detener
@@ -311,10 +442,26 @@ def control_loop_pwm_range(robot_positions_pipe, frame_pipe, robot_id, serial_po
 
                     # Finalizar sesión si estaba activa
                     if session_stats['active']:
-                        print("📊 RESUMEN DE SESIÓN (interrumpida):")
+                        elapsed = current_time - session_stats['start_time']
+                        print(f"\n🛑 Sesión interrumpida ({elapsed:.2f}s)")
+                        print("=" * 70)
+                        print("📊 RESUMEN DE SESIÓN (interrumpida)")
+                        print("=" * 70)
                         print(f"   Frames analizados: {session_stats['frames_analyzed']}")
                         print(f"   Frames detectados: {session_stats['frames_detected']}")
                         print(f"   Tasa detección: {session_stats['detection_rate']*100:.1f}%")
+                        print("=" * 70 + "\n")
+
+                        # Generar y mostrar gráfico de timeline
+                        if len(session_stats['detection_timeline']) > 0:
+                            show_detection_graph(
+                                session_stats['detection_timeline'],
+                                elapsed
+                            )
+                            print("📊 Gráfico de timeline generado - cierra la ventana para continuar")
+                        else:
+                            print("⚠️  Sin detecciones para graficar\n")
+
                         session_stats['active'] = False
 
             elif key == 82:  # ↑
@@ -380,7 +527,7 @@ def control_loop_pwm_range(robot_positions_pipe, frame_pipe, robot_id, serial_po
                     calibration.set_pwm_range(robot_id, pwm_min_temp, pwm_max_temp)
                     calibration.save()
                     print(f"✅ Rango guardado para Robot {robot_id}")
-                    print(f"⚠️  Los puntos de calibración fueron regenerados con valores neutros")
+                    print("⚠️  Los puntos de calibración fueron regenerados con valores neutros")
                     print(f"   Ejecuta 'calibrate_robot_motors_multipoint.py --robot-id {robot_id}' para calibrar\n")
 
             time.sleep(0.001)
@@ -401,15 +548,15 @@ def control_loop_pwm_range(robot_positions_pipe, frame_pipe, robot_id, serial_po
         print("RESUMEN")
         print("=" * 70)
         print(f"Último PWM probado: {current_pwm}")
-        print(f"Total de detecciones: {detection_count}")
+        print(f"Total de detecciones: {global_stats['total_detections']}")
         print(f"Rango temporal: [{pwm_min_temp}, {pwm_max_temp}]")
 
         # Verificar si el rango fue guardado
         current_saved_min, current_saved_max = calibration.get_pwm_range(robot_id)
         if (current_saved_min, current_saved_max) == (pwm_min_temp, pwm_max_temp):
-            print(f"✅ Rango GUARDADO en JSON")
+            print("✅ Rango GUARDADO en JSON")
         else:
-            print(f"⚠️  Rango NO guardado (presiona 'g' para guardar)")
+            print("⚠️  Rango NO guardado (presiona 'g' para guardar)")
 
         print("\n💡 Proceso sugerido:")
         print("   1. Encuentra PWM_min: PWM más bajo donde el robot se mueve consistentemente")
