@@ -16,6 +16,12 @@ from robot_soccer.config import (
     ROBOT_ANGLE_THRESHOLD_DEG,
     MAX_ANGULAR_CORRECTION_PWM,
     MOTOR_MAX_PWM,
+    PID_POSITION_KP,
+    PID_POSITION_KI,
+    PID_POSITION_KD,
+    PID_ANGLE_KP,
+    PID_ANGLE_KI,
+    PID_ANGLE_KD,
 )
 
 log = logging.getLogger(__name__)
@@ -87,17 +93,15 @@ class DifferentialDriveController:
         self.last_error_angle = 0
         self.integral_angle = 0
 
-        # Constantes para PID (ajustadas para respuesta suave pero precisa)
-        self.kp_pos = 0.008          # Reducido de 0.5 a 0.008
-        self.ki_pos = 0.0001         # Reducido de 0.01 a 0.0001
-        self.kd_pos = 0.05           # Reducido de 0.1 a 0.05
-        # kp_angle: Control proporcional angular
-        # CRÍTICO: Valor alto causa oscilaciones en movimiento lineal con corrección simultánea
-        # Para rotación pura: usa PID completo (p + i + d)
-        # Para corrección durante movimiento: solo usa kp (sin i, sin d aquí)
-        self.kp_angle = 0.08         # REDUCIDO de 0.25 → 0.08 para corrección estable
-        self.ki_angle = 0.001        # Reducido de 0.002 a 0.001 (menos integral windup)
-        self.kd_angle = 0.12         # AUMENTADO de 0.08 → 0.12 para damping fuerte
+        # Constantes para PID (configurables desde config.py)
+        # Valores iniciales se cargan desde config, pero pueden ser sobrescritos
+        # durante calibración usando el script calibrate_pid_controllers.py
+        self.kp_pos = PID_POSITION_KP      # Ganancia proporcional de posición
+        self.ki_pos = PID_POSITION_KI      # Ganancia integral de posición
+        self.kd_pos = PID_POSITION_KD      # Ganancia derivativa de posición
+        self.kp_angle = PID_ANGLE_KP       # Ganancia proporcional angular
+        self.ki_angle = PID_ANGLE_KI       # Ganancia integral angular
+        self.kd_angle = PID_ANGLE_KD       # Ganancia derivativa angular
 
         # Compensación de latencia para predictive stopping
         # Medición real: 25 FPS (40ms/frame) + procesamiento (15ms) + RF (10ms) = ~65ms
@@ -158,8 +162,13 @@ class DifferentialDriveController:
         if self.rf_controller.calibration is None:
             return (1.0, 1.0)
 
-        # Obtener calibración del robot
-        max_left, max_right, _ = self.rf_controller.calibration.get_calibration(robot_id)
+        # Obtener calibración del robot usando velocidad de referencia
+        # Con calibración multipoint, max_left/max_right varían según velocidad
+        # Usamos 50 PWM como referencia (velocidad media típica en rango 20-80)
+        REFERENCE_SPEED = 50
+        max_left, max_right, _ = self.rf_controller.calibration.get_calibration_at_speed(
+            robot_id, REFERENCE_SPEED
+        )
 
         # Si ambos motores son iguales, no hay asimetría
         if abs(max_left - max_right) < 0.01:
