@@ -130,7 +130,7 @@ def _load_default_pid():
         'ki_angle': PID_ANGLE_KI,
         'kd_angle': PID_ANGLE_KD,
         'position_threshold': ROBOT_POSITION_THRESHOLD,
-        'angle_threshold': ROBOT_ANGLE_THRESHOLD_DEG,
+        'angle_threshold': math.radians(ROBOT_ANGLE_THRESHOLD_DEG),  # Convertir a radianes
     }
 
 
@@ -355,8 +355,9 @@ def control_loop_pid(robot_positions_pipe, control_state_pipe, keyboard_pipe, ro
                 iteration_count = 0
                 last_stats_time = current_time
 
-            # Pausa mínima para permitir ~100-200 Hz (5-10ms por iteración)
-            time.sleep(0.005)  # 5ms = máximo 200 Hz
+            # Pausa mínima para permitir ~100-200 Hz
+            # No usar sleep - el polling de pipes ya introduce suficiente delay
+            # time.sleep(0.001)  # Removido para máximo rendimiento
 
     except KeyboardInterrupt:
         log.info("⏹️  Proceso de control detenido por usuario")

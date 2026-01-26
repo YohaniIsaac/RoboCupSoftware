@@ -275,8 +275,8 @@ class DifferentialDriveController:
         # Calcular ángulo hacia el objetivo (en radianes)
         target_heading = math.atan2(dy, dx)
 
-        # Convertir ángulo del robot a radianes
-        current_angle_rad = math.radians(robot.angle)
+        # El ángulo del robot YA está en radianes (convertido en control_process)
+        current_angle_rad = robot.angle
 
         # Calcular error de ángulo (normalizado entre -pi y pi)
         angle_error = _normalize_angle(target_heading - current_angle_rad)
@@ -403,8 +403,8 @@ class DifferentialDriveController:
                 angle_deg += 360
             return angle_deg
 
-        # Normalizar ambos ángulos
-        current_normalized = normalize_degrees(robot.angle)
+        # Normalizar ambos ángulos (robot.angle está en radianes, convertir a grados)
+        current_normalized = normalize_degrees(math.degrees(robot.angle))
         target_normalized = normalize_degrees(target_angle_deg)
 
         # Calcular error angular en el camino MÁS CORTO
@@ -416,23 +416,31 @@ class DifferentialDriveController:
         angle_error = math.radians(angle_error_deg)
 
         # ===== DETECCIÓN DE CRUCE DEL OBJETIVO =====
-        # Si el error cambió de signo, significa que CRUZAMOS el objetivo
-        # Esto ocurre cuando el robot va demasiado rápido y salta por encima del threshold
-        if hasattr(robot, '_last_angle_error_sign'):
+        # Si el error cambió de signo Y disminuyó en magnitud, CRUZAMOS el objetivo
+        # IMPORTANTE: No considerar cruce si el error está cerca de ±180° (cambio de signo por normalización)
+        if hasattr(robot, '_last_angle_error_deg'):
             current_sign = 1 if angle_error >= 0 else -1
-            if robot._last_angle_error_sign != current_sign and robot._last_angle_error_sign != 0:
+            last_sign = 1 if self.last_error_angle >= 0 else -1
+
+            # Verificar si cambió de signo Y el error absoluto disminuyó (verdadero cruce)
+            # Evitar falsos positivos cerca de ±180° donde el signo puede cambiar sin cruzar
+            sign_changed = (current_sign != last_sign)
+            error_decreased = abs(angle_error_deg) < abs(robot._last_angle_error_deg)
+            not_near_180 = abs(angle_error_deg) < 170  # Ignorar cruces cerca de ±180°
+
+            if sign_changed and error_decreased and not_near_180:
                 # CRUZAMOS el objetivo! Detener inmediatamente
-                log.info("🎯 Robot %d CRUCE DE OBJETIVO | Actual=%.1f° Target=%.1f° Error cambió: %.1f° → %.1f°",
+                log.info("🎯 Robot %d CRUCE DE OBJETIVO | Actual=%.1f° Target=%.1f° Error: %.1f° → %.1f°",
                          robot.id, current_normalized, target_normalized,
-                         math.degrees(self.last_error_angle), angle_error_deg)
+                         robot._last_angle_error_deg, angle_error_deg)
                 self._send_motor_commands(robot, 0, 0)
                 self.last_rotation_speed = 0
                 self.last_logged_rotation_speed[robot.id] = 0
-                robot._last_angle_error_sign = 0
+                robot._last_angle_error_deg = 0
                 return True
 
-        # Guardar signo del error para próxima iteración
-        robot._last_angle_error_sign = 1 if angle_error >= 0 else -1
+        # Guardar error anterior para próxima iteración
+        robot._last_angle_error_deg = angle_error_deg
 
         # ===== PREDICTIVE STOPPING =====
         # Estimar dónde ESTARÁ el robot después de la latencia
