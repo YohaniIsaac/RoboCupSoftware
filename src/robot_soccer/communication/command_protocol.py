@@ -33,11 +33,13 @@ class RobotCommandProtocol:
         de los motores izquierdo y derecho del robot. Los valores se limitan
         automáticamente al rango válido.
 
+        IMPORTANTE: El firmware acepta valores int8_t (-127 a 127), NO -255 a 255.
+
         Args:
             robot_id (int): Identificador único del robot (1-4).
-            left_speed (int): Velocidad del motor izquierdo (-255 a 255).
+            left_speed (int): Velocidad del motor izquierdo (-127 a 127).
                 Valores negativos para retroceso, positivos para avance.
-            right_speed (int): Velocidad del motor derecho (-255 a 255).
+            right_speed (int): Velocidad del motor derecho (-127 a 127).
                 Valores negativos para retroceso, positivos para avance.
 
         Returns:
@@ -50,9 +52,9 @@ class RobotCommandProtocol:
         # Formato: M,id,left,right\n
         # Ejemplo: M,1,100,-100\n
 
-        # Limitar valores entre -255 y 255
-        left = max(-255, min(255, int(left_speed)))
-        right = max(-255, min(255, int(right_speed)))
+        # Limitar valores entre -127 y 127 (rango int8_t del firmware)
+        left = max(-127, min(127, int(left_speed)))
+        right = max(-127, min(127, int(right_speed)))
 
         return f"M,{robot_id},{left},{right}"
 
