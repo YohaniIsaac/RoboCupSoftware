@@ -208,9 +208,9 @@ BALL_DETECTION_MAX_RADIUS = 9  # Radio máximo (px)
 # torque para vencer la fricción estática.
 MOTOR_DEAD_ZONE_PWM = 30         # PWM < 30: Motor probablemente NO se mueve (dead zone)
 MOTOR_MIN_MOVEMENT_PWM = 50      # PWM ≥ 50: Movimiento confiable del motor
-MOTOR_MAX_PWM = 255              # PWM máximo absoluto del motor
+MOTOR_MAX_PWM = 127              # PWM máximo absoluto del motor (límite firmware int8_t)
 
-# --- Velocidades de Rotación (en PWM: 0-255) ---
+# --- Velocidades de Rotación (en PWM: 0-127) ---
 # IMPORTANTE: Con corrección angular y calibración asimétrica (L=1.0, R=0.79),
 # las velocidades efectivas pueden reducirse ~20-40%. Por eso los mínimos deben
 # ser suficientemente altos para superar el dead zone del motor (~30 PWM).
@@ -223,7 +223,7 @@ ROBOT_ROTATION_ARRIVAL_ANGLE_DEG = 25.0  # Ángulo donde empieza rampa de desace
 ROBOT_ROTATION_NEAR_MIN = 18  # Velocidad mínima EN LA RAMPA (PWM)
                                   # Debe ser <= ROBOT_MIN_ROTATION_SPEED y >= MOTOR_MIN_MOVEMENT_PWM
 
-# --- Velocidades de Movimiento Lineal (en PWM: 0-255) ---
+# --- Velocidades de Movimiento Lineal (en PWM: 0-127) ---
 # Con corrección angular (MAX_ANGULAR_CORRECTION_PWM) y calibración (R×0.79),
 # el motor más lento puede perder ~35% de velocidad. Por eso MIN debe ser ≥90
 # para asegurar que incluso después de corrección y calibración se supere el dead zone.
