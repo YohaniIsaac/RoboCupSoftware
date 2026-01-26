@@ -83,6 +83,45 @@ python scripts/calibrate_robot_motors_multipoint.py --robot-id 0
 - **Flechas** → Probar movimiento | **ENTER** → Guardar calibración completa
 - Guarda en `src/robot_soccer/config/robot_calibration_multipoint.json`
 
+#### Paso 3: calibrate_pid_controllers.py
+Calibra parámetros PID del controlador de movimiento del robot.
+
+```bash
+python scripts/calibrate_pid_controllers.py --robot-id 0
+```
+
+**Arquitectura de 3 procesos optimizada:**
+- **Percepción ultra-rápida:** 28-40 FPS (detección ArUco + envío de frames)
+- **Control PID puro:** ~100 Hz (solo PID + comandos RF, sin UI)
+- **Visualización:** 28-40 FPS (frames reales + panel de información)
+
+**Objetivo:** Ajustar 6 parámetros PID para que el robot alcance waypoints con precisión:
+- **PID Posición (KP/KI/KD):** Controla qué tan bien sigue trayectorias lineales
+- **PID Angular (KP/KI/KD):** Controla rotación y corrección de orientación
+
+**Controles:**
+- **Click en frame** → Establecer waypoint objetivo
+- **ESPACIO** → Toggle movimiento (activar/pausar)
+- **1/q** → Ajustar PID Posición KP (±0.001)
+- **2/w** → Ajustar PID Posición KI (±0.0001)
+- **3/e** → Ajustar PID Posición KD (±0.01)
+- **4/r** → Ajustar PID Ángulo KP (±0.01)
+- **5/t** → Ajustar PID Ángulo KI (±0.001)
+- **6/y** → Ajustar PID Ángulo KD (±0.01)
+- **g** → Guardar parámetros a `config.py`
+- **z** → Reset PID a valores por defecto
+- **ESC** → Salir
+
+**Metodología de ajuste:**
+1. Establecer waypoint cercano con click
+2. Presionar ESPACIO para que el robot se mueva
+3. Observar comportamiento:
+   - **Oscilaciones:** Reducir KP
+   - **Error permanente:** Aumentar KI
+   - **Overshoot:** Aumentar KD
+4. Repetir con waypoints a diferentes distancias y ángulos
+5. Presionar **g** para guardar cuando esté satisfecho
+
 ---
 
 ## 🔄 Flujo de Calibración Recomendado
@@ -93,16 +132,30 @@ python scripts/calibrate_robot_motors_multipoint.py --robot-id 0
 3. Calibrar pelota:
    - Ejecutar FASE 1 (Color HSV) → presionar **N**
    - Ajustar FASE 2 (Detección) → presionar **ENTER** para guardar
-4. Calibrar motores de cada robot (`--robot-id 0, 1, 2, 3`):
-   - **Paso 1:** `calibrate_robot_pwm_range.py` → Determinar rango PWM útil → presionar **G** para guardar
-   - **Paso 2:** `calibrate_robot_motors_multipoint.py` → Calibrar 10 puntos → presionar **ENTER** para guardar
-5. Probar con `python examples/test_perception.py`
+
+**Calibración de Motores y Control (para cada robot `--robot-id 0, 1, 2, 3`):**
+4. **Paso 1:** `calibrate_robot_pwm_range.py`
+   - Determinar rango PWM útil [min, max]
+   - Presionar **G** para guardar → actualiza `robot_calibration_multipoint.json`
+
+5. **Paso 2:** `calibrate_robot_motors_multipoint.py`
+   - Calibrar 10 puntos (5 adelante + 5 atrás)
+   - Ajustar max_left, max_right, bias, dead-zone
+   - Presionar **ENTER** para guardar → actualiza `robot_calibration_multipoint.json`
+
+6. **Paso 3:** `calibrate_pid_controllers.py`
+   - Calibrar parámetros PID (6 parámetros: posición y angular)
+   - Click para establecer waypoints, ajustar con teclas 1-6
+   - Presionar **g** para guardar → actualiza `config.py`
+
+7. Probar con `python examples/test_perception.py`
 
 ---
 
 ## 💡 Notas
 
 - Requiere DroidCam: `cd algoritmos_basicos/aruco_tag && ./start_droidcam.sh`
-- Percepción guarda en `src/robot_soccer/config.py`
-- Motores guardan en `src/robot_soccer/config/robot_calibration.json`
+- **Percepción** guarda en `src/robot_soccer/config.py` (color pelota, perspectiva)
+- **Motores** guardan en `src/robot_soccer/config/robot_calibration_multipoint.json` (PWM range, calibración 10 puntos)
+- **PID** guarda en `src/robot_soccer/config.py` (6 parámetros PID_POSITION_* y PID_ANGLE_*)
 - Valores de motores pueden transferirse al firmware para producción
