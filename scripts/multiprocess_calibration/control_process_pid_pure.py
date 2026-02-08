@@ -39,7 +39,10 @@ log = logging.getLogger(__name__)
 
 
 class RobotEntity:
-    """Entidad de robot para el controlador."""
+    """Entidad de robot con tracking de velocidad para predicción lineal."""
+
+    # Máximo tiempo (s) usando predicción antes de considerar robot perdido
+    MAX_PREDICTION_TIME = 0.5
 
     def __init__(self, robot_id, x, y, angle):
         """Inicializa entidad de robot.
@@ -58,11 +61,51 @@ class RobotEntity:
         self.dy = 0.0
         self.dw = 0.0
 
+        # Tracking de velocidad para predicción lineal
+        self.vx = 0.0  # px/s
+        self.vy = 0.0  # px/s
+        self.last_detection_time = time.time()
+        self.is_predicted = False  # True cuando posición es predicha
+        # Posición real de última detección (para predecir siempre desde aquí)
+        self._real_x = x
+        self._real_y = y
+
     def update(self, x, y, angle):
-        """Actualiza la posición del robot."""
+        """Actualiza posición con datos reales de detección y calcula velocidad."""
+        now = time.time()
+        dt = now - self.last_detection_time
+
+        # Calcular velocidad solo si dt es razonable (evitar spikes)
+        if 0.005 < dt < 0.5:
+            self.vx = (x - self._real_x) / dt
+            self.vy = (y - self._real_y) / dt
+
         self.x = x
         self.y = y
+        self._real_x = x
+        self._real_y = y
         self.angle = angle
+        self.last_detection_time = now
+        self.is_predicted = False
+
+    def predict(self):
+        """Predice posición actual usando velocidad lineal desde última detección real.
+
+        Returns:
+            bool: True si la predicción es válida, False si expiró (>MAX_PREDICTION_TIME)
+        """
+        now = time.time()
+        dt = now - self.last_detection_time
+
+        if dt > self.MAX_PREDICTION_TIME:
+            return False
+
+        # Predicción lineal SIEMPRE desde la última posición real detectada
+        self.x = self._real_x + self.vx * dt
+        self.y = self._real_y + self.vy * dt
+        # Ángulo se mantiene (no predecimos rotación)
+        self.is_predicted = True
+        return True
 
 
 def _update_pid_controller(controller, pid_params):
@@ -254,13 +297,21 @@ def control_loop_pid(robot_positions_pipe, control_state_pipe, keyboard_pipe, ro
                                 robot_data['y'],
                                 math.radians(robot_data['angulo'])
                             )
+                    # Robot no detectado: usar predicción lineal si existe
                     elif robot is not None:
-                        # Robot se perdió
-                        log.warning(f"⚠️  Robot {robot_id} perdido")
-                        robot = None
+                        if not robot.predict():
+                            # Predicción expiró (>0.5s sin detección)
+                            log.warning(f"⚠️  Robot {robot_id} perdido (predicción expirada)")
+                            robot = None
 
                 except Exception as e:
                     log.error(f"Error recibiendo posiciones: {e}")
+
+            # Si no hay datos nuevos de percepción, seguir prediciendo
+            elif robot is not None and robot.is_predicted:
+                if not robot.predict():
+                    log.warning(f"⚠️  Robot {robot_id} perdido (predicción expirada)")
+                    robot = None
 
             # ===== RECIBIR COMANDOS DESDE VISUALIZACIÓN =====
             if keyboard_pipe.poll():
@@ -340,6 +391,7 @@ def control_loop_pid(robot_positions_pipe, control_state_pipe, keyboard_pipe, ro
                     'target_waypoint': target_waypoint,
                     'movement_active': movement_active,
                     'robot_id': robot_id,
+                    'robot_predicted': robot.is_predicted if robot else False,
                     'timestamp': time.time()
                 })
             except Exception:

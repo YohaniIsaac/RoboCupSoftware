@@ -103,34 +103,13 @@ class PerceptionStats:
         }
 
 
-def detect_aruco_fast(frame, robot_id: int):
-    """Detección ArUco ULTRA-RÁPIDA sin procesamiento adicional.
-
-    Elimina TODO el pre-procesamiento para máxima velocidad:
-    - Sin sharpening (~10ms ahorrados)
-    - Sin CLAHE (~15ms ahorrados)
-    - Sin bilateral filter (~10ms ahorrados)
-    - Sin transformación de perspectiva (~7ms ahorrados)
-    - Sin dibujos (~18ms ahorrados)
-
-    Total ahorrado: ~60ms
-
-    Args:
-        frame: Frame BGR de la cámara (640x480)
-        robot_id: ID del robot a detectar (0-3)
+def create_aruco_detector():
+    """Crea el detector ArUco UNA sola vez (reutilizable entre frames).
 
     Returns:
-        tuple: (detected: bool, robot_data: dict or None)
-            - detected: True si se encontró el robot
-            - robot_data: {'x': int, 'y': int, 'angulo': float} o None
+        cv2.aruco.ArucoDetector: Detector configurado y listo para usar
     """
-    # Convertir a escala de grises (única operación de pre-procesamiento)
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-
-    # Diccionario ArUco para cámara física (5x5 para mejor detección)
     aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_5X5_1000)
-
-    # Parámetros de detección optimizados (copiados del sistema estándar)
     parameters = cv2.aruco.DetectorParameters()
 
     # Ventana de umbral adaptativo
@@ -167,8 +146,26 @@ def detect_aruco_fast(frame, robot_id: int):
     # Aproximación poligonal
     parameters.polygonalApproxAccuracyRate = 0.08
 
-    # Crear detector y detectar marcadores
-    detector = cv2.aruco.ArucoDetector(aruco_dict, parameters)
+    return cv2.aruco.ArucoDetector(aruco_dict, parameters)
+
+
+def detect_aruco_fast(frame, robot_id: int, detector):
+    """Detección ArUco ULTRA-RÁPIDA sin procesamiento adicional.
+
+    Args:
+        frame: Frame BGR de la cámara (640x480)
+        robot_id: ID del robot a detectar (0-3)
+        detector: cv2.aruco.ArucoDetector pre-creado (reutilizable)
+
+    Returns:
+        tuple: (detected: bool, robot_data: dict or None)
+            - detected: True si se encontró el robot
+            - robot_data: {'x': int, 'y': int, 'angulo': float} o None
+    """
+    # Convertir a escala de grises (única operación de pre-procesamiento)
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+    # Detectar marcadores con el detector pre-creado
     corners, ids, _ = detector.detectMarkers(gray)
 
     # Buscar el robot específico
@@ -277,6 +274,10 @@ def perception_loop_pid(robot_positions_pipe, frame_pipe, robot_id: int, camera_
         perspective_matrix = cv2.getPerspectiveTransform(src_pts, dst_pts)
         log.info("✅ Transformación de perspectiva calculada")
 
+    # Crear detector ArUco UNA sola vez (reutilizable entre frames)
+    aruco_detector = create_aruco_detector()
+    log.info("✅ Detector ArUco creado (reutilizable)")
+
     log.info("✅ Cámara iniciada - Comenzando detección ultra-rápida...")
 
     try:
@@ -298,8 +299,8 @@ def perception_loop_pid(robot_positions_pipe, frame_pipe, robot_id: int, camera_
             else:
                 frame_transformed = frame.copy()
 
-            # Detección RÁPIDA (sin pre-procesamiento pesado como sharpening/CLAHE)
-            detected, robot_data = detect_aruco_fast(frame_transformed, robot_id)
+            # Detección RÁPIDA con detector pre-creado
+            detected, robot_data = detect_aruco_fast(frame_transformed, robot_id, aruco_detector)
 
             # Actualizar estadísticas
             stats.update(detected)

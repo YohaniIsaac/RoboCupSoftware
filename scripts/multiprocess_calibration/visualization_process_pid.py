@@ -87,6 +87,7 @@ def visualization_loop_pid(frame_pipe, control_state_pipe, keyboard_pipe):
     last_target_waypoint = None
     last_movement_active = False
     last_robot_id = 0
+    last_robot_predicted = False
 
     # Configuración de ventana
     window_name = 'Calibracion PID (3 Procesos)'
@@ -138,6 +139,7 @@ def visualization_loop_pid(frame_pipe, control_state_pipe, keyboard_pipe):
                     last_target_waypoint = control_data.get('target_waypoint')
                     last_movement_active = control_data.get('movement_active', False)
                     last_robot_id = control_data.get('robot_id', 0)
+                    last_robot_predicted = control_data.get('robot_predicted', False)
                 except Exception as e:
                     log.warning(f"⚠️  Error recibiendo estado de control: {e}")
 
@@ -190,6 +192,9 @@ def visualization_loop_pid(frame_pipe, control_state_pipe, keyboard_pipe):
                 if last_robot_detected and last_robot_data:
                     robot_status += f"DETECTADO | Pos: ({last_robot_data['x']}, {last_robot_data['y']}) | Angulo: {last_robot_data['angulo']:.1f}°"
                     status_color = (0, 255, 0)
+                elif last_robot_predicted:
+                    robot_status += "PREDICCION LINEAL"
+                    status_color = (0, 165, 255)  # Naranja
                 else:
                     robot_status += "NO DETECTADO"
                     status_color = (0, 0, 255)
