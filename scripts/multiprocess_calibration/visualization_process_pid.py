@@ -12,9 +12,10 @@ Diseñado para NO bloquear el proceso de control PID crítico.
 FPS objetivo: 28-40 (limitado por percepción y cv2.imshow)
 """
 
+import logging
 import sys
 import time
-import logging
+from multiprocessing import shared_memory
 from pathlib import Path
 
 import cv2
@@ -24,20 +25,24 @@ import numpy as np
 ROOT_DIR = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(ROOT_DIR / "src"))
 
+from robot_soccer.config import CAMERA_PERSPECTIVE_HEIGHT, CAMERA_PERSPECTIVE_WIDTH
+
 log = logging.getLogger(__name__)
 
 
-def visualization_loop_pid(frame_pipe, control_state_pipe, keyboard_pipe):
+def visualization_loop_pid(frame_pipe, control_state_pipe, keyboard_pipe,
+                           shm_name: str = None, frame_counter=None):
     """Bucle principal del proceso de visualización para calibración PID.
 
     Args:
-        frame_pipe: Pipe para recibir frames procesados desde percepción
+        frame_pipe: Pipe para recibir metadata desde percepción (sin frames)
         control_state_pipe: Pipe para recibir estado desde control (PID params, waypoint, etc.)
         keyboard_pipe: Pipe bidireccional para enviar comandos de teclado/mouse a control
+        shm_name: Nombre de la shared memory para leer frames
+        frame_counter: multiprocessing.Value('i') contador atómico de frames
 
-    Recibe por frame_pipe (desde Percepción):
+    Recibe por frame_pipe (metadata desde Percepción, frame se lee de shared memory):
         {
-            'frame': np.ndarray (BGR, con transformación de perspectiva),
             'robot_detected': bool,
             'robot_data': {'x': int, 'y': int, 'angulo': float} or None,
             'stats': {'fps': float, 'detection_rate': float, ...},
@@ -67,12 +72,19 @@ def visualization_loop_pid(frame_pipe, control_state_pipe, keyboard_pipe):
     """
     log.info("🖥️  Proceso de visualización iniciado (PID - 3 procesos)")
     log.info("   Responsabilidades:")
-    log.info("     ✓ Recibir frames de percepción")
+    log.info("     ✓ Leer frames de shared memory (zero-copy)")
+    log.info("     ✓ Recibir metadata de percepción (pipe, ~100 bytes)")
     log.info("     ✓ Recibir estado de control")
     log.info("     ✓ Mostrar UI con cv2.imshow()")
     log.info("     ✓ Capturar teclas y mouse")
     log.info("     ✓ Enviar comandos a control")
-    log.info("     → FPS: 28-40 (limitado por percepción)")
+
+    # Conectar a shared memory para leer frames
+    frame_shape = (CAMERA_PERSPECTIVE_HEIGHT, CAMERA_PERSPECTIVE_WIDTH, 3)
+    shm = shared_memory.SharedMemory(name=shm_name)
+    shared_array = np.ndarray(frame_shape, dtype=np.uint8, buffer=shm.buf)
+    last_frame_counter = 0
+    log.info(f"📦 Conectado a shared memory: {shm_name}")
 
     # Estado local (última información recibida)
     last_frame = None
@@ -96,22 +108,20 @@ def visualization_loop_pid(frame_pipe, control_state_pipe, keyboard_pipe):
     # Callback de mouse para establecer waypoints
     def mouse_callback(event, x, y, flags, param):
         """Callback de mouse para establecer waypoint con click."""
-        if event == cv2.EVENT_LBUTTONDOWN:
-            # Ajustar coordenadas (restar altura del panel)
-            if y > panel_height:
-                actual_y = y - panel_height
-                # Enviar comando al proceso de control
-                try:
-                    if keyboard_pipe.poll():
-                        _ = keyboard_pipe.recv()  # Vaciar pipe
-                    keyboard_pipe.send({
-                        'command': 'set_waypoint',
-                        'waypoint': [x, actual_y],
-                        'timestamp': time.time()
-                    })
-                    log.info(f"🎯 Waypoint establecido: ({x}, {actual_y})")
-                except Exception as e:
-                    log.warning(f"⚠️  Error enviando waypoint: {e}")
+        if event == cv2.EVENT_LBUTTONDOWN and y > panel_height:
+            actual_y = y - panel_height
+            # Enviar comando al proceso de control
+            try:
+                if keyboard_pipe.poll():
+                    _ = keyboard_pipe.recv()  # Vaciar pipe
+                keyboard_pipe.send({
+                    'command': 'set_waypoint',
+                    'waypoint': [x, actual_y],
+                    'timestamp': time.time()
+                })
+                log.info(f"🎯 Waypoint establecido: ({x}, {actual_y})")
+            except Exception as e:
+                log.warning(f"⚠️  Error enviando waypoint: {e}")
 
     cv2.namedWindow(window_name)
     cv2.setMouseCallback(window_name, mouse_callback)
@@ -120,16 +130,20 @@ def visualization_loop_pid(frame_pipe, control_state_pipe, keyboard_pipe):
 
     try:
         while True:
-            # ===== RECIBIR FRAMES DESDE PERCEPCIÓN =====
+            # ===== LEER FRAME DESDE SHARED MEMORY + METADATA DESDE PIPE =====
+            current_counter = frame_counter.value
+            if current_counter != last_frame_counter:
+                last_frame = shared_array.copy()  # Copia local para dibujar
+                last_frame_counter = current_counter
+
             if frame_pipe.poll():
                 try:
                     perception_data = frame_pipe.recv()
-                    last_frame = perception_data.get('frame')
                     last_robot_detected = perception_data.get('robot_detected', False)
                     last_robot_data = perception_data.get('robot_data')
                     last_perception_stats = perception_data.get('stats', {})
                 except Exception as e:
-                    log.warning(f"⚠️  Error recibiendo frame: {e}")
+                    log.warning(f"⚠️  Error recibiendo metadata: {e}")
 
             # ===== RECIBIR ESTADO DESDE CONTROL =====
             if control_state_pipe.poll():
@@ -146,7 +160,7 @@ def visualization_loop_pid(frame_pipe, control_state_pipe, keyboard_pipe):
             # ===== GENERAR FRAME DE VISUALIZACIÓN =====
             if last_frame is not None:
                 frame_display = last_frame.copy()
-                frame_height, frame_width = frame_display.shape[:2]
+                _, frame_width = frame_display.shape[:2]
 
                 # Dibujar robot si detectado
                 if last_robot_detected and last_robot_data:
@@ -190,7 +204,10 @@ def visualization_loop_pid(frame_pipe, control_state_pipe, keyboard_pipe):
                 # Línea 1: Estado del robot
                 robot_status = f"Robot {last_robot_id}: "
                 if last_robot_detected and last_robot_data:
-                    robot_status += f"DETECTADO | Pos: ({last_robot_data['x']}, {last_robot_data['y']}) | Angulo: {last_robot_data['angulo']:.1f}°"
+                    rd = last_robot_data
+                    robot_status += (
+                        f"DETECTADO | Pos: ({rd['x']}, {rd['y']}) | Angulo: {rd['angulo']:.1f}°"
+                    )
                     status_color = (0, 255, 0)
                 elif last_robot_predicted:
                     robot_status += "PREDICCION LINEAL"
@@ -235,7 +252,8 @@ def visualization_loop_pid(frame_pipe, control_state_pipe, keyboard_pipe):
 
                 # Línea 10: Estadísticas de detección
                 detection_rate = last_perception_stats.get('detection_rate', 0.0)
-                det_text = f"Deteccion: {detection_rate * 100:.1f}% | Frames: {last_perception_stats.get('frames_analyzed', 0)}"
+                frames_count = last_perception_stats.get('frames_analyzed', 0)
+                det_text = f"Deteccion: {detection_rate * 100:.1f}% | Frames: {frames_count}"
                 cv2.putText(panel, det_text, (10, 310),
                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (100, 255, 255), 1)
 
@@ -360,13 +378,11 @@ def visualization_loop_pid(frame_pipe, control_state_pipe, keyboard_pipe):
                 if command == 'exit':
                     break
 
-            # Pausa pequeña para no saturar CPU
-            time.sleep(0.001)
-
     except KeyboardInterrupt:
         log.info("⏹️  Proceso de visualización detenido por usuario")
     except Exception as e:
         log.error(f"❌ Error en proceso de visualización: {e}", exc_info=True)
     finally:
+        shm.close()
         cv2.destroyAllWindows()
-        log.info("🔌 Ventana cerrada")
+        log.info("🔌 Ventana cerrada, shared memory desconectada")

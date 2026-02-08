@@ -9,21 +9,21 @@ La comunicación entre procesos es no bloqueante usando pipes.
 Este módulo NO debe ejecutarse directamente. Usar scripts/calibrate_pid_controllers.py
 """
 
-import sys
 import logging
 import multiprocessing
+import sys
+from multiprocessing import Value, shared_memory
 from pathlib import Path
 
 # Agregar src y scripts al path
 ROOT_DIR = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(ROOT_DIR / "src"))
 
-from robot_soccer.utils.camera_utils import get_camera_index
-
-# Importar desde el mismo directorio
-from multiprocess_calibration.perception_process_pid import perception_loop_pid
 from multiprocess_calibration.control_process_pid_pure import control_loop_pid
+from multiprocess_calibration.perception_process_pid import perception_loop_pid
 from multiprocess_calibration.visualization_process_pid import visualization_loop_pid
+from robot_soccer.config import CAMERA_PERSPECTIVE_HEIGHT, CAMERA_PERSPECTIVE_WIDTH
+from robot_soccer.utils.camera_utils import get_camera_index
 
 log = logging.getLogger(__name__)
 
@@ -54,11 +54,17 @@ def run_pid_calibration(robot_id, serial_port='/dev/ttyUSB0', camera_id=None):
         log.info("  PROCESO 3: Visualización (28-40 FPS)")
         log.info("=" * 70)
 
+        # ===== CREAR SHARED MEMORY PARA FRAMES =====
+        frame_size = CAMERA_PERSPECTIVE_HEIGHT * CAMERA_PERSPECTIVE_WIDTH * 3  # 921,600 bytes
+        shm = shared_memory.SharedMemory(create=True, size=frame_size)
+        frame_counter = Value('i', 0)
+        log.info(f"📦 Shared memory creada: {shm.name} ({frame_size} bytes)")
+
         # ===== CREAR PIPES DE COMUNICACIÓN =====
         # Pipe 1: Percepción → Control (datos posición, ~100 bytes)
         perception_to_control_send, perception_to_control_recv = multiprocessing.Pipe()
 
-        # Pipe 2: Percepción → Visualización (frames procesados, ~921KB)
+        # Pipe 2: Percepción → Visualización (solo metadata, ~100 bytes)
         perception_to_viz_send, perception_to_viz_recv = multiprocessing.Pipe()
 
         # Pipe 3: Control → Visualización (estado PID, ~200 bytes)
@@ -76,9 +82,11 @@ def run_pid_calibration(robot_id, serial_port='/dev/ttyUSB0', camera_id=None):
             target=perception_loop_pid,
             args=(
                 perception_to_control_send,  # Envía datos posición a Control
-                perception_to_viz_send,      # Envía frames a Visualización
+                perception_to_viz_send,      # Envía metadata a Visualización
                 robot_id,
-                camera_id
+                camera_id,
+                shm.name,                    # Shared memory para frames
+                frame_counter               # Contador atómico de frames
             ),
             name="PerceptionFast"
         )
@@ -104,9 +112,11 @@ def run_pid_calibration(robot_id, serial_port='/dev/ttyUSB0', camera_id=None):
         p3 = multiprocessing.Process(
             target=visualization_loop_pid,
             args=(
-                perception_to_viz_recv,      # Recibe frames de Percepción
+                perception_to_viz_recv,      # Recibe metadata de Percepción
                 control_to_viz_recv,         # Recibe estado de Control
-                viz_to_control_send          # Envía comandos a Control
+                viz_to_control_send,         # Envía comandos a Control
+                shm.name,                   # Shared memory para frames
+                frame_counter               # Contador atómico de frames
             ),
             name="Visualization"
         )
@@ -143,3 +153,8 @@ def run_pid_calibration(robot_id, serial_port='/dev/ttyUSB0', camera_id=None):
             if proc.is_alive():
                 proc.terminate()
                 proc.join(timeout=2)
+    finally:
+        # Limpiar shared memory
+        shm.close()
+        shm.unlink()
+        log.info("🧹 Shared memory liberada")

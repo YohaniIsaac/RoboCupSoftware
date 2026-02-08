@@ -17,9 +17,13 @@ Ganancia de velocidad:
 - Total ahorrado: ~60ms de ~75-100ms = mejora 2-3x
 """
 
-import sys
-import time
+import contextlib
 import logging
+import queue
+import sys
+import threading
+import time
+from multiprocessing import shared_memory
 from pathlib import Path
 
 import cv2
@@ -31,9 +35,9 @@ sys.path.insert(0, str(ROOT_DIR / "src"))
 
 from robot_soccer.config import (
     CAMERA_PERSPECTIVE_ENABLED,
+    CAMERA_PERSPECTIVE_HEIGHT,
     CAMERA_PERSPECTIVE_SRC_POINTS,
     CAMERA_PERSPECTIVE_WIDTH,
-    CAMERA_PERSPECTIVE_HEIGHT
 )
 
 log = logging.getLogger(__name__)
@@ -49,6 +53,7 @@ class PerceptionStats:
                  'last_fps_calc_time', 'fps')
 
     def __init__(self):
+        """Inicializa contadores y temporizadores."""
         self.frames_analyzed = 0
         self.frames_detected = 0
         self.start_time = time.time()
@@ -170,7 +175,7 @@ def detect_aruco_fast(frame, robot_id: int, detector):
 
     # Buscar el robot específico
     if ids is not None:
-        for corner, aruco_id in zip(corners, ids):
+        for corner, aruco_id in zip(corners, ids, strict=False):
             if aruco_id[0] == robot_id:
                 # Calcular centro (promedio de las 4 esquinas)
                 corner_points = corner.reshape(4, 2)
@@ -192,7 +197,54 @@ def detect_aruco_fast(frame, robot_id: int, detector):
     return False, None
 
 
-def perception_loop_pid(robot_positions_pipe, frame_pipe, robot_id: int, camera_id: int):
+def _frame_sender_thread(frame_queue, metadata_pipe, shm_name, frame_shape, frame_counter):
+    """Thread que escribe frames a shared memory y envía metadata por pipe.
+
+    Corre en un thread separado para no bloquear el loop de detección.
+    Lee frames de la Queue, los copia a shared memory (memcpy ~0.5ms),
+    incrementa el frame_counter atómico y envía metadata por pipe (~0.2ms).
+
+    Args:
+        frame_queue: Queue(maxsize=1) con tuplas (frame, metadata_dict)
+        metadata_pipe: Pipe para enviar metadata a visualización
+        shm_name: Nombre de la shared memory creada por el proceso principal
+        frame_shape: Tupla (height, width, channels) del frame
+        frame_counter: multiprocessing.Value('i') - contador atómico
+    """
+    # Conectar a shared memory existente
+    shm = shared_memory.SharedMemory(name=shm_name)
+    shared_array = np.ndarray(frame_shape, dtype=np.uint8, buffer=shm.buf)
+
+    try:
+        while True:
+            item = frame_queue.get()
+
+            # Señal de parada
+            if item is None:
+                break
+
+            frame, metadata = item
+
+            # Copiar frame a shared memory (memcpy, ~0.5ms para 921KB)
+            np.copyto(shared_array, frame)
+
+            # Incrementar contador atómico
+            with frame_counter.get_lock():
+                frame_counter.value += 1
+
+            # Enviar solo metadata por pipe (~0.2ms para ~100 bytes)
+            try:
+                if metadata_pipe.poll():
+                    _ = metadata_pipe.recv()  # Vaciar pipe
+                metadata_pipe.send(metadata)
+            except Exception:
+                pass
+    finally:
+        shm.close()
+
+
+def perception_loop_pid(robot_positions_pipe, frame_pipe, robot_id: int, camera_id: int,
+                        shm_name: str = None, frame_counter=None):
     """Bucle principal del proceso de percepción ULTRA-RÁPIDO para calibración PID.
 
     Arquitectura de 3 procesos:
@@ -202,9 +254,11 @@ def perception_loop_pid(robot_positions_pipe, frame_pipe, robot_id: int, camera_
 
     Args:
         robot_positions_pipe: Pipe para enviar datos al proceso de control (datos pequeños)
-        frame_pipe: Pipe para enviar frames procesados a visualización (frames grandes)
+        frame_pipe: Pipe para enviar metadata a visualización (solo ~100 bytes, frames van por shared memory)
         robot_id: ID del robot a detectar (0-3)
         camera_id: ID de la cámara a usar
+        shm_name: Nombre de la shared memory para escribir frames (None = fallback a pipe)
+        frame_counter: multiprocessing.Value('i') contador atómico de frames
 
     Envía por robot_positions_pipe (a Control):
         {
@@ -214,9 +268,8 @@ def perception_loop_pid(robot_positions_pipe, frame_pipe, robot_id: int, camera_
             'timestamp': float
         }
 
-    Envía por frame_pipe (a Visualización):
+    Envía por frame_pipe (metadata a Visualización, frame va por shared memory):
         {
-            'frame': np.ndarray (BGR, después de transformación de perspectiva),
             'robot_detected': bool,
             'robot_data': {'x': int, 'y': int, 'angulo': float} or None,
             'stats': {...},
@@ -230,8 +283,9 @@ def perception_loop_pid(robot_positions_pipe, frame_pipe, robot_id: int, camera_
     log.info("     ✓ Detección ArUco rápida (sin pre-procesamiento pesado)")
     log.info("     ✓ Transformación de perspectiva aplicada")
     log.info("     ✓ Datos enviados a Control (pipe 1)")
-    log.info("     ✓ Frames enviados a Visualización (pipe 2)")
-    log.info("     → FPS objetivo: 28-40")
+    log.info("     ✓ Frames enviados a Visualización (shared memory + thread)")
+    log.info("     ✓ Metadata enviada a Visualización (pipe 2, ~100 bytes)")
+    log.info("     → FPS objetivo: >40")
 
     # Abrir cámara
     cap = cv2.VideoCapture(camera_id)
@@ -278,6 +332,17 @@ def perception_loop_pid(robot_positions_pipe, frame_pipe, robot_id: int, camera_
     aruco_detector = create_aruco_detector()
     log.info("✅ Detector ArUco creado (reutilizable)")
 
+    # Crear Queue y lanzar thread para envío asíncrono de frames
+    frame_shape = (CAMERA_PERSPECTIVE_HEIGHT, CAMERA_PERSPECTIVE_WIDTH, 3)
+    frame_queue = queue.Queue(maxsize=1)
+    sender_thread = threading.Thread(
+        target=_frame_sender_thread,
+        args=(frame_queue, frame_pipe, shm_name, frame_shape, frame_counter),
+        daemon=True
+    )
+    sender_thread.start()
+    log.info("✅ Thread de envío de frames iniciado (shared memory)")
+
     log.info("✅ Cámara iniciada - Comenzando detección ultra-rápida...")
 
     try:
@@ -297,7 +362,7 @@ def perception_loop_pid(robot_positions_pipe, frame_pipe, robot_id: int, camera_
                     (CAMERA_PERSPECTIVE_WIDTH, CAMERA_PERSPECTIVE_HEIGHT)
                 )
             else:
-                frame_transformed = frame.copy()
+                frame_transformed = frame
 
             # Detección RÁPIDA con detector pre-creado
             detected, robot_data = detect_aruco_fast(frame_transformed, robot_id, aruco_detector)
@@ -325,23 +390,16 @@ def perception_loop_pid(robot_positions_pipe, frame_pipe, robot_id: int, camera_
                 # Continuar aunque falle el envío
                 pass
 
-            # ===== ENVIAR FRAME AL PROCESO DE VISUALIZACIÓN (pipe 2, no crítico) =====
-            try:
-                # Vaciar pipe si tiene frames viejos (mantener solo el más reciente)
-                if frame_pipe.poll():
-                    _ = frame_pipe.recv()
-
-                # Enviar frame procesado con datos (frame ~921KB + datos ~100 bytes)
-                frame_pipe.send({
-                    'frame': frame_transformed,
-                    'robot_detected': detected,
-                    'robot_data': robot_data,
-                    'stats': stats.to_dict(),
-                    'timestamp': current_timestamp
-                })
-            except Exception:
-                # Continuar aunque falle el envío
-                pass
+            # ===== ENVIAR FRAME VÍA SHARED MEMORY (thread, no crítico) =====
+            metadata = {
+                'robot_detected': detected,
+                'robot_data': robot_data,
+                'stats': stats.to_dict(),
+                'timestamp': current_timestamp
+            }
+            # Non-blocking put: descarta si la queue está llena (viz lenta)
+            with contextlib.suppress(queue.Full):
+                frame_queue.put_nowait((frame_transformed, metadata))
 
             # Log cada 100 frames (~3 segundos a 30 FPS)
             if stats.frames_analyzed % 100 == 0:
@@ -351,14 +409,14 @@ def perception_loop_pid(robot_positions_pipe, frame_pipe, robot_id: int, camera_
                     f"({stats.frames_detected}/{stats.frames_analyzed})"
                 )
 
-            # Mínima pausa para no saturar CPU (ajustable)
-            time.sleep(0.0001)  # 0.1ms - casi imperceptible
-
     except KeyboardInterrupt:
         log.info("⏹️  Proceso de percepción detenido por usuario")
     except Exception as e:
         log.error(f"❌ Error en proceso de percepción: {e}", exc_info=True)
     finally:
+        # Señalar al thread que pare y esperar
+        frame_queue.put(None)
+        sender_thread.join(timeout=2)
         cap.release()
         log.info("🔌 Cámara cerrada")
         log.info(
