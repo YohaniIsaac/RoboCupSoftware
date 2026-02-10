@@ -90,6 +90,7 @@ def busqueda_player(fr2player_recv, player_send, use_camera=False, enable_planni
                 log.error("   Verifica que el proceso de cámara/simulación esté enviando frames")
                 continue
 
+            # TODO(perf): Copia innecesaria si el frame ya viene de shared memory.
             img = np.copy(frame)
 
             salida, datos = deteccion_jugadores_aruco_tag(img, use_camera=use_camera)

@@ -120,6 +120,9 @@ def deteccion_jugadores_aruco_tag(frame, use_camera=False, allowed_ids=None):
 
     log.debug("Parámetros ArUco optimizados para detección en movimiento")
 
+    # TODO(perf): Crear detector ArUco UNA sola vez fuera de esta función y reutilizarlo
+    # entre frames. Actualmente se recrea cada frame (~0.5ms innecesario).
+    # Ver perception_process_pid.py create_aruco_detector() para referencia.
     detector = cv.aruco.ArucoDetector(aruco_dict, parameters)
 
     corners, ids, _ = detector.detectMarkers(gray)
