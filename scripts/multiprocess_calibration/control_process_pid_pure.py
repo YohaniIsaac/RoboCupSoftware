@@ -42,7 +42,7 @@ class RobotEntity:
     """Entidad de robot con tracking de velocidad para predicción lineal."""
 
     # Máximo tiempo (s) usando predicción antes de considerar robot perdido
-    MAX_PREDICTION_TIME = 0.5
+    MAX_PREDICTION_TIME = 1.5
 
     def __init__(self, robot_id, x, y, angle):
         """Inicializa entidad de robot.

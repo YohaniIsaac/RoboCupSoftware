@@ -28,7 +28,10 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 # pylint: disable=wrong-import-position
-from robot_soccer.perception.player_tracking import deteccion_jugadores_aruco_tag
+from robot_soccer.perception.player_tracking import (
+    create_aruco_detector,
+    deteccion_jugadores_aruco_tag,
+)
 from robot_soccer.ai.path_planning.rrt_star_smart import RrtStarSmart
 from robot_soccer.controllers.differential_drive import DifferentialDriveController
 from robot_soccer.communication.rf_controller import RFController
@@ -44,6 +47,9 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)-8s - %(message)s'
 )
 log = logging.getLogger(__name__)
+
+# Crear detector ArUco una sola vez a nivel de módulo
+_aruco_detector = create_aruco_detector(use_camera=True)
 
 
 class RobotEntity:
@@ -136,7 +142,7 @@ def detect_robots(camera_id=None):
                                      (CAMERA_PERSPECTIVE_WIDTH, CAMERA_PERSPECTIVE_HEIGHT))
 
     # Detectar robots (solo IDs 0-3 permitidos)
-    frame_out, robots = deteccion_jugadores_aruco_tag(frame, use_camera=True, allowed_ids={0, 1, 2, 3})
+    frame_out, robots = deteccion_jugadores_aruco_tag(frame, _aruco_detector, allowed_ids={0, 1, 2, 3})
 
     if len(robots) == 0:
         log.warning("⚠️  No se detectaron robots")
@@ -290,7 +296,7 @@ def control_robot(robot, path, rf_controller, camera_id=2, max_time=30):
                                            (CAMERA_PERSPECTIVE_WIDTH, CAMERA_PERSPECTIVE_HEIGHT))
 
             # Detectar robots (solo IDs 0-3 permitidos)
-            frame_out, robots = deteccion_jugadores_aruco_tag(frame, use_camera=True, allowed_ids={0, 1, 2, 3})
+            frame_out, robots = deteccion_jugadores_aruco_tag(frame, _aruco_detector, allowed_ids={0, 1, 2, 3})
 
             # Buscar el robot controlado
             robot_found = False

@@ -128,6 +128,9 @@ def camera_feed(fr2ball_env, fr2player_env, env_ruta, fr2traj_env, camera_id=2,
 
             # Enviar frame transformado a procesos de percepción (solo si están habilitados)
             # Los frames ya están en formato BGR (OpenCV), no necesitan conversión
+            # TODO(perf): Reemplazar pipe.send() por shared memory para eliminar
+            # serialización pickle de frames (~921KB cada uno, ~15-25ms por envío).
+            # Ver scripts/multiprocess_calibration/ para implementación de referencia.
             try:
                 if enable_ball:
                     fr2ball_env.send(frame_transformed)

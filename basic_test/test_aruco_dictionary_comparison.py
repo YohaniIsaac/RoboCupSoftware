@@ -20,6 +20,20 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+# Agregar src al path para importar config
+ROOT_DIR = Path(__file__).parent.parent
+sys.path.insert(0, str(ROOT_DIR / "src"))
+
+from robot_soccer.config import (
+    ARUCO_ADAPTIVE_THRESH_WIN_SIZE_MIN, ARUCO_ADAPTIVE_THRESH_WIN_SIZE_MAX,
+    ARUCO_ADAPTIVE_THRESH_WIN_SIZE_STEP,
+    ARUCO_MIN_MARKER_PERIMETER_RATE, ARUCO_MAX_MARKER_PERIMETER_RATE,
+    ARUCO_CORNER_REFINEMENT_METHOD, ARUCO_ERROR_CORRECTION_RATE,
+    ARUCO_PERSPECTIVE_REMOVE_PX_PER_CELL, ARUCO_PERSPECTIVE_REMOVE_IGNORED_MARGIN,
+    ARUCO_MIN_DISTANCE_TO_BORDER, ARUCO_MARKER_BORDER_BITS,
+    ARUCO_MIN_OTSU_STD_DEV, ARUCO_POLYGONAL_APPROX_ACCURACY_RATE,
+)
+
 # ── Diccionarios a comparar ───────────────────────────────────────────────────
 DICTIONARIES = [
     ("4x4_50",        cv2.aruco.DICT_4X4_50,        "ArUco 4x4  (16 bits, FP moderado)"),
@@ -43,10 +57,10 @@ CELL_W, CELL_H = 480, 360
 # ── Detector ─────────────────────────────────────────────────────────────────
 
 def create_detector(dict_const):
-    """Crea detector ArUco con los mismos parámetros que perception_process_pid.py.
+    """Crea detector ArUco con los mismos parámetros de config.py.
 
-    Parámetros idénticos a create_aruco_detector() para que el test sea
-    representativo del comportamiento real en producción.
+    Usa parámetros centralizados para que el test sea representativo
+    del comportamiento real en producción.
 
     Args:
         dict_const: Constante del diccionario (cv2.aruco.DICT_*)
@@ -57,23 +71,19 @@ def create_detector(dict_const):
     aruco_dict = cv2.aruco.getPredefinedDictionary(dict_const)
     params = cv2.aruco.DetectorParameters()
 
-    params.adaptiveThreshWinSizeMin = 5
-    params.adaptiveThreshWinSizeMax = 51
-    params.adaptiveThreshWinSizeStep = 10
-
-    params.minMarkerPerimeterRate = 0.01
-    params.maxMarkerPerimeterRate = 6.0
-
-    # CORNER_REFINE_NONE: mismo ajuste que en el pipeline de producción
-    params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_NONE
-
-    params.errorCorrectionRate = 0.8
-    params.perspectiveRemovePixelPerCell = 6
-    params.perspectiveRemoveIgnoredMarginPerCell = 0.10
-    params.minDistanceToBorder = 1
-    params.markerBorderBits = 1
-    params.minOtsuStdDev = 2.0
-    params.polygonalApproxAccuracyRate = 0.08
+    params.adaptiveThreshWinSizeMin = ARUCO_ADAPTIVE_THRESH_WIN_SIZE_MIN
+    params.adaptiveThreshWinSizeMax = ARUCO_ADAPTIVE_THRESH_WIN_SIZE_MAX
+    params.adaptiveThreshWinSizeStep = ARUCO_ADAPTIVE_THRESH_WIN_SIZE_STEP
+    params.minMarkerPerimeterRate = ARUCO_MIN_MARKER_PERIMETER_RATE
+    params.maxMarkerPerimeterRate = ARUCO_MAX_MARKER_PERIMETER_RATE
+    params.cornerRefinementMethod = ARUCO_CORNER_REFINEMENT_METHOD
+    params.errorCorrectionRate = ARUCO_ERROR_CORRECTION_RATE
+    params.perspectiveRemovePixelPerCell = ARUCO_PERSPECTIVE_REMOVE_PX_PER_CELL
+    params.perspectiveRemoveIgnoredMarginPerCell = ARUCO_PERSPECTIVE_REMOVE_IGNORED_MARGIN
+    params.minDistanceToBorder = ARUCO_MIN_DISTANCE_TO_BORDER
+    params.markerBorderBits = ARUCO_MARKER_BORDER_BITS
+    params.minOtsuStdDev = ARUCO_MIN_OTSU_STD_DEV
+    params.polygonalApproxAccuracyRate = ARUCO_POLYGONAL_APPROX_ACCURACY_RATE
 
     return cv2.aruco.ArucoDetector(aruco_dict, params)
 

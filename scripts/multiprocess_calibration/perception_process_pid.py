@@ -39,6 +39,7 @@ from robot_soccer.config import (
     CAMERA_PERSPECTIVE_SRC_POINTS,
     CAMERA_PERSPECTIVE_WIDTH,
 )
+from robot_soccer.perception.player_tracking import create_aruco_detector
 
 log = logging.getLogger(__name__)
 
@@ -108,50 +109,8 @@ class PerceptionStats:
         }
 
 
-def create_aruco_detector():
-    """Crea el detector ArUco UNA sola vez (reutilizable entre frames).
-
-    Returns:
-        cv2.aruco.ArucoDetector: Detector configurado y listo para usar
-    """
-    aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_5X5_1000)
-    parameters = cv2.aruco.DetectorParameters()
-
-    # Ventana de umbral adaptativo
-    parameters.adaptiveThreshWinSizeMin = 5
-    parameters.adaptiveThreshWinSizeMax = 51
-    parameters.adaptiveThreshWinSizeStep = 10
-
-    # Rango de tamaño de marcadores (detecta pequeños y grandes)
-    parameters.minMarkerPerimeterRate = 0.01
-    parameters.maxMarkerPerimeterRate = 6.0
-
-    # Refinamiento de esquinas para máxima precisión
-    parameters.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
-    parameters.cornerRefinementWinSize = 3
-    parameters.cornerRefinementMaxIterations = 50
-    parameters.cornerRefinementMinAccuracy = 0.01
-
-    # Corrección de errores
-    parameters.errorCorrectionRate = 0.8
-
-    # Remoción de perspectiva
-    parameters.perspectiveRemovePixelPerCell = 6
-    parameters.perspectiveRemoveIgnoredMarginPerCell = 0.10
-
-    # Distancia al borde
-    parameters.minDistanceToBorder = 1
-
-    # Bits de borde del marcador
-    parameters.markerBorderBits = 1
-
-    # Desviación estándar mínima para Otsu
-    parameters.minOtsuStdDev = 2.0
-
-    # Aproximación poligonal
-    parameters.polygonalApproxAccuracyRate = 0.08
-
-    return cv2.aruco.ArucoDetector(aruco_dict, parameters)
+# create_aruco_detector() importado de robot_soccer.perception.player_tracking
+# Usa ARUCO_DICTIONARY_CAMERA y parámetros centralizados de config.py
 
 
 def detect_aruco_fast(frame, robot_id: int, detector):
@@ -329,7 +288,7 @@ def perception_loop_pid(robot_positions_pipe, frame_pipe, robot_id: int, camera_
         log.info("✅ Transformación de perspectiva calculada")
 
     # Crear detector ArUco UNA sola vez (reutilizable entre frames)
-    aruco_detector = create_aruco_detector()
+    aruco_detector = create_aruco_detector(use_camera=True)
     log.info("✅ Detector ArUco creado (reutilizable)")
 
     # Crear Queue y lanzar thread para envío asíncrono de frames

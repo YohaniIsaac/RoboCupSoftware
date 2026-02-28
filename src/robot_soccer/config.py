@@ -5,6 +5,8 @@ Contiene constantes y variables compartidas entre diferentes módulos.
 
 from pathlib import Path
 
+import cv2
+
 BALL_CAPTURE_DISTANCE = 25
 
 # ==========================================
@@ -16,6 +18,40 @@ ROOT_DIR = Path(__file__).parent.parent  # sube 2 niveles
 
 # Si arucoMarkers está un nivel más arriba de la raíz del proyecto
 ARUCO_MARKERS_DIR = ROOT_DIR.parent / "arucoMarkers"
+
+# ==========================================
+# Configuración de marcadores ArUco
+# ==========================================
+# Para cambiar el diccionario, solo modifica ARUCO_DICTIONARY_CAMERA.
+# Opciones comunes:
+#   cv2.aruco.DICT_4X4_50         - 4x4, 50 IDs, detección rápida
+#   cv2.aruco.DICT_5X5_50         - 5x5, 50 IDs, más robusto
+#   cv2.aruco.DICT_APRILTAG_16H5  - AprilTag 4x4, Hamming ≥5, excelente anti-confusión
+#   cv2.aruco.DICT_APRILTAG_25H9  - AprilTag 5x5, Hamming ≥9, máxima robustez
+ARUCO_DICTIONARY_CAMERA = cv2.aruco.DICT_APRILTAG_16H5  # Diccionario para cámara real
+ARUCO_DICTIONARY_SIM = cv2.aruco.DICT_7X7_1000           # Diccionario para simulación
+
+# IDs de marcadores asignados a cada robot
+ARUCO_ROBOT_IDS = [0, 1, 2, 3]          # Todos los robots
+ARUCO_TEAM_RED_IDS = [0, 1]             # Equipo rojo: robot 0 y 1
+ARUCO_TEAM_BLUE_IDS = [2, 3]            # Equipo azul: robot 2 y 3
+
+# --- Parámetros de detección ArUco ---
+# Estos se usan en TODOS los detectores (pipeline principal, calibración, tests).
+# Optimizados para detección en movimiento con cámara de baja resolución.
+ARUCO_ADAPTIVE_THRESH_WIN_SIZE_MIN = 5
+ARUCO_ADAPTIVE_THRESH_WIN_SIZE_MAX = 51
+ARUCO_ADAPTIVE_THRESH_WIN_SIZE_STEP = 10
+ARUCO_MIN_MARKER_PERIMETER_RATE = 0.01
+ARUCO_MAX_MARKER_PERIMETER_RATE = 6.0
+ARUCO_CORNER_REFINEMENT_METHOD = cv2.aruco.CORNER_REFINE_NONE  # NONE = más rápido
+ARUCO_ERROR_CORRECTION_RATE = 0.8        # 80% tolerancia a errores (crítico para motion blur)
+ARUCO_PERSPECTIVE_REMOVE_PX_PER_CELL = 6
+ARUCO_PERSPECTIVE_REMOVE_IGNORED_MARGIN = 0.10
+ARUCO_MIN_DISTANCE_TO_BORDER = 1
+ARUCO_MARKER_BORDER_BITS = 1
+ARUCO_MIN_OTSU_STD_DEV = 2.0
+ARUCO_POLYGONAL_APPROX_ACCURACY_RATE = 0.08
 
 # ==========================================
 # Dimensiones y configuración del campo

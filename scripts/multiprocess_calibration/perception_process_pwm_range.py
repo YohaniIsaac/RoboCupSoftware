@@ -29,6 +29,8 @@ import numpy as np
 ROOT_DIR = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(ROOT_DIR / "src"))
 
+from robot_soccer.perception.player_tracking import create_aruco_detector
+
 log = logging.getLogger(__name__)
 
 
@@ -96,72 +98,23 @@ class PerceptionStats:
         }
 
 
-def detect_aruco_fast(frame, robot_id: int):
+def detect_aruco_fast(frame, robot_id: int, detector):
     """Detección ArUco ULTRA-RÁPIDA sin procesamiento adicional.
 
-    Elimina TODO el pre-procesamiento para máxima velocidad:
-    - Sin sharpening (~10ms ahorrados)
-    - Sin CLAHE (~15ms ahorrados)
-    - Sin bilateral filter (~10ms ahorrados)
-    - Sin transformación de perspectiva (~7ms ahorrados)
-    - Sin dibujos (~18ms ahorrados)
-
-    Total ahorrado: ~60ms
+    Usa detector pre-creado de create_aruco_detector() para evitar
+    recrear el detector cada frame (~0.5ms de ahorro).
 
     Args:
         frame: Frame BGR de la cámara (640x480)
         robot_id: ID del robot a detectar (0-3)
+        detector: cv2.aruco.ArucoDetector pre-creado
 
     Returns:
         tuple: (detected: bool, robot_data: dict or None)
             - detected: True si se encontró el robot
             - robot_data: {'x': int, 'y': int, 'angle': float} o None
     """
-    # Convertir a escala de grises (única operación de pre-procesamiento)
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-
-    # Diccionario ArUco para cámara física (5x5 para mejor detección)
-    aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_5X5_1000)
-
-    # Parámetros de detección optimizados (copiados del sistema estándar)
-    parameters = cv2.aruco.DetectorParameters()
-
-    # Ventana de umbral adaptativo
-    parameters.adaptiveThreshWinSizeMin = 5
-    parameters.adaptiveThreshWinSizeMax = 51
-    parameters.adaptiveThreshWinSizeStep = 10
-
-    # Rango de tamaño de marcadores (detecta pequeños y grandes)
-    parameters.minMarkerPerimeterRate = 0.01
-    parameters.maxMarkerPerimeterRate = 6.0
-
-    # Refinamiento de esquinas para máxima precisión
-    parameters.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
-    parameters.cornerRefinementWinSize = 3
-    parameters.cornerRefinementMaxIterations = 50
-    parameters.cornerRefinementMinAccuracy = 0.01
-
-    # Corrección de errores
-    parameters.errorCorrectionRate = 0.8
-
-    # Remoción de perspectiva
-    parameters.perspectiveRemovePixelPerCell = 6
-    parameters.perspectiveRemoveIgnoredMarginPerCell = 0.10
-
-    # Distancia al borde
-    parameters.minDistanceToBorder = 1
-
-    # Bits de borde del marcador
-    parameters.markerBorderBits = 1
-
-    # Desviación estándar mínima para Otsu
-    parameters.minOtsuStdDev = 2.0
-
-    # Aproximación poligonal
-    parameters.polygonalApproxAccuracyRate = 0.08
-
-    # Crear detector y detectar marcadores
-    detector = cv2.aruco.ArucoDetector(aruco_dict, parameters)
     corners, ids, _ = detector.detectMarkers(gray)
 
     # Buscar el robot específico
@@ -250,6 +203,10 @@ def perception_loop_pwm_range(robot_positions_pipe, robot_id: int, camera_id: in
     actual_fps = cap.get(cv2.CAP_PROP_FPS)
     log.info(f"📷 Cámara configurada: FPS objetivo={actual_fps:.1f}")
 
+    # Crear detector ArUco UNA sola vez (reutilizable entre frames)
+    aruco_detector = create_aruco_detector(use_camera=True)
+    log.info("✅ Detector ArUco creado (reutilizable)")
+
     # Estadísticas
     stats = PerceptionStats()
 
@@ -265,7 +222,7 @@ def perception_loop_pwm_range(robot_positions_pipe, robot_id: int, camera_id: in
                 continue
 
             # Detección RÁPIDA (sin pre-procesamiento)
-            detected, robot_data = detect_aruco_fast(frame, robot_id)
+            detected, robot_data = detect_aruco_fast(frame, robot_id, aruco_detector)
 
             # Actualizar estadísticas
             stats.update(detected)

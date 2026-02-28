@@ -11,7 +11,10 @@ import cv2
 sys.path.insert(0, '/home/yt/git/RoboCupSoftware/src')
 
 # pylint: disable=wrong-import-position
-from robot_soccer.perception.player_tracking import deteccion_jugadores_aruco_tag
+from robot_soccer.perception.player_tracking import (
+    create_aruco_detector,
+    deteccion_jugadores_aruco_tag,
+)
 from robot_soccer.perception.ball_tracking import Ball
 from robot_soccer.config import RANGO_COLOR_NARANJO
 
@@ -49,6 +52,9 @@ def main():
     print("=" * 50)
     print("")
 
+    # Crear detector ArUco una sola vez
+    aruco_detector = create_aruco_detector(use_camera=True)
+
     # Leer primer frame para inicializar pelota
     ret, frame = cap.read()
     if not ret:
@@ -76,8 +82,7 @@ def main():
         frame_count += 1
 
         # === DETECCIÓN DE JUGADORES ===
-        # use_camera=True para usar diccionario 6x6
-        frame_jugadores, datos_jugadores = deteccion_jugadores_aruco_tag(frame, use_camera=True)
+        frame_jugadores, datos_jugadores = deteccion_jugadores_aruco_tag(frame, aruco_detector)
 
         # === DETECCIÓN DE PELOTA ===
         # Convertir a HSV para detección de pelota

@@ -18,7 +18,10 @@ import numpy as np
 ROOT_DIR = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(ROOT_DIR / "src"))
 
-from robot_soccer.perception.player_tracking import deteccion_jugadores_aruco_tag
+from robot_soccer.perception.player_tracking import (
+    create_aruco_detector,
+    deteccion_jugadores_aruco_tag,
+)
 from robot_soccer.config import (
     CAMERA_PERSPECTIVE_ENABLED,
     CAMERA_PERSPECTIVE_SRC_POINTS,
@@ -93,6 +96,10 @@ def perception_loop(robot_positions_pipe, frame_pipe, camera_id):
     frame_count = 0
     last_log_time = time.time()
 
+    # Crear detector ArUco UNA sola vez (reutilizable entre frames)
+    aruco_detector = create_aruco_detector(use_camera=True)
+    log.info("✅ Detector ArUco creado (reutilizable)")
+
     # ===== IDs PERMITIDOS =====
     # Solo detectar robots con IDs 0, 1, 2, 3 (rechazar falsos positivos)
     ALLOWED_ROBOT_IDS = {0, 1, 2, 3}
@@ -122,7 +129,7 @@ def perception_loop(robot_positions_pipe, frame_pipe, camera_id):
             # Detectar robots (solo IDs permitidos: 0, 1, 2, 3)
             frame_with_markers, robots_data = deteccion_jugadores_aruco_tag(
                 frame,
-                use_camera=True,
+                aruco_detector,
                 allowed_ids=ALLOWED_ROBOT_IDS
             )
 
