@@ -4,6 +4,8 @@ Este módulo implementa nodos específicos y árboles predefinidos para las
 estrategias y tácticas de los robots en el juego de fútbol.
 """
 
+import logging
+
 import numpy as np
 from robot_soccer.ai.behavior_tree.utils import calculate_ball_approach_position
 from robot_soccer.config import ALTO_CAMPO, ANCHO_CAMPO, ROL_ATACANTE, ROL_DEFENSIVO
@@ -39,6 +41,7 @@ class Blackboard:
             opponents: Lista de jugadores rivales
             team: Equipo ('red' o 'blue'). Defaults to "red".
         """
+        self.logger = logging.getLogger(__name__)
         self.player = player  # Jugador que ejecuta este árbol
         self.ball = ball  # Pelota
         self.team_players = team_players  # Lista de jugadores del equipo
@@ -732,7 +735,9 @@ def intercept_ball(blackboard):
 
     # Calcular posición de intercepción
     target_pos = calculate_interception_position(
-        player_pos, ball_pos, ball_velocity, prediction_time, approach_distance=40
+        player_pos, ball_pos, ball_velocity,
+        blackboard.opponent_goal_pos, blackboard.team,
+        prediction_time, approach_distance=40
     )
 
     # Registrar para debugging
