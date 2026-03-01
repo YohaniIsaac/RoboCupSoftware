@@ -8,9 +8,10 @@ import math
 import time
 import cv2 as cv
 from robot_soccer.ai.path_planning.rrt_star_smart import RrtStarSmart
+from robot_soccer.core.shared_frame import SharedFrameReader
 
 
-def trayectoria(ball_received, player_received, fr2traj_recv):
+def trayectoria(ball_received, player_received, frame_config):
     """Función principal para la planificación de trayectorias en tiempo real.
 
     Esta función ejecuta un bucle continuo que recibe datos de la pelota y jugadores,
@@ -49,21 +50,21 @@ def trayectoria(ball_received, player_received, fr2traj_recv):
         ... )
         >>> p4.start()
     """
+    reader = SharedFrameReader(frame_config)
+
     try:
         # Inicializar el tiempo de inicio para el retraso
         start_time = time.time()
         delay_seconds = 2  # Por ejemplo, un retraso de 5 segundos
-        # print("---------COORDENADAS DE PELOTA------------")
-        # print("---------COORDENADAS DE JUGADORES------------")
         que_robot_mover = 1
         first = True
         path_rrt = RrtStarSmart(50, 0.50, 5, 10000,
                                 None, None, None)
 
         while True:
-            # que_robot_mover = que_robot_mover.recv()
-            # final = final.recv()
-            frame = fr2traj_recv.recv()
+            frame = reader.read(blocking_timeout=5.0)
+            if frame is None:
+                continue
             x_ball, y_ball = ball_received.recv()
             coords_players = player_received.recv()
 
@@ -103,6 +104,8 @@ def trayectoria(ball_received, player_received, fr2traj_recv):
 
     except Exception as e:
         print(f"error en trayectoria {e}")
+    finally:
+        reader.cleanup()
 
 
 def dibujar(img, path):

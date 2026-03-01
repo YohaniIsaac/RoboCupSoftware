@@ -9,27 +9,22 @@ import cv2
 import numpy as np
 from robot_soccer.config import (CAMERA_PERSPECTIVE_ENABLED, CAMERA_PERSPECTIVE_SRC_POINTS,
                                   CAMERA_PERSPECTIVE_WIDTH, CAMERA_PERSPECTIVE_HEIGHT)
+from robot_soccer.core.shared_frame import SharedFrameWriter
 
 log = logging.getLogger(__name__)
 
 
-def camera_feed(fr2ball_env, fr2player_env, env_ruta, fr2traj_env, camera_id=2,
-                enable_ball=True, enable_player=True, enable_traj=True):
+def camera_feed(frame_config, env_ruta, camera_id=2):
     """Captura video de cámara y lo distribuye a los procesos de percepción.
 
     Reemplaza simulacion_principal() para usar una cámara física en lugar
-    de la simulación pygame. Mantiene la misma interfaz de comunicación
-    mediante pipes.
+    de la simulación pygame. Escribe frames a shared memory con double
+    buffering para que todos los consumidores lean sin serialización.
 
     Args:
-        fr2ball_env (multiprocessing.Pipe): Pipe para enviar frames a detección de pelota.
-        fr2player_env (multiprocessing.Pipe): Pipe para enviar frames a detección de jugadores.
+        frame_config (dict): Configuración de shared memory (de SharedFrameWriter.config()).
         env_ruta (multiprocessing.Queue): Cola para recibir rutas planificadas (no usado en modo cámara).
-        fr2traj_env (multiprocessing.Pipe): Pipe para enviar frames a análisis de trayectorias.
         camera_id (int): ID de la cámara (default: 2 para DroidCam).
-        enable_ball (bool): Si True, envía frames al proceso de búsqueda de pelota.
-        enable_player (bool): Si True, envía frames al proceso de búsqueda de jugadores.
-        enable_traj (bool): Si True, envía frames al proceso de trayectorias.
 
     Note:
         - Requiere que droidcam-cli esté corriendo si usa DroidCam
@@ -92,6 +87,21 @@ def camera_feed(fr2ball_env, fr2player_env, env_ruta, fr2traj_env, camera_id=2,
 
     log.info("=" * 60)
 
+    # Conectar al shared memory como escritor
+    writer = SharedFrameWriter.__new__(SharedFrameWriter)
+    writer.shape = frame_config['shape']
+    writer._active_index = frame_config['active_index']
+    writer._frame_counter = frame_config['frame_counter']
+    from multiprocessing import shared_memory as _shm_mod
+    writer._shm = [
+        _shm_mod.SharedMemory(name=frame_config['shm_names'][i], create=False)
+        for i in range(2)
+    ]
+    writer._arrays = [
+        np.ndarray(writer.shape, dtype=np.uint8, buffer=writer._shm[i].buf)
+        for i in range(2)
+    ]
+
     frame_count = 0
     start_time = time.time()
     fps_display = 0
@@ -126,21 +136,11 @@ def camera_feed(fr2ball_env, fr2player_env, env_ruta, fr2traj_env, camera_id=2,
             else:
                 frame_transformed = frame
 
-            # Enviar frame transformado a procesos de percepción (solo si están habilitados)
-            # Los frames ya están en formato BGR (OpenCV), no necesitan conversión
-            # TODO(perf): Reemplazar pipe.send() por shared memory para eliminar
-            # serialización pickle de frames (~921KB cada uno, ~15-25ms por envío).
-            # Ver scripts/multiprocess_calibration/ para implementación de referencia.
+            # Escribir frame a shared memory (todos los consumidores leen de ahí)
             try:
-                if enable_ball:
-                    fr2ball_env.send(frame_transformed)
-                if enable_player:
-                    fr2player_env.send(frame_transformed)
-                if enable_traj:
-                    fr2traj_env.send(frame_transformed)
+                writer.write(frame_transformed)
             except Exception as e:
-                log.error("Error enviando frame a procesos: %i", e)
-                # break
+                log.error("Error escribiendo frame a shared memory: %s", e)
 
             # Mostrar frame con información
             display_frame = frame.copy()
@@ -197,4 +197,6 @@ def camera_feed(fr2ball_env, fr2player_env, env_ruta, fr2traj_env, camera_id=2,
         # Limpiar
         cap.release()
         cv2.destroyAllWindows()
+        for shm in writer._shm:
+            shm.close()
         log.info("✅ Cámara cerrada")

@@ -14,86 +14,12 @@ from robot_soccer.config import (ANCHO_TOTAL, ALTO_TOTAL, ANCHO_CAMPO, ALTO_CAMP
                                 COLOR_BLANCO, MARGEN_CANCHA, LARGO_ARCO, FPS)
 
 
-def simulacion_principal(fr2ball_env, fr2player_env, env_ruta, fr2traj_env, enable_ball=True, enable_player=True, enable_traj=True):
+def simulacion_principal(frame_config, env_ruta):
     """Ejecuta la simulación principal del juego de fútbol robot.
 
-    Esta función inicializa y ejecuta el bucle principal de simulación,
-    manejando la renderización gráfica con pygame, la actualización de
-    estados de jugadores y pelota, detección de colisiones, y comunicación
-    entre procesos mediante pipes.
-
     Args:
-        fr2ball_env : multiprocessing.Pipe
-            Pipe para enviar frames al proceso de detección de pelota.
-            Se utiliza para comunicar frames de video capturados desde pygame
-            al módulo de procesamiento de imágenes para tracking de pelota.
-
-        fr2player_env : multiprocessing.Pipe
-            Pipe para enviar frames al proceso de detección de jugadores.
-            Permite la comunicación de frames de video al módulo de tracking
-            de jugadores para análisis de posicionamiento.
-
-        env_ruta : multiprocessing.Queue
-            Cola para recibir nodos de planificación de rutas.
-            Contiene las coordenadas de destino calculadas por el algoritmo
-            de planificación de rutas (ej. RRT*) para el movimiento de jugadores.
-
-        fr2traj_env : multiprocessing.Pipe
-            Pipe para enviar frames al proceso de análisis de trayectorias.
-            Se utiliza para enviar información visual al módulo de análisis
-            de trayectorias y paths de los jugadores.
-
-        enable_ball : bool, optional
-            Si True, envía frames al proceso de búsqueda de pelota (default: True).
-
-        enable_player : bool, optional
-            Si True, envía frames al proceso de búsqueda de jugadores (default: True).
-
-        enable_traj : bool, optional
-            Si True, envía frames al proceso de trayectorias (default: True).
-
-    Returns:
-        None
-            La función ejecuta un bucle infinito hasta que se cierre la ventana
-            de pygame o ocurra una excepción.
-
-    Raises:
-        Exception
-            Cualquier excepción durante la ejecución se captura y se imprime
-            un mensaje de error con detalles.
-
-    Notes:
-        - La función inicializa pygame y crea una ventana de simulación
-        - Dibuja el campo de fútbol con líneas y elementos gráficos
-        - Crea instancias de jugadores (Player4Simulation) y pelota (Ball4Simulation)
-        - Ejecuta un bucle principal que:
-            * Procesa eventos de pygame
-            * Actualiza posiciones de jugadores y pelota
-            * Detecta colisiones entre objetos
-            * Renderiza elementos gráficos
-            * Convierte frames a formato OpenCV
-            * Envía frames a procesos de análisis mediante pipes
-
-    Examples:
-        Típicamente se invoca desde el controlador de multiprocesos:
-
-        >>> import multiprocessing
-        >>> fr2ball_env, fr2ball_recv = multiprocessing.Pipe()
-        >>> fr2player_env, fr2player_recv = multiprocessing.Pipe()
-        >>> fr2traj_env, fr2traj_recv = multiprocessing.Pipe()
-        >>> env_ruta = multiprocessing.Queue()
-        >>>
-        >>> process = multiprocessing.Process(
-        ...     target=simulacion_principal,
-        ...     args=(fr2ball_env, fr2player_env, env_ruta, fr2traj_env)
-        ... )
-        >>> process.start()
-
-    See Also:
-        robot_soccer.entities.simulation.player_sim.Player4Simulation : Clase de jugador para simulación
-        robot_soccer.entities.simulation.ball_sim.Ball4Simulation : Clase de pelota para simulación
-        robot_soccer.core.physics.detectar_colisiones : Función de detección de colisiones
-        robot_soccer.core.game_controller.execute_multiprocessing : Controlador principal de procesos
+        frame_config (dict): Configuración de shared memory (de SharedFrameWriter.config()).
+        env_ruta (multiprocessing.Queue): Cola para recibir nodos de planificación de rutas.
     """
     # Crear la ventana de pygame
     pygame.init()
@@ -129,6 +55,28 @@ def simulacion_principal(fr2ball_env, fr2player_env, env_ruta, fr2traj_env, enab
                      (MARGEN_CANCHA + ANCHO_CAMPO - 1, MARGEN_CANCHA + (ALTO_CAMPO // 2) - LARGO_ARCO // 2,
                       ANCHO_TOTAL - 1,
                       LARGO_ARCO), 2)
+
+    # Conectar al shared memory como escritor
+    from multiprocessing import shared_memory as _shm_mod
+    _shape = frame_config['shape']
+    _active_index = frame_config['active_index']
+    _frame_counter = frame_config['frame_counter']
+    _shm_bufs = [
+        _shm_mod.SharedMemory(name=frame_config['shm_names'][i], create=False)
+        for i in range(2)
+    ]
+    _shm_arrays = [
+        np.ndarray(_shape, dtype=np.uint8, buffer=_shm_bufs[i].buf)
+        for i in range(2)
+    ]
+
+    def write_frame(frame):
+        inactive = 1 - _active_index.value
+        np.copyto(_shm_arrays[inactive], frame)
+        with _active_index.get_lock():
+            _active_index.value = inactive
+        with _frame_counter.get_lock():
+            _frame_counter.value += 1
 
     # Crear instancias de la clase Objeto y pelota
     player_1 = Player4Simulation(400, 1000, 300, 0, 0, 0, 0,
@@ -229,13 +177,11 @@ def simulacion_principal(fr2ball_env, fr2player_env, env_ruta, fr2traj_env, enab
             frame = np.transpose(frame, (1, 0, 2))
             frame = cv.cvtColor(frame, cv.COLOR_RGB2BGR)
 
-            # Enviar frames solo a los procesos habilitados
-            if enable_ball:
-                fr2ball_env.send(frame)
-            if enable_player:
-                fr2player_env.send(frame)
-            if enable_traj:
-                fr2traj_env.send(frame)
+            # Escribir frame a shared memory (todos los consumidores leen de ahí)
+            write_frame(frame)
             # inicio += 1
     except Exception as e:
         print(f"error en make {e}")
+    finally:
+        for shm in _shm_bufs:
+            shm.close()

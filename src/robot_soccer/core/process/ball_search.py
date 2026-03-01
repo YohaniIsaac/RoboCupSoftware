@@ -1,14 +1,14 @@
 import logging
 import traceback
 
-import numpy as np
 import cv2 as cv
 from robot_soccer.perception.ball_tracking import Ball
+from robot_soccer.core.shared_frame import SharedFrameReader
 
 log = logging.getLogger(__name__)
 
 
-def busqueda_ball(fr2ball_recv, ball_send, enable_planning=True):
+def busqueda_ball(frame_config, ball_send, enable_planning=True):
     """Realiza la búsqueda y seguimiento continuo de la pelota en el campo de juego.
 
     Esta función implementa un algoritmo de detección y seguimiento de pelota
@@ -72,23 +72,23 @@ def busqueda_ball(fr2ball_recv, ball_send, enable_planning=True):
     log.info("   Rango de color: HSV %s", naranjo)
     log.info("Esperando frames...")
 
+    reader = SharedFrameReader(frame_config)
+
     try:
         frame_count = 0
         while True:
-            # Recibir frame con timeout
-            if fr2ball_recv.poll(timeout=5):  # Esperar máximo 5 segundos
-                frame = fr2ball_recv.recv()
-                frame_count += 1
-
-                # Log del primer frame
-                if frame_count == 1:
-                    log.info("✅ Primer frame recibido")
-            else:
+            # Leer frame de shared memory (retorna copia local)
+            frame = reader.read(blocking_timeout=5.0)
+            if frame is None:
                 log.error("❌ Timeout: No se recibió frame en 5 segundos")
                 log.error("   Verifica que el proceso de cámara/simulación esté enviando frames")
                 continue
 
-            img = np.copy(frame)
+            frame_count += 1
+            if frame_count == 1:
+                log.info("✅ Primer frame recibido")
+
+            img = frame  # Ya es copia local, np.copy innecesario
             hsv = cv.cvtColor(frame, cv.COLOR_BGR2HSV)
 
             # FASE 1: Inicialización - Detectar pelota por primera vez
@@ -155,12 +155,15 @@ def busqueda_ball(fr2ball_recv, ball_send, enable_planning=True):
                 break
 
         cv.destroyAllWindows()
+        reader.cleanup()
 
     except KeyboardInterrupt:
         log.info("🛑 Búsqueda de pelota interrumpida por el usuario")
         cv.destroyAllWindows()
+        reader.cleanup()
 
     except Exception as e:
         log.error("❌ Error crítico en búsqueda de pelota: %s", e)
         log.error(traceback.format_exc())
         cv.destroyAllWindows()
+        reader.cleanup()

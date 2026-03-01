@@ -7,31 +7,24 @@ de los jugadores detectados.
 """
 import logging
 
-import numpy as np
 import cv2 as cv
 from robot_soccer.perception.player_tracking import (
     create_aruco_detector,
     deteccion_jugadores_aruco_tag,
 )
+from robot_soccer.core.shared_frame import SharedFrameReader
 
 log = logging.getLogger(__name__)
 
 
-def busqueda_player(fr2player_recv, player_send, use_camera=False, enable_planning=True):
+def busqueda_player(frame_config, player_send, use_camera=False, enable_planning=True):
     """Ejecuta la búsqueda y detección continua de jugadores en el campo.
 
-    Esta función implementa un bucle de procesamiento de video en tiempo real
-    que recibe frames a través de una tubería de multiproceso, detecta jugadores
-    usando ArUco tags y envía las coordenadas detectadas a través de otra tubería.
-
     Args:
-        fr2player_recv (multiprocessing.Pipe): Tubería para recibir frames de video.
-        player_send (multiprocessing.Pipe): Tubería para enviar las coordenadas
-            de los jugadores detectados.
-        use_camera (bool): Si True usa diccionario de cámara configurado en config.py,
-            si False usa diccionario de simulación. Default: False.
-        enable_planning (bool): Si True, envía coordenadas al proceso de planificación.
-            Default: True.
+        frame_config (dict): Configuración de shared memory (de SharedFrameWriter.config()).
+        player_send (multiprocessing.Pipe): Tubería para enviar coordenadas de jugadores.
+        use_camera (bool): Si True usa diccionario de cámara. Default: False.
+        enable_planning (bool): Si True, envía coordenadas al planificador. Default: True.
     """
     logging.basicConfig(
         level=logging.INFO,
@@ -44,23 +37,23 @@ def busqueda_player(fr2player_recv, player_send, use_camera=False, enable_planni
     log.info("Iniciando búsqueda de jugadores...")
     log.info("Esperando frames...")
 
+    reader = SharedFrameReader(frame_config)
+
     try:
         frame_count = 0
         while True:
-            if fr2player_recv.poll(timeout=5):
-                frame = fr2player_recv.recv()
-                frame_count += 1
-
-                if frame_count == 1:
-                    log.info("Primer frame recibido")
-                elif frame_count % 60 == 0:
-                    log.debug("Frames procesados: %d", frame_count)
-            else:
+            frame = reader.read(blocking_timeout=5.0)
+            if frame is None:
                 log.error("Timeout: No se recibió frame en 5 segundos")
                 continue
 
-            # TODO(perf): Copia innecesaria si el frame ya viene de shared memory.
-            img = np.copy(frame)
+            frame_count += 1
+            if frame_count == 1:
+                log.info("Primer frame recibido")
+            elif frame_count % 60 == 0:
+                log.debug("Frames procesados: %d", frame_count)
+
+            img = frame  # Ya es copia local del shared memory
 
             salida, datos = deteccion_jugadores_aruco_tag(img, detector)
 
@@ -76,3 +69,5 @@ def busqueda_player(fr2player_recv, player_send, use_camera=False, enable_planni
 
     except Exception as e:
         log.error("Error en búsqueda de jugadores: %s", e)
+    finally:
+        reader.cleanup()

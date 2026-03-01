@@ -10,6 +10,9 @@ from .process.main_simulation import simulacion_principal
 from .process.ball_search import busqueda_ball
 from .process.search_for_players import busqueda_player
 from .process.path import trayectoria
+from .shared_frame import SharedFrameWriter
+from robot_soccer.config import (CAMERA_PERSPECTIVE_WIDTH, CAMERA_PERSPECTIVE_HEIGHT,
+                                  ANCHO_TOTAL, ALTO_TOTAL)
 
 log = logging.getLogger(__name__)
 
@@ -77,13 +80,20 @@ def execute_multiprocessing(use_camera=False, camera_id=2, modules=None):
             log.info(f"Módulo Planificación: {'✅' if modules['path_planning'] else '❌'}")
         log.info("=" * 70)
 
-        # Crear pipes de comunicación entre procesos
-        fr2ball_env, fr2ball_recv = multiprocessing.Pipe()  # envia el frame para pelota
-        fr2player_env, fr2player_recv = multiprocessing.Pipe()  # envia el frame para jugadores
+        # Crear shared memory con double buffering para frames
+        if use_camera:
+            frame_h, frame_w = CAMERA_PERSPECTIVE_HEIGHT, CAMERA_PERSPECTIVE_WIDTH
+        else:
+            frame_h, frame_w = ALTO_TOTAL, ANCHO_TOTAL
 
-        ball_send, ball_received = multiprocessing.Pipe()         # Enviar las coordenadas de la pelota
-        player_send, player_received = multiprocessing.Pipe()     # Enviar las coordenadas de los jugadores
-        fr2traj_env, fr2traj_recv = multiprocessing.Pipe()          # Para probar la ruta
+        frame_writer = SharedFrameWriter(frame_h, frame_w)
+        frame_config = frame_writer.config()
+        log.info("Shared memory creada: %dx%d (%d bytes x2)",
+                 frame_w, frame_h, frame_writer.nbytes)
+
+        # Pipes para datos pequeños (coordenadas, no frames)
+        ball_send, ball_received = multiprocessing.Pipe()
+        player_send, player_received = multiprocessing.Pipe()
 
         # Cola para enviar la ruta planificada
         env_ruta = multiprocessing.Queue()
@@ -101,16 +111,14 @@ def execute_multiprocessing(use_camera=False, camera_id=2, modules=None):
             from .process.camera_feed import camera_feed
             p1 = multiprocessing.Process(
                 target=camera_feed,
-                args=(fr2ball_env, fr2player_env, env_ruta, fr2traj_env, camera_id,
-                      enable_perception, enable_perception, enable_planning),
+                args=(frame_config, env_ruta, camera_id),
                 name="CameraFeed"
             )
         else:
             log.info("Inicializando simulación...")
             p1 = multiprocessing.Process(
                 target=simulacion_principal,
-                args=(fr2ball_env, fr2player_env, env_ruta, fr2traj_env,
-                      enable_perception, enable_perception, enable_planning),
+                args=(frame_config, env_ruta),
                 name="Simulation"
             )
         processes.append(p1)
@@ -122,7 +130,7 @@ def execute_multiprocessing(use_camera=False, camera_id=2, modules=None):
             # PROCESO 2: Búsqueda de pelota
             p2 = multiprocessing.Process(
                 target=busqueda_ball,
-                args=(fr2ball_recv, ball_send, enable_planning),
+                args=(frame_config, ball_send, enable_planning),
                 name="BallTracking"
             )
             processes.append(p2)
@@ -130,7 +138,7 @@ def execute_multiprocessing(use_camera=False, camera_id=2, modules=None):
             # PROCESO 3: Búsqueda de jugadores
             p3 = multiprocessing.Process(
                 target=busqueda_player,
-                args=(fr2player_recv, player_send, use_camera, enable_planning),
+                args=(frame_config, player_send, use_camera, enable_planning),
                 name="PlayerTracking"
             )
             processes.append(p3)
@@ -142,7 +150,7 @@ def execute_multiprocessing(use_camera=False, camera_id=2, modules=None):
             # PROCESO 4: Planificación de trayectorias
             p4 = multiprocessing.Process(
                 target=trayectoria,
-                args=(ball_received, player_received, fr2traj_recv),
+                args=(ball_received, player_received, frame_config),
                 name="PathPlanning"
             )
             processes.append(p4)
@@ -165,3 +173,6 @@ def execute_multiprocessing(use_camera=False, camera_id=2, modules=None):
 
     except Exception as e:
         print(f"Error en main {e}")
+
+    finally:
+        frame_writer.cleanup()
