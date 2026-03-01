@@ -247,30 +247,25 @@ MOTOR_MIN_MOVEMENT_PWM = 50      # PWM ≥ 50: Movimiento confiable del motor
 MOTOR_MAX_PWM = 127              # PWM máximo absoluto del motor (límite firmware int8_t)
 
 # --- Velocidades de Rotación (en PWM: 0-127) ---
-# IMPORTANTE: Con corrección angular y calibración asimétrica (L=1.0, R=0.79),
-# las velocidades efectivas pueden reducirse ~20-40%. Por eso los mínimos deben
-# ser suficientemente altos para superar el dead zone del motor (~30 PWM).
+# IMPORTANTE: Todos los valores deben superar MOTOR_MIN_MOVEMENT_PWM (50) para
+# garantizar movimiento real del motor. Con calibración asimétrica (L=1.0, R=0.79),
+# las velocidades efectivas pueden reducirse ~20-40%.
 #
-# AJUSTADAS para latencia del sistema (~65ms: 40ms captura + 15ms proceso + 10ms RF)
-# A 25 FPS real (no 60 FPS), el robot se mueve significativamente entre frames
-ROBOT_MIN_ROTATION_SPEED = 18  # Velocidad mínima cuando LEJOS del objetivo (PWM)
-ROBOT_MAX_ROTATION_SPEED = 23  # Velocidad máxima de rotación (PWM)
+# Perfil: LEJOS → velocidad constante MIN, RAMPA → desacelera de MIN a NEAR_MIN
+ROBOT_MIN_ROTATION_SPEED = 50  # Velocidad cuando LEJOS del objetivo (PWM, >= MOTOR_MIN_MOVEMENT_PWM)
+ROBOT_MAX_ROTATION_SPEED = 65  # Velocidad máxima de rotación (PWM)
 ROBOT_ROTATION_ARRIVAL_ANGLE_DEG = 25.0  # Ángulo donde empieza rampa de desaceleración (grados)
-ROBOT_ROTATION_NEAR_MIN = 18  # Velocidad mínima EN LA RAMPA (PWM)
-                                  # Debe ser <= ROBOT_MIN_ROTATION_SPEED y >= MOTOR_MIN_MOVEMENT_PWM
+ROBOT_ROTATION_NEAR_MIN = 45  # Velocidad mínima EN LA RAMPA (PWM, debe ser <= MIN y >= dead zone)
 
 # --- Velocidades de Movimiento Lineal (en PWM: 0-127) ---
-# Con corrección angular (MAX_ANGULAR_CORRECTION_PWM) y calibración (R×0.79),
-# el motor más lento puede perder ~35% de velocidad. Por eso MIN debe ser ≥90
-# para asegurar que incluso después de corrección y calibración se supere el dead zone.
+# Todos los valores deben superar MOTOR_MIN_MOVEMENT_PWM (50) para garantizar
+# movimiento real. NEAR_MIN debe ser <= MIN para que la rampa desacelere.
 #
-# Ejemplo: Speed=90 PWM → Con corrección: L=80, R=100
-#          → Con calibración: L=80, R=79 → AMBOS > 50 PWM ✓
-ROBOT_MIN_LINEAR_SPEED = 10  # Velocidad mínima cuando LEJOS (PWM)
-ROBOT_MAX_LINEAR_SPEED = 21  # Velocidad máxima de movimiento (PWM)
+# Perfil: LEJOS → velocidad constante MIN, RAMPA → desacelera de MIN a NEAR_MIN
+ROBOT_MIN_LINEAR_SPEED = 55  # Velocidad cuando LEJOS (PWM, >= MOTOR_MIN_MOVEMENT_PWM)
+ROBOT_MAX_LINEAR_SPEED = 80  # Velocidad máxima de movimiento (PWM)
 ROBOT_LINEAR_ARRIVAL_DISTANCE = 51  # Distancia donde empieza rampa de desaceleración (píxeles)
-ROBOT_LINEAR_NEAR_MIN = 65  # Velocidad mínima EN LA RAMPA (PWM)
-                                  # Debe ser <= ROBOT_MIN_LINEAR_SPEED y >= MOTOR_MIN_MOVEMENT_PWM
+ROBOT_LINEAR_NEAR_MIN = 50  # Velocidad mínima EN LA RAMPA (PWM, debe ser <= MIN y >= dead zone)
 
 # --- Umbral de Inicio de Movimiento Lineal ---
 # Ángulo máximo donde el robot puede comenzar a moverse linealmente mientras corrige

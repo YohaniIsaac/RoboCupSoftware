@@ -87,11 +87,8 @@ class DifferentialDriveController:
         self.max_motor_speed = max_motor_speed
         self.rf_controller = rf_controller
 
-        # Parámetros para PID
-        self.last_error_pos = (0, 0)
-        self.integral_pos = (0, 0)
-        self.last_error_angle = 0
-        self.integral_angle = 0
+        # Estado PID por robot (evita corrupción con múltiples robots)
+        self._pid_state = {}  # {robot_id: dict con estado PID}
 
         # Constantes para PID (configurables desde config.py)
         # Valores iniciales se cargan desde config, pero pueden ser sobrescritos
@@ -106,8 +103,6 @@ class DifferentialDriveController:
         # Compensación de latencia para predictive stopping
         # Medición real: 25 FPS (40ms/frame) + procesamiento (15ms) + RF (10ms) = ~65ms
         self.LATENCY_COMPENSATION_MS = 70  # ms totales de latencia (conservador)
-        self.last_rotation_speed = 0  # Última velocidad angular enviada (PWM)
-        self.last_linear_speed = 0    # Última velocidad lineal enviada (PWM)
 
         # Corrección angular máxima durante movimiento lineal (en PWM)
         # Evita que la corrección haga que un motor vaya muy lento (causa oscilaciones)
@@ -141,6 +136,27 @@ class DifferentialDriveController:
         self.last_periodic_log_time_linear = {}  # {robot_id: timestamp} para movimiento lineal
         self.PERIODIC_LOG_INTERVAL = 0.25  # 250ms entre logs periódicos
         self.last_logged_linear_speed = {}  # {robot_id: speed} para movimiento lineal
+
+    def _get_pid_state(self, robot_id):
+        """Retorna el estado PID para un robot específico, creándolo si no existe.
+
+        Args:
+            robot_id: ID del robot.
+
+        Returns:
+            dict: Estado PID con last_error_pos, integral_pos, last_error_angle,
+                  integral_angle, last_linear_speed, last_rotation_speed.
+        """
+        if robot_id not in self._pid_state:
+            self._pid_state[robot_id] = {
+                'last_error_pos': (0, 0),
+                'integral_pos': (0, 0),
+                'last_error_angle': 0,
+                'integral_angle': 0,
+                'last_linear_speed': 0,
+                'last_rotation_speed': 0,
+            }
+        return self._pid_state[robot_id]
 
     def _calculate_rotation_compensation(self, robot_id):
         """Calcula factores de compensación para asimetría en rotación.
@@ -236,6 +252,9 @@ class DifferentialDriveController:
                      int(dx), int(dy), distance)
             self._last_target = target_pos
 
+        # Obtener estado PID para este robot
+        state = self._get_pid_state(robot.id)
+
         # ===== PREDICTIVE STOPPING LINEAL =====
         # Estimar dónde ESTARÁ el robot después de la latencia
         latency_seconds = self.LATENCY_COMPENSATION_MS / 1000.0
@@ -243,7 +262,7 @@ class DifferentialDriveController:
         # Estimar distancia adicional que recorrerá (velocidad actual * latencia)
         # Convertir PWM (0-255) a velocidad normalizada (0-1) para estimación
         # Asumimos ~200 px/s a velocidad máxima (depende del campo, ajustar si es necesario)
-        speed_normalized = abs(self.last_linear_speed) / 255.0
+        speed_normalized = abs(state['last_linear_speed']) / 255.0
         estimated_speed_px_per_sec = speed_normalized * 200.0
         predicted_additional_distance_px = estimated_speed_px_per_sec * latency_seconds
 
@@ -251,11 +270,11 @@ class DifferentialDriveController:
         predicted_distance = distance - predicted_additional_distance_px
 
         # Si la distancia PREDICHA está dentro del threshold, DETENER AHORA
-        if predicted_distance < self.position_threshold and self.last_linear_speed > 0:
+        if predicted_distance < self.position_threshold and state['last_linear_speed'] > 0:
             log.info("🎯 Robot %d STOP PREDICTIVO LINEAL | Dist=%.1f px Predicha=%.1f px < Threshold=%d px",
                      robot.id, distance, predicted_distance, self.position_threshold)
             self._send_motor_commands(robot, 0, 0)
-            self.last_linear_speed = 0
+            state['last_linear_speed'] = 0
             if target_angle is not None:
                 return self.rotate_to_angle(robot, target_angle)
             return True
@@ -304,18 +323,18 @@ class DifferentialDriveController:
         p_term = self.kp_pos * distance
 
         # Calcular integral y derivada
-        self.integral_pos = (self.integral_pos[0] + dx, self.integral_pos[1] + dy)
+        state['integral_pos'] = (state['integral_pos'][0] + dx, state['integral_pos'][1] + dy)
         i_term = self.ki_pos * math.sqrt(
-            self.integral_pos[0] ** 2 + self.integral_pos[1] ** 2
+            state['integral_pos'][0] ** 2 + state['integral_pos'][1] ** 2
         )
 
-        derivative_pos = (dx - self.last_error_pos[0], dy - self.last_error_pos[1])
+        derivative_pos = (dx - state['last_error_pos'][0], dy - state['last_error_pos'][1])
         d_term = self.kd_pos * math.sqrt(
             derivative_pos[0] ** 2 + derivative_pos[1] ** 2
         )
 
         # Actualizar último error
-        self.last_error_pos = (dx, dy)
+        state['last_error_pos'] = (dx, dy)
 
         # Calcular velocidad base del PID
         pid_speed = p_term + i_term + d_term
@@ -372,7 +391,7 @@ class DifferentialDriveController:
             self.last_periodic_log_time_linear[robot.id] = current_time
 
         # Actualizar última velocidad lineal para predicción
-        self.last_linear_speed = speed
+        state['last_linear_speed'] = speed
 
         # Enviar comandos a los motores
         self._send_motor_commands(robot, left_speed, right_speed)
@@ -415,12 +434,15 @@ class DifferentialDriveController:
         # Convertir error a radianes
         angle_error = math.radians(angle_error_deg)
 
+        # Obtener estado PID para este robot
+        state = self._get_pid_state(robot.id)
+
         # ===== DETECCIÓN DE CRUCE DEL OBJETIVO =====
         # Si el error cambió de signo Y disminuyó en magnitud, CRUZAMOS el objetivo
         # IMPORTANTE: No considerar cruce si el error está cerca de ±180° (cambio de signo por normalización)
         if hasattr(robot, '_last_angle_error_deg'):
             current_sign = 1 if angle_error >= 0 else -1
-            last_sign = 1 if self.last_error_angle >= 0 else -1
+            last_sign = 1 if state['last_error_angle'] >= 0 else -1
 
             # Verificar si cambió de signo Y el error absoluto disminuyó (verdadero cruce)
             # Evitar falsos positivos cerca de ±180° donde el signo puede cambiar sin cruzar
@@ -434,7 +456,7 @@ class DifferentialDriveController:
                          robot.id, current_normalized, target_normalized,
                          robot._last_angle_error_deg, angle_error_deg)
                 self._send_motor_commands(robot, 0, 0)
-                self.last_rotation_speed = 0
+                state['last_rotation_speed'] = 0
                 self.last_logged_rotation_speed[robot.id] = 0
                 robot._last_angle_error_deg = 0
                 return True
@@ -451,7 +473,7 @@ class DifferentialDriveController:
         # Estimar rotación adicional por inercia (velocidad actual * tiempo de latencia)
         # Convertir PWM (0-255) a velocidad normalizada (0-1) para estimación
         # Asumimos que el robot gira a ~100 deg/s a velocidad máxima
-        speed_normalized = abs(self.last_rotation_speed) / 255.0
+        speed_normalized = abs(state['last_rotation_speed']) / 255.0
         estimated_rotation_rate_deg_per_sec = speed_normalized * 100.0
         predicted_additional_rotation_deg = estimated_rotation_rate_deg_per_sec * latency_seconds
 
@@ -472,7 +494,7 @@ class DifferentialDriveController:
                      robot.id, current_normalized, target_normalized, angle_error_deg,
                      predicted_error_deg, math.degrees(self.angle_threshold))
             self._send_motor_commands(robot, 0, 0)
-            self.last_rotation_speed = 0
+            state['last_rotation_speed'] = 0
             self.last_logged_rotation_speed[robot.id] = 0
             return True
 
@@ -482,7 +504,7 @@ class DifferentialDriveController:
                      robot.id, current_normalized, target_normalized, angle_error_deg,
                      math.degrees(self.angle_threshold))
             self._send_motor_commands(robot, 0, 0)
-            self.last_rotation_speed = 0
+            state['last_rotation_speed'] = 0
             self.last_logged_rotation_speed[robot.id] = 0
             return True
 
@@ -491,25 +513,25 @@ class DifferentialDriveController:
 
         # Calcular integral (con anti-windup)
         # Si el error cambió de signo, resetear integral para evitar overshoot
-        if (self.last_error_angle * angle_error) < 0:
+        if (state['last_error_angle'] * angle_error) < 0:
             # Error cambió de signo → resetear integral
-            self.integral_angle = 0
+            state['integral_angle'] = 0
             log.debug("🔄 Reset integral angular (cambio de dirección)")
         else:
-            self.integral_angle += angle_error
+            state['integral_angle'] += angle_error
 
         # Anti-windup: limitar integral
         max_integral = 0.5  # Limitar contribución integral
-        self.integral_angle = max(-max_integral, min(max_integral, self.integral_angle))
+        state['integral_angle'] = max(-max_integral, min(max_integral, state['integral_angle']))
 
-        i_term = self.ki_angle * self.integral_angle
+        i_term = self.ki_angle * state['integral_angle']
 
         # Calcular derivada
-        derivative = angle_error - self.last_error_angle
+        derivative = angle_error - state['last_error_angle']
         d_term = self.kd_angle * derivative
 
         # Actualizar último error
-        self.last_error_angle = angle_error
+        state['last_error_angle'] = angle_error
 
         # Calcular velocidad de rotación base del PID
         pid_rotation_speed = p_term + i_term + d_term
@@ -566,7 +588,7 @@ class DifferentialDriveController:
             right_speed = -rotation_speed  # positivo (hacia adelante)
 
         # Guardar velocidad de rotación para predictive stopping en la próxima iteración
-        self.last_rotation_speed = rotation_speed
+        state['last_rotation_speed'] = rotation_speed
 
         # ===== LOGGING DETALLADO =====
         current_time = time.time()
