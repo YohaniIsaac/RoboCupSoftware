@@ -110,7 +110,7 @@ class RobotActionExecutor:
             # PASO 3: Acercarse un poco más con motor activo
             if dist_to_ball > 25:
                 # Moverse lentamente hacia la pelota con motor activo
-                self.controller.move_to_position(player, ball_pos, speed_factor=0.3)
+                self.controller.move_to_position(player, ball_pos)
                 return False
 
             # PASO 4: Confirmar captura

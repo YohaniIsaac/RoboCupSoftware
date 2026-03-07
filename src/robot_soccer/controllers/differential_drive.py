@@ -685,8 +685,8 @@ class DifferentialDriveController:
             min_speed_in_ramp = int(self.linear_near_min + \
                                (self.min_motor_speed - self.linear_near_min) * ramp_factor)
 
-            # Aplicar este mínimo dinámico
-            speed_pwm = max(speed_pwm, min_speed_in_ramp)
+            # Forzar velocidad al valor de la rampa (techo, no piso)
+            speed_pwm = min(speed_pwm, min_speed_in_ramp)
 
         return speed_pwm
 
@@ -729,8 +729,8 @@ class DifferentialDriveController:
             min_rotation_in_ramp = int(self.rotation_near_min + \
                                   (self.min_rotation_speed - self.rotation_near_min) * ramp_factor)
 
-            # Aplicar este mínimo dinámico
-            rotation_speed_pwm = max(rotation_speed_pwm, min_rotation_in_ramp)
+            # Forzar velocidad al valor de la rampa (techo, no piso)
+            rotation_speed_pwm = min(rotation_speed_pwm, min_rotation_in_ramp)
 
         return rotation_speed_pwm
 

@@ -175,8 +175,7 @@ class RobotCommandManager:
                     is_completed = self.action_executors[player.id].execute_move_with_ball(
                         player,
                         action['target_pos'],
-                        action['ball'],
-                        action['speed_factor']
+                        action['ball']
                     )
 
                     if is_completed:
