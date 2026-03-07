@@ -1,11 +1,12 @@
 """Utilitario para calcular posiciones estratégicas cerca de la pelota."""
 
 import numpy as np
-from robot_soccer.config import ALTO_CAMPO, ANCHO_CAMPO, ROL_ATACANTE, ROL_DEFENSIVO
+from robot_soccer.config import ROL_ATACANTE, ROL_DEFENSIVO
 
 
 def calculate_ball_approach_position(
-    player_pos, ball_pos, opponent_goal_pos, approach_distance=50, team="red"
+    player_pos, ball_pos, opponent_goal_pos, approach_distance=50, team="red",
+    field=None
 ):
     """Calcula la posición óptima INDIVIDUALIZADA para aproximarse a la pelota.
 
@@ -21,6 +22,7 @@ def calculate_ball_approach_position(
         opponent_goal_pos: Posición del arco enemigo (x, y)
         approach_distance: Distancia de parada antes de la pelota
         team: Equipo del robot ('red' o 'blue')
+        field: FieldGeometry para clamping de posiciones
 
     Returns:
         tuple: Posición objetivo INDIVIDUAL (x, y) para el robot
@@ -55,7 +57,6 @@ def calculate_ball_approach_position(
     ideal_distance = np.linalg.norm(current_to_ideal)
 
     if ideal_distance > 1:
-        # current_to_ideal = current_to_ideal / ideal_distance
         pass
 
     # 4. CONSIDERAR POSICIÓN ACTUAL DEL ROBOT
@@ -87,27 +88,12 @@ def calculate_ball_approach_position(
         target_pos = ideal_position
 
     # 5. ASEGURAR QUE LA POSICIÓN ESTÁ DENTRO DEL CAMPO
-    target_pos[0] = max(30, min(ANCHO_CAMPO - 30, int(target_pos[0])))
-    target_pos[1] = max(30, min(ALTO_CAMPO - 30, int(target_pos[1])))
+    if field is not None:
+        target_pos = field.clamp(target_pos)
+    else:
+        target_pos = (int(target_pos[0]), int(target_pos[1]))
 
     return tuple(target_pos)
-
-
-def get_opponent_goal_position(team):
-    """Retorna la posición del arco enemigo según el equipo.
-
-    Args:
-        team: Equipo del robot ('red' o 'blue')
-
-    Returns:
-        tuple: Posición del arco enemigo (x, y)
-    """
-    if team == "red":
-        return ANCHO_CAMPO, ALTO_CAMPO / 2  # Arco derecho
-    if team == "blue":
-        return 0, ALTO_CAMPO / 2  # Arco izquierdo
-
-    return None, None
 
 
 def calculate_interception_position(
@@ -118,6 +104,7 @@ def calculate_interception_position(
     team="red",
     prediction_time=1.0,
     approach_distance=40,
+    field=None,
 ):
     """Calcula la posición óptima para interceptar la pelota en movimiento.
 
@@ -125,10 +112,11 @@ def calculate_interception_position(
         player_pos: Posición actual del jugador (x, y)
         ball_pos: Posición actual de la pelota (x, y)
         ball_velocity: Velocidad de la pelota (dx, dy)
-        opponent_goal_pos: Posición del arco enemigo (x, y)  # NUEVO PARÁMETRO
-        team: Equipo del robot ('red' o 'blue')              # NUEVO PARÁMETRO
+        opponent_goal_pos: Posición del arco enemigo (x, y)
+        team: Equipo del robot ('red' o 'blue')
         prediction_time: Tiempo de predicción en segundos
         approach_distance: Distancia de aproximación a la pelota
+        field: FieldGeometry para clamping de posiciones
 
     Returns:
         tuple: Posición objetivo para interceptar (x, y)
@@ -141,21 +129,25 @@ def calculate_interception_position(
     future_ball_pos = ball_pos + ball_velocity * prediction_time
 
     # Asegurar que la posición predicha está dentro del campo
-    future_ball_pos[0] = max(0, min(ANCHO_CAMPO, int(future_ball_pos[0])))
-    future_ball_pos[1] = max(0, min(ALTO_CAMPO, int(future_ball_pos[1])))
+    if field is not None:
+        future_ball_pos[0] = max(0, min(field.width, int(future_ball_pos[0])))
+        future_ball_pos[1] = max(0, min(field.height, int(future_ball_pos[1])))
+    else:
+        future_ball_pos = np.array([int(future_ball_pos[0]), int(future_ball_pos[1])])
 
-    # Calcular posición de aproximación a la pelota predicha CON NUEVOS PARÁMETROS
+    # Calcular posición de aproximación a la pelota predicha
     return calculate_ball_approach_position(
         player_pos,
-        tuple(future_ball_pos),  # Posición predicha de la pelota
-        opponent_goal_pos,  # NUEVO: Arco enemigo
-        approach_distance,  # Distancia de aproximación
-        team,  # NUEVO: Equipo del robot
+        tuple(future_ball_pos),
+        opponent_goal_pos,
+        approach_distance,
+        team,
+        field=field,
     )
 
 
 def calculate_shooting_position(
-    player_pos, ball_pos, target_goal, approach_distance=60
+    player_pos, ball_pos, target_goal, approach_distance=60, field=None
 ):
     """Calcula la posición óptima para disparar hacia la portería.
 
@@ -164,6 +156,7 @@ def calculate_shooting_position(
         ball_pos: Posición de la pelota (x, y)
         target_goal: Posición de la portería objetivo (x, y)
         approach_distance: Distancia óptima para el disparo
+        field: FieldGeometry para clamping de posiciones
 
     Returns:
         tuple: Posición objetivo para el disparo (x, y)
@@ -181,16 +174,21 @@ def calculate_shooting_position(
         target_pos = ball_pos + goal_to_ball * approach_distance
     else:
         # Fallback: usar posición del jugador actual
-        return calculate_ball_approach_position(player_pos, ball_pos, approach_distance)
+        return calculate_ball_approach_position(
+            player_pos, ball_pos, target_goal, approach_distance, field=field
+        )
 
     # Asegurar que la posición está dentro del campo
-    target_pos[0] = max(30, min(ANCHO_CAMPO - 30, int(target_pos[0])))
-    target_pos[1] = max(30, min(ALTO_CAMPO - 30, int(target_pos[1])))
+    if field is not None:
+        target_pos = field.clamp(target_pos)
+    else:
+        target_pos = (int(target_pos[0]), int(target_pos[1]))
 
     return tuple(target_pos)
 
 
-def calculate_pass_position(player_pos, ball_pos, teammate_pos, approach_distance=50):
+def calculate_pass_position(player_pos, ball_pos, teammate_pos, approach_distance=50,
+                            field=None):
     """Calcula la posición óptima para hacer un pase a un compañero.
 
     Args:
@@ -198,6 +196,7 @@ def calculate_pass_position(player_pos, ball_pos, teammate_pos, approach_distanc
         ball_pos: Posición de la pelota (x, y)
         teammate_pos: Posición del compañero (x, y)
         approach_distance: Distancia de aproximación
+        field: FieldGeometry para clamping de posiciones
 
     Returns:
         tuple: Posición objetivo para el pase (x, y)
@@ -215,11 +214,15 @@ def calculate_pass_position(player_pos, ball_pos, teammate_pos, approach_distanc
         target_pos = ball_pos + teammate_to_ball * approach_distance
     else:
         # Fallback a aproximación directa
-        return calculate_ball_approach_position(player_pos, ball_pos, approach_distance)
+        return calculate_ball_approach_position(
+            player_pos, ball_pos, teammate_pos, approach_distance, field=field
+        )
 
     # Asegurar que la posición está dentro del campo
-    target_pos[0] = max(30, min(ANCHO_CAMPO - 30, int(target_pos[0])))
-    target_pos[1] = max(30, min(ALTO_CAMPO - 30, int(target_pos[1])))
+    if field is not None:
+        target_pos = field.clamp(target_pos)
+    else:
+        target_pos = (int(target_pos[0]), int(target_pos[1]))
 
     return tuple(target_pos)
 
@@ -247,7 +250,7 @@ def get_optimal_ball_approach_strategy(blackboard):
 
 
 def calculate_dribbling_path_positions(
-    ball_pos, target_goal, num_waypoints=3, spacing=100
+    ball_pos, target_goal, num_waypoints=3, spacing=100, field=None
 ):
     """Calcula una secuencia de posiciones para driblar hacia la portería.
 
@@ -256,6 +259,7 @@ def calculate_dribbling_path_positions(
         target_goal: Posición de la portería objetivo
         num_waypoints: Número de puntos intermedios
         spacing: Espaciado entre puntos
+        field: FieldGeometry para clamping de posiciones
 
     Returns:
         list: Lista de posiciones [(x, y), ...] para el dribbling
@@ -278,8 +282,10 @@ def calculate_dribbling_path_positions(
         waypoint = ball_pos + direction * (spacing * i)
 
         # Asegurar que está dentro del campo
-        waypoint[0] = max(30, min(ANCHO_CAMPO - 30, int(waypoint[0])))
-        waypoint[1] = max(30, min(ALTO_CAMPO - 30, int(waypoint[1])))
+        if field is not None:
+            waypoint = field.clamp(waypoint)
+        else:
+            waypoint = (int(waypoint[0]), int(waypoint[1]))
 
         waypoints.append(tuple(waypoint))
 

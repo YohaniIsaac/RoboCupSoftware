@@ -6,7 +6,7 @@ con el sistema de lógica difusa para proporcionar un control completo de los ro
 
 import logging
 # from .base import NodeStatus
-from robot_soccer.config import LADO_IZQUIERDO, LADO_DERECHO, EQUIPO_ROJO, ROL_ATACANTE
+from robot_soccer.config import LADO_IZQUIERDO, LADO_DERECHO, EQUIPO_ROJO, ROL_ATACANTE, FIELD_SIM
 from robot_soccer.controllers.robot_command_manager import RobotCommandManager
 from .soccer_behaviors import (Blackboard, create_attacker_tree, create_defender_tree)
 
@@ -20,7 +20,8 @@ class BehaviorManager:
     """
 
     def __init__(
-            self, players, ball, team='red', use_real_robots=False, serial_port='/dev/ttyUSB0'
+            self, players, ball, team='red', use_real_robots=False, serial_port='/dev/ttyUSB0',
+            field=None
     ):
         """Inicializa el gestor de equipos de forma dinámica.
 
@@ -30,8 +31,10 @@ class BehaviorManager:
             team (str): Equipo que gestionará este manager ('red' o 'blue')
             use_real_robots: Si True, utiliza comunicación real con robots
             serial_port: Puerto serial para comunicación con Arduino
+            field: FieldGeometry con geometría del campo. Defaults to FIELD_SIM.
         """
         self.team = team
+        self.field = field if field is not None else FIELD_SIM
         self.side = LADO_IZQUIERDO if team == EQUIPO_ROJO else LADO_DERECHO
         self.ball = ball
         # Filtrar jugadores por equipo
@@ -50,7 +53,8 @@ class BehaviorManager:
         self.blackboards = {}
         for player in self.team_players:
             self.blackboards[player.id] = Blackboard(
-                player, ball, self.team_players, self.opponents, team
+                player, ball, self.team_players, self.opponents, team,
+                field=self.field
             )
             # Añadir el gestor de comandos a cada blackboard
             self.blackboards[player.id].command_manager = self.command_manager

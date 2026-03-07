@@ -8,7 +8,14 @@ import logging
 
 import numpy as np
 from robot_soccer.ai.behavior_tree.utils import calculate_ball_approach_position
-from robot_soccer.config import ALTO_CAMPO, ANCHO_CAMPO, ROL_ATACANTE, ROL_DEFENSIVO
+from robot_soccer.config import (
+    ROL_ATACANTE, ROL_DEFENSIVO, FIELD_SIM,
+    BT_SHOT_DISTANCE_RATIO, BT_PASS_MIN_RATIO, BT_PASS_MAX_RATIO,
+    BT_CAPTURE_RANGE_RATIO, BT_APPROACH_RATIO, BT_CAPTURE_ACTIVATE_RATIO,
+    BT_CAPTURE_CONFIRM_RATIO, BT_INTERCEPT_RATIO, BT_SUPPORT_DISTANCE_RATIO,
+    BT_DEFENDER_WAIT_RATIO, BT_DRIBBLE_GOAL_RATIO,
+    BT_DEFENSIVE_ARRIVAL_RATIO, BT_ATTACKER_PRIORITY_MARGIN_RATIO,
+)
 
 from .base import (
     NodeStatus,
@@ -31,7 +38,7 @@ class Blackboard:
     Contiene el estado del juego y los robots.
     """
 
-    def __init__(self, player, ball, team_players, opponents, team="red"):
+    def __init__(self, player, ball, team_players, opponents, team="red", field=None):
         """Inicializa la pizarra con el estado del juego.
 
         Args:
@@ -40,6 +47,7 @@ class Blackboard:
             team_players: Lista de jugadores del equipo
             opponents: Lista de jugadores rivales
             team: Equipo ('red' o 'blue'). Defaults to "red".
+            field: FieldGeometry con geometría del campo. Defaults to FIELD_SIM.
         """
         self.logger = logging.getLogger(__name__)
         self.player = player  # Jugador que ejecuta este árbol
@@ -47,6 +55,7 @@ class Blackboard:
         self.team_players = team_players  # Lista de jugadores del equipo
         self.opponents = opponents  # Lista de jugadores rivales
         self.team = team  # Equipo ('red' o 'blue')
+        self.field = field if field is not None else FIELD_SIM
 
         # Datos contextuales del juego
         self.posesion_pelota = 0.5  # 0: posesión aliada, 0.5: libre, 1: posesión rival
@@ -87,32 +96,33 @@ class Blackboard:
 
     def update_strategic_positions(self):
         """Calcula posiciones estratégicas en el campo según la orientación del equipo."""
+        f = self.field
         # Determinar orientación del campo según equipo
         if self.team == "red":
             # Equipo rojo ataca hacia la derecha
-            self.own_goal_pos = [0, ALTO_CAMPO / 2]
-            self.opponent_goal_pos = [ANCHO_CAMPO, ALTO_CAMPO / 2]
-            self.defensive_zone_center = [ANCHO_CAMPO * 0.2, ALTO_CAMPO / 2]
-            self.neutral_zone_center = [ANCHO_CAMPO * 0.5, ALTO_CAMPO / 2]
-            self.offensive_zone_center = [ANCHO_CAMPO * 0.8, ALTO_CAMPO / 2]
+            self.own_goal_pos = list(f.goal_left_center)
+            self.opponent_goal_pos = list(f.goal_right_center)
+            self.defensive_zone_center = [f.zone_x(0.2), f.zone_y(0.5)]
+            self.neutral_zone_center = [f.zone_x(0.5), f.zone_y(0.5)]
+            self.offensive_zone_center = [f.zone_x(0.8), f.zone_y(0.5)]
         else:
             # Equipo azul ataca hacia la izquierda
-            self.own_goal_pos = [ANCHO_CAMPO, ALTO_CAMPO / 2]
-            self.opponent_goal_pos = [0, ALTO_CAMPO / 2]
-            self.defensive_zone_center = [ANCHO_CAMPO * 0.8, ALTO_CAMPO / 2]
-            self.neutral_zone_center = [ANCHO_CAMPO * 0.5, ALTO_CAMPO / 2]
-            self.offensive_zone_center = [ANCHO_CAMPO * 0.2, ALTO_CAMPO / 2]
+            self.own_goal_pos = list(f.goal_right_center)
+            self.opponent_goal_pos = list(f.goal_left_center)
+            self.defensive_zone_center = [f.zone_x(0.8), f.zone_y(0.5)]
+            self.neutral_zone_center = [f.zone_x(0.5), f.zone_y(0.5)]
+            self.offensive_zone_center = [f.zone_x(0.2), f.zone_y(0.5)]
 
         # Posiciones estratégicas defensivas
         self.defensive_positions = [
-            [self.defensive_zone_center[0], ALTO_CAMPO * 0.3],  # Defensa arriba
-            [self.defensive_zone_center[0], ALTO_CAMPO * 0.7],  # Defensa abajo
+            [self.defensive_zone_center[0], f.zone_y(0.3)],  # Defensa arriba
+            [self.defensive_zone_center[0], f.zone_y(0.7)],  # Defensa abajo
         ]
 
         # Posiciones estratégicas ofensivas
         self.offensive_positions = [
-            [self.offensive_zone_center[0], ALTO_CAMPO * 0.3],  # Ataque arriba
-            [self.offensive_zone_center[0], ALTO_CAMPO * 0.7],  # Ataque abajo
+            [self.offensive_zone_center[0], f.zone_y(0.3)],  # Ataque arriba
+            [self.offensive_zone_center[0], f.zone_y(0.7)],  # Ataque abajo
         ]
 
 
@@ -301,7 +311,7 @@ def is_shot_possible(blackboard):
 
     # Condiciones para un tiro posible
     return (
-        distance_to_goal < 400  # Distancia razonable para tirar
+        distance_to_goal < blackboard.field.ratio_to_px(BT_SHOT_DISTANCE_RATIO)
         and angle_diff < np.pi / 4  # Bien orientado hacia la portería
         and not shot_blocked  # Sin oponentes bloqueando
     )
@@ -331,7 +341,8 @@ def is_pass_possible(blackboard):
 
         # Verificar distancia (ni muy cerca ni muy lejos)
         pass_distance = np.linalg.norm(np.array(teammate_pos) - np.array(player_pos))
-        if pass_distance < 100 or pass_distance > 600:
+        if (pass_distance < blackboard.field.ratio_to_px(BT_PASS_MIN_RATIO) or
+                pass_distance > blackboard.field.ratio_to_px(BT_PASS_MAX_RATIO)):
             continue
 
         # Verificar si hay oponentes que puedan interceptar
@@ -405,6 +416,7 @@ def move_to_ball(blackboard):
         opponent_goal_pos,  # Arco enemigo para alineación
         approach_distance,
         blackboard.team,  # Equipo del robot
+        field=blackboard.field,
     )
 
     # Registrar movimiento planificado para debugging
@@ -429,10 +441,10 @@ def move_to_ball(blackboard):
 
     # Verificar si hemos llegado lo suficientemente cerca del objetivo
     distance_to_target = np.linalg.norm(np.array(player_pos) - np.array(target_pos))
-    if distance_to_target < 25:
+    if distance_to_target < blackboard.field.ratio_to_px(BT_APPROACH_RATIO):
         # Si llegamos al punto objetivo, verificar distancia a la pelota
         distance_to_ball = blackboard.player.distance_to_ball(blackboard.ball)
-        if distance_to_ball < 60:  # Rango para capturar la pelota
+        if distance_to_ball < blackboard.field.ratio_to_px(BT_CAPTURE_RANGE_RATIO):
             return NodeStatus.SUCCESS
 
     # Continuar ejecutando la acción
@@ -467,7 +479,7 @@ def capture_ball(blackboard):
     # Calcular distancia a la pelota
     distance_to_ball = blackboard.player.distance_to_ball(blackboard.ball)
 
-    if distance_to_ball < 50:  # Rango de captura
+    if distance_to_ball < blackboard.field.ratio_to_px(BT_CAPTURE_ACTIVATE_RATIO):
         # PASO 1: Orientarse hacia la pelota
         angle_to_ball = np.degrees(
             np.arctan2(ball_pos[1] - player_pos[1], ball_pos[0] - player_pos[0])
@@ -487,7 +499,7 @@ def capture_ball(blackboard):
         blackboard.command_manager.capture_ball(blackboard.player.id)
 
         # PASO 3: Verificar captura exitosa
-        if distance_to_ball < 35:
+        if distance_to_ball < blackboard.field.ratio_to_px(BT_CAPTURE_CONFIRM_RATIO):
             # Marcar como capturada en el modelo
             blackboard.player._has_ball = True
 
@@ -525,7 +537,9 @@ def dribble_forward(blackboard):
 
     # Calcular waypoints para el dribbling
     waypoints = calculate_dribbling_path_positions(
-        ball_pos, goal_pos, num_waypoints=2, spacing=120
+        ball_pos, goal_pos, num_waypoints=2,
+        spacing=blackboard.field.ratio_to_px(BT_DRIBBLE_SPACING_RATIO),
+        field=blackboard.field,
     )
 
     if waypoints:
@@ -550,7 +564,7 @@ def dribble_forward(blackboard):
 
         # Verificar progreso
         distance_to_goal = np.linalg.norm(np.array(player_pos) - np.array(goal_pos))
-        if distance_to_goal < 200:
+        if distance_to_goal < blackboard.field.ratio_to_px(BT_DRIBBLE_GOAL_RATIO):
             return NodeStatus.SUCCESS
 
         return NodeStatus.RUNNING
@@ -583,7 +597,8 @@ def shoot_to_goal(blackboard):
 
     # Calcular posición óptima para disparar
     shooting_pos = calculate_shooting_position(
-        player_pos, ball_pos, goal_pos, approach_distance=50
+        player_pos, ball_pos, goal_pos, approach_distance=50,
+        field=blackboard.field,
     )
 
     # Verificar si estamos en buena posición para disparar
@@ -591,7 +606,7 @@ def shoot_to_goal(blackboard):
         np.array(player_pos) - np.array(shooting_pos)
     )
 
-    if distance_to_shooting_pos > 25:
+    if distance_to_shooting_pos > blackboard.field.ratio_to_px(BT_APPROACH_RATIO):
         # Moverse a mejor posición de disparo
         blackboard.command_manager.move_with_ball(
             blackboard.player.id, shooting_pos, blackboard.ball, speed_factor=0.8
@@ -599,7 +614,7 @@ def shoot_to_goal(blackboard):
         return NodeStatus.RUNNING
 
     # Calcular mejor punto de la portería para disparar
-    goal_width = 200
+    goal_width = blackboard.field.goal_right_size
     # Añadir variación para no disparar siempre al centro
     offset = goal_width * 0.3 * (1 if np.random.random() > 0.5 else -1)
     target = [goal_pos[0], goal_pos[1] + offset]
@@ -653,13 +668,14 @@ def pass_to_teammate(blackboard):
 
     # Calcular posición óptima para el pase
     pass_pos = calculate_pass_position(
-        player_pos, ball_pos, teammate_pos, approach_distance=40
+        player_pos, ball_pos, teammate_pos, approach_distance=40,
+        field=blackboard.field,
     )
 
     # Verificar si estamos en buena posición para pasar
     distance_to_pass_pos = np.linalg.norm(np.array(player_pos) - np.array(pass_pos))
 
-    if distance_to_pass_pos > 25:
+    if distance_to_pass_pos > blackboard.field.ratio_to_px(BT_APPROACH_RATIO):
         # Moverse a mejor posición de pase
         blackboard.command_manager.move_with_ball(
             blackboard.player.id, pass_pos, blackboard.ball, speed_factor=0.6
@@ -737,7 +753,8 @@ def intercept_ball(blackboard):
     target_pos = calculate_interception_position(
         player_pos, ball_pos, ball_velocity,
         blackboard.opponent_goal_pos, blackboard.team,
-        prediction_time, approach_distance=40
+        prediction_time, approach_distance=40,
+        field=blackboard.field,
     )
 
     # Registrar para debugging
@@ -764,7 +781,7 @@ def intercept_ball(blackboard):
 
     # Verificar si estamos cerca de la pelota
     distance = blackboard.player.distance_to_ball(blackboard.ball)
-    if distance < 50:
+    if distance < blackboard.field.ratio_to_px(BT_INTERCEPT_RATIO):
         return NodeStatus.SUCCESS
 
     return NodeStatus.RUNNING
@@ -868,8 +885,8 @@ def move_to_defensive_position(blackboard):
                 np.array(teammate_pos) - np.array(ball_pos)
             )
 
-            # Si el atacante está cerca de la pelota (< 600 px), esperar
-            if attacker_distance_to_ball < 600:
+            # Si el atacante está cerca de la pelota, esperar
+            if attacker_distance_to_ball < blackboard.field.ratio_to_px(BT_DEFENDER_WAIT_RATIO) * 2:
                 # No moverse, quedarse en posición actual
                 # El defensor esperará hasta que el atacante termine
                 return NodeStatus.RUNNING
@@ -895,7 +912,7 @@ def move_to_defensive_position(blackboard):
     # Verificar si hemos llegado
     distance = np.linalg.norm(np.array(player_pos) - np.array(defensive_pos))
 
-    if distance < 30:
+    if distance < blackboard.field.ratio_to_px(BT_DEFENSIVE_ARRIVAL_RATIO):
         return NodeStatus.SUCCESS
 
     # Continuar ejecutando la acción
@@ -935,15 +952,14 @@ def move_to_support_position(blackboard):
         # Vector rotado
         rotated = [np.cos(angle), np.sin(angle)]
 
-        # Posición de apoyo (a 200 unidades de la pelota)
-        support_pos = ball_pos + np.array(rotated) * 200
+        # Posición de apoyo (proporción del campo)
+        support_pos = ball_pos + np.array(rotated) * blackboard.field.ratio_to_px(BT_SUPPORT_DISTANCE_RATIO)
     else:
         # Fallback si la pelota está en la portería
         support_pos = [(ball_pos[0] + goal_pos[0]) / 2, (ball_pos[1] + goal_pos[1]) / 2]
 
     # Asegurar que la posición está dentro del campo
-    support_pos[0] = max(50, min(ANCHO_CAMPO - 50, support_pos[0]))
-    support_pos[1] = max(50, min(ALTO_CAMPO - 50, support_pos[1]))
+    support_pos = list(blackboard.field.clamp(support_pos))
 
     # Ordenar movimiento
     blackboard.command_manager.move_robot_to(blackboard.player.id, tuple(support_pos))
@@ -1030,8 +1046,8 @@ def is_no_attacker_closer_to_ball(blackboard):
     for teammate in blackboard.team_players:
         if teammate.rol == ROL_ATACANTE:
             teammate_distance = teammate.distance_to_ball(blackboard.ball)
-            # Si el atacante está a menos de 200px más lejos, darle prioridad
-            if teammate_distance < my_distance + 200:  # Margen de 200px a favor del atacante
+            # Si el atacante está dentro del margen de prioridad, darle prioridad
+            if teammate_distance < my_distance + blackboard.field.ratio_to_px(BT_ATTACKER_PRIORITY_MARGIN_RATIO):
                 return False
 
     return True
