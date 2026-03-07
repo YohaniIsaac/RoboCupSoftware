@@ -3,8 +3,8 @@ import numpy as np
 import skfuzzy as fuzz
 from skfuzzy import control as ctrl
 from robot_soccer.ai.role_assignment.role_assigner import RoleAssigner
-from robot_soccer.config import (LADO_DERECHO, LADO_IZQUIERDO, EQUIPO_ROJO, ANCHO_CAMPO,
-                                ZONA_IZQUIERDA, ZONA_DERECHA)
+from robot_soccer.config import (LADO_DERECHO, LADO_IZQUIERDO, EQUIPO_ROJO,
+                                ZONA_IZQUIERDA, ZONA_DERECHA, FIELD_SIM)
 from robot_soccer.ai.fuzzy_logic.proximity_calculator import calcular_ventaja_proximidad
 
 log = logging.getLogger(__name__)
@@ -24,7 +24,8 @@ class FuzzyRobotTeamManager:
         lim_derecho         (float): Límite derecho del campo para determinar zonas aliada, neutral o rival.
     """
 
-    def __init__(self, players, ball, team="red", zonas=(ZONA_IZQUIERDA, ZONA_DERECHA)):
+    def __init__(self, players, ball, team="red", zonas=(ZONA_IZQUIERDA, ZONA_DERECHA),
+                 field=None):
         """Inicializa el gestor de equipos de forma dinámica.
 
         Args:
@@ -32,8 +33,10 @@ class FuzzyRobotTeamManager:
             ball: Objeto pelota
             team: Equipo ('red' o 'blue')
             zonas: Tupla con límites de zona
+            field: FieldGeometry con geometría del campo. Defaults to FIELD_SIM.
         """
         self.team = team
+        self.field = field if field is not None else FIELD_SIM
         self.side = LADO_IZQUIERDO if team == EQUIPO_ROJO else LADO_DERECHO
         self.ball = ball
 
@@ -46,7 +49,7 @@ class FuzzyRobotTeamManager:
             raise ValueError(f"No hay suficientes jugadores en el equipo {team}")
 
         # Zonas del campo
-        self.lim_izquierdo, self.lim_derecho = [ANCHO_CAMPO * z for z in zonas]
+        self.lim_izquierdo, self.lim_derecho = [self.field.width * z for z in zonas]
 
         # Configuración del equipo
         # self.side = LADO_IZQUIERDO if team == EQUIPO_ROJO else LADO_DERECHO
@@ -84,18 +87,19 @@ class FuzzyRobotTeamManager:
 
     def _init_posesion_system(self):
         """Inicializa el sistema de lógica difusa para determinar la posesión de la pelota."""
-        # ENTRADA - Distancia
+        # ENTRADA - Distancia (escalada al campo)
+        dist_max = int(self.field.width * 1.17) + 1
         self.distancia_aliado1 = ctrl.Antecedent(
-            np.arange(0, 1751, 1), "distancia_aliado1"
+            np.arange(0, dist_max, 1), "distancia_aliado1"
         )
         self.distancia_aliado2 = ctrl.Antecedent(
-            np.arange(0, 1751, 1), "distancia_aliado2"
+            np.arange(0, dist_max, 1), "distancia_aliado2"
         )
         self.distancia_rival1 = ctrl.Antecedent(
-            np.arange(0, 1751, 1), "distancia_rival1"
+            np.arange(0, dist_max, 1), "distancia_rival1"
         )
         self.distancia_rival2 = ctrl.Antecedent(
-            np.arange(0, 1751, 1), "distancia_rival2"
+            np.arange(0, dist_max, 1), "distancia_rival2"
         )
 
         # ENTRADA - Orientación
@@ -135,46 +139,23 @@ class FuzzyRobotTeamManager:
 
     def _definir_funciones_membresia_posesion(self):
         """Define las funciones de membresía para las variables de entrada y salida del sistema de posesión."""
-        # ENTRADA - Distancias
-        self.distancia_aliado1["cerca"] = fuzz.trapmf(
-            self.distancia_aliado1.universe, [0, 0, 100, 200]
-        )
-        self.distancia_aliado1["media"] = fuzz.trapmf(
-            self.distancia_aliado1.universe, [150, 250, 450, 550]
-        )
-        self.distancia_aliado1["lejos"] = fuzz.trapmf(
-            self.distancia_aliado1.universe, [500, 800, 1500, 1500]
-        )
-
-        self.distancia_aliado2["cerca"] = fuzz.trapmf(
-            self.distancia_aliado2.universe, [0, 0, 100, 200]
-        )
-        self.distancia_aliado2["media"] = fuzz.trapmf(
-            self.distancia_aliado2.universe, [150, 250, 450, 550]
-        )
-        self.distancia_aliado2["lejos"] = fuzz.trapmf(
-            self.distancia_aliado2.universe, [500, 800, 1500, 1500]
-        )
-
-        self.distancia_rival1["cerca"] = fuzz.trapmf(
-            self.distancia_rival1.universe, [0, 0, 100, 200]
-        )
-        self.distancia_rival1["media"] = fuzz.trapmf(
-            self.distancia_rival1.universe, [150, 250, 450, 550]
-        )
-        self.distancia_rival1["lejos"] = fuzz.trapmf(
-            self.distancia_rival1.universe, [500, 800, 1500, 1500]
-        )
-
-        self.distancia_rival2["cerca"] = fuzz.trapmf(
-            self.distancia_rival2.universe, [0, 0, 100, 200]
-        )
-        self.distancia_rival2["media"] = fuzz.trapmf(
-            self.distancia_rival2.universe, [150, 250, 450, 550]
-        )
-        self.distancia_rival2["lejos"] = fuzz.trapmf(
-            self.distancia_rival2.universe, [500, 800, 1500, 1500]
-        )
+        f = self.field
+        # ENTRADA - Distancias (escaladas al campo)
+        # Breakpoints como proporción del ancho: cerca ~0-13%, media ~10-37%, lejos ~33-100%
+        for dist_var in [self.distancia_aliado1, self.distancia_aliado2,
+                         self.distancia_rival1, self.distancia_rival2]:
+            dist_var["cerca"] = fuzz.trapmf(
+                dist_var.universe,
+                [0, 0, f.ratio_to_px(0.067), f.ratio_to_px(0.133)]
+            )
+            dist_var["media"] = fuzz.trapmf(
+                dist_var.universe,
+                [f.ratio_to_px(0.1), f.ratio_to_px(0.167), f.ratio_to_px(0.3), f.ratio_to_px(0.367)]
+            )
+            dist_var["lejos"] = fuzz.trapmf(
+                dist_var.universe,
+                [f.ratio_to_px(0.333), f.ratio_to_px(0.533), f.width, f.width]
+            )
 
         # ENTRADA - Orientaciones (en radianes)
         self.orientacion_aliado1["apuntando"] = fuzz.trimf(
@@ -437,9 +418,10 @@ class FuzzyRobotTeamManager:
             np.arange(0, 1.1, 0.1), "posesion_pelota_result"
         )
 
-        # ENTRADA - Ventaja de proximidad
+        # ENTRADA - Ventaja de proximidad (escalada al campo)
+        ventaja_max = int(self.field.width * 0.667)  # ~1000 para 1500, ~427 para 640
         self.ventaja_proximidad = ctrl.Antecedent(
-            np.arange(-1000, 1001, 1), "ventaja_proximidad"
+            np.arange(-ventaja_max, ventaja_max + 1, 1), "ventaja_proximidad"
         )
 
         # ENTRADA - Velocidad de la pelota
@@ -474,20 +456,26 @@ class FuzzyRobotTeamManager:
         )
 
         # ENTRADA - Ventaja de proximidad (POSITIVO = ventaja aliada, NEGATIVO = ventaja rival)
+        f = self.field
         self.ventaja_proximidad["ventaja_aliada_grande"] = fuzz.trimf(
-            self.ventaja_proximidad.universe, [300, 1000, 1000]
+            self.ventaja_proximidad.universe,
+            [f.ratio_to_px(0.2), f.ratio_to_px(0.667), f.ratio_to_px(0.667)]
         )
         self.ventaja_proximidad["ventaja_aliada_media"] = fuzz.trimf(
-            self.ventaja_proximidad.universe, [50, 200, 500]
+            self.ventaja_proximidad.universe,
+            [f.ratio_to_px(0.033), f.ratio_to_px(0.133), f.ratio_to_px(0.333)]
         )
         self.ventaja_proximidad["equilibrado"] = fuzz.trimf(
-            self.ventaja_proximidad.universe, [-100, 0, 100]
+            self.ventaja_proximidad.universe,
+            [-f.ratio_to_px(0.067), 0, f.ratio_to_px(0.067)]
         )
         self.ventaja_proximidad["ventaja_rival_media"] = fuzz.trimf(
-            self.ventaja_proximidad.universe, [-500, -200, -50]
+            self.ventaja_proximidad.universe,
+            [-f.ratio_to_px(0.333), -f.ratio_to_px(0.133), -f.ratio_to_px(0.033)]
         )
         self.ventaja_proximidad["ventaja_rival_grande"] = fuzz.trimf(
-            self.ventaja_proximidad.universe, [-1000, -1000, -300]
+            self.ventaja_proximidad.universe,
+            [-f.ratio_to_px(0.667), -f.ratio_to_px(0.667), -f.ratio_to_px(0.2)]
         )
 
         # ENTRADA - Velocidad de la pelota
@@ -609,10 +597,10 @@ class FuzzyRobotTeamManager:
 
     def _init_zona_system(self):
         """Inicializa el sistema difuso para determinar la zona del campo donde se encuentra la pelota."""
-        # ENTRADA - posición de la pelota
+        # ENTRADA - posición de la pelota (escalada al campo)
         self.posicion_x = ctrl.Antecedent(
-            np.arange(0, 1501, 1), "posicion_x"
-        )  # Campo de 0 a 100
+            np.arange(0, self.field.width + 1, 1), "posicion_x"
+        )
 
         # ENTRADA - dirección de movimiento
         self.direccion_movimiento_zona = ctrl.Antecedent(
@@ -632,6 +620,8 @@ class FuzzyRobotTeamManager:
 
     def _definir_funciones_membresia_zona(self):
         """Define las funciones de membresía para las variables de entrada y salida del sistema de zona."""
+        w = self.field.width
+        overlap = self.field.ratio_to_px(0.053)  # ~80px en 1500, ~34px en 640
         # ENTRADA - posición de la pelota por equipo
         if self.side == "LEFT":
             self.posicion_x["defensiva"] = fuzz.trimf(
@@ -639,18 +629,18 @@ class FuzzyRobotTeamManager:
             )
             self.posicion_x["media"] = fuzz.trimf(
                 self.posicion_x.universe,
-                [self.lim_izquierdo - 80, ANCHO_CAMPO // 2, self.lim_derecho + 80],
+                [self.lim_izquierdo - overlap, w // 2, self.lim_derecho + overlap],
             )
             self.posicion_x["ofensiva"] = fuzz.trimf(
-                self.posicion_x.universe, [self.lim_derecho, ANCHO_CAMPO, ANCHO_CAMPO]
+                self.posicion_x.universe, [self.lim_derecho, w, w]
             )
         else:
             self.posicion_x["defensiva"] = fuzz.trimf(
-                self.posicion_x.universe, [self.lim_derecho, ANCHO_CAMPO, ANCHO_CAMPO]
+                self.posicion_x.universe, [self.lim_derecho, w, w]
             )
             self.posicion_x["media"] = fuzz.trimf(
                 self.posicion_x.universe,
-                [self.lim_izquierdo - 80, ANCHO_CAMPO // 2, self.lim_derecho + 80],
+                [self.lim_izquierdo - overlap, w // 2, self.lim_derecho + overlap],
             )
             self.posicion_x["ofensiva"] = fuzz.trimf(
                 self.posicion_x.universe, [0, 0, self.lim_izquierdo]
@@ -753,19 +743,20 @@ class FuzzyRobotTeamManager:
         orientaciones_aliados = []
         orientaciones_rivales = []
 
+        max_dist = self.field.width
         for player in self.team_players[:2]:  # Máximo 2 aliados
-            distancias_aliados.append(min(1500, player.distance_to_ball(self.ball)))
+            distancias_aliados.append(min(max_dist, player.distance_to_ball(self.ball)))
             orientaciones_aliados.append(min(np.pi, player.angle_difference_ball(self.ball)))
 
         for player in self.opponents[:2]:  # Máximo 2 rivales
-            distancias_rivales.append(min(1500, player.distance_to_ball(self.ball)))
+            distancias_rivales.append(min(max_dist, player.distance_to_ball(self.ball)))
             orientaciones_rivales.append(min(np.pi, player.angle_difference_ball(self.ball)))
 
         # Completar listas si faltan jugadores
         while len(distancias_aliados) < 2:
-            distancias_aliados.append(1500)
+            distancias_aliados.append(max_dist)
         while len(distancias_rivales) < 2:
-            distancias_rivales.append(1500)
+            distancias_rivales.append(max_dist)
         while len(orientaciones_aliados) < 2:
             orientaciones_aliados.append(3.14)
         while len(orientaciones_rivales) < 2:
