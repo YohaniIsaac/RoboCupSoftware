@@ -7,7 +7,7 @@ Incluye definición de obstáculos, límites del área y verificación de colisi
 """
 import math
 import numpy as np
-from robot_soccer.config import ANCHO_CAMPO, ALTO_CAMPO
+from robot_soccer.config import FIELD_SIM
 
 
 class Node:
@@ -59,15 +59,17 @@ class Env:
         obs_circle (list): Lista de obstáculos circulares.
         obs_rectangle (list): Lista de obstáculos rectangulares.
     """
-    def __init__(self, list_obs):
+    def __init__(self, list_obs, field=None):
         """Inicializa el entorno con obstáculos dados.
 
         Args:
             list_obs (list): Lista de obstáculos en formato específico.
+            field: FieldGeometry con geometría del campo. Defaults to FIELD_SIM.
         """
-        self.x_range = (0, ANCHO_CAMPO)   # Límite del área
-        self.y_range = (0, ALTO_CAMPO)    # Límite del área
-        self.obs_boundary = self.obs_boundary_met()             # Límite externos del campo como obstáculos
+        self.field = field if field is not None else FIELD_SIM
+        self.x_range = (0, self.field.width)   # Límite del área
+        self.y_range = (0, self.field.height)   # Límite del área
+        self.obs_boundary = self._obs_boundary_met()             # Límite externos del campo como obstáculos
         self.obs_circle = self.obs_circle_met(list_obs)         # Obstáculos circulares
         self.obs_rectangle = self.obs_rectangle_met(list_obs)   # Obstáculos rectangulares
 
@@ -80,18 +82,18 @@ class Env:
         self.obs_circle = self.obs_circle_met(n_list_obs)         # Obstáculos circulares
         self.obs_rectangle = self.obs_rectangle_met(n_list_obs)   # Obstáculos rectangulares
 
-    @staticmethod
-    def obs_boundary_met():
+    def _obs_boundary_met(self):
         """Genera límites del entorno como obstáculos rectangulares delgados.
 
         Returns:
             list: Lista de obstáculos rectangulares que forman el perímetro del campo.
         """
+        w, h = self.field.width, self.field.height
         obs_boundary = [
-            [0, 0, 1, ALTO_CAMPO],
-            [0, ALTO_CAMPO, ANCHO_CAMPO, 1],
-            [1, 0, ANCHO_CAMPO, 1],
-            [ANCHO_CAMPO, 1, 1, ALTO_CAMPO]
+            [0, 0, 1, h],
+            [0, h, w, 1],
+            [1, 0, w, 1],
+            [w, 1, 1, h]
         ]
         return obs_boundary
 
@@ -184,13 +186,14 @@ class Utils:
         obs_boundary (list): Lista de obstáculos de límites.
     """
 
-    def __init__(self, list_obs):
+    def __init__(self, list_obs, field=None):
         """Inicializa las utilidades con una lista de obstáculos.
 
         Args:
             list_obs (list): Lista de obstáculos en el entorno.
+            field: FieldGeometry con geometría del campo. Defaults to FIELD_SIM.
         """
-        self.env = Env(list_obs)
+        self.env = Env(list_obs, field=field)
         self.delta = 20
         self.obs_circle = self.env.obs_circle
         self.obs_rectangle = self.env.obs_rectangle
