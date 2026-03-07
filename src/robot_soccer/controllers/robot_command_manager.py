@@ -1,5 +1,6 @@
 import time
 import logging
+from robot_soccer.config import FIELD_SIM
 from robot_soccer.controllers.differential_drive import DifferentialDriveController
 from robot_soccer.controllers.robot_action_executor import RobotActionExecutor
 from robot_soccer.communication.rf_controller import RFController
@@ -40,7 +41,8 @@ class RobotCommandManager:
         actions_in_progress (dict): Acciones actuales en progreso.
     """
 
-    def __init__(self, team_players, ball, use_real_robots=False, port='/dev/ttyUSB0'):
+    def __init__(self, team_players, ball, use_real_robots=False, port='/dev/ttyUSB0',
+                 field=None):
         """Inicializa el gestor de comandos para robots.
 
         Args:
@@ -50,6 +52,7 @@ class RobotCommandManager:
                 real con robots físicos. Defaults to False.
             port (str, optional): Puerto serial para comunicación con Arduino.
                 Defaults to '/dev/ttyUSB0'.
+            field: FieldGeometry con geometría del campo. Defaults to FIELD_SIM.
 
         Note:
             Si falla la inicialización del controlador RF, automáticamente
@@ -59,6 +62,7 @@ class RobotCommandManager:
         self.team_players = team_players
         self.ball = ball
         self.use_real_robots = use_real_robots
+        self.field = field if field is not None else FIELD_SIM
 
         # Inicializar controlador RF si se utilizan robots reales
         self.rf_controller = None
@@ -76,7 +80,9 @@ class RobotCommandManager:
         for player in team_players:
             controller = DifferentialDriveController(rf_controller=self.rf_controller)
             self.controllers[player.id] = controller
-            self.action_executors[player.id] = RobotActionExecutor(controller, self.rf_controller)
+            self.action_executors[player.id] = RobotActionExecutor(
+                controller, self.rf_controller, field=self.field
+            )
 
         # Memoria de acciones en curso
         self.actions_in_progress = {}

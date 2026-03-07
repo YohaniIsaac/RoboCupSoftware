@@ -1,7 +1,7 @@
 import logging
 import math
 import numpy as np
-from robot_soccer.config import ANCHO_CAMPO, ALTO_CAMPO
+from robot_soccer.config import FIELD_SIM
 
 from robot_soccer.ai.behavior_tree.utils import (
     calculate_ball_approach_position,
@@ -28,7 +28,7 @@ class RobotActionExecutor:
             con robots reales.
     """
 
-    def __init__(self, differential_controller, rf_controller=None):
+    def __init__(self, differential_controller, rf_controller=None, field=None):
         """Inicializa el ejecutor de acciones.
 
         Args:
@@ -36,6 +36,7 @@ class RobotActionExecutor:
                 movimiento diferencial asociado al robot.
             rf_controller (RFController, optional): Controlador RF para comunicación
                 con robots reales. Si es None, opera solo en simulación.
+            field: FieldGeometry con geometría del campo. Defaults to FIELD_SIM.
 
         Note:
             El rf_controller es necesario para activar motores físicos como el
@@ -43,6 +44,7 @@ class RobotActionExecutor:
         """
         self.controller = differential_controller
         self.rf_controller = rf_controller
+        self.field = field if field is not None else FIELD_SIM
 
     def execute_capture_ball(self, player, ball):
         """Ejecuta la acción de capturar la pelota activando físicamente el motor.
@@ -77,9 +79,9 @@ class RobotActionExecutor:
 
         # Obtener arco enemigo para cálculo individualizado
         if player.team == 'red':
-            opponent_goal_pos = (ANCHO_CAMPO, ALTO_CAMPO / 2)
+            opponent_goal_pos = self.field.goal_right_center
         else:
-            opponent_goal_pos = (0, ALTO_CAMPO / 2)
+            opponent_goal_pos = self.field.goal_left_center
 
         # Calcular distancia a la pelota
         dist_to_ball = player.distance_to_ball(ball)
@@ -133,7 +135,8 @@ class RobotActionExecutor:
             ball_pos,
             opponent_goal_pos,  # CLAVE: Considerar arco enemigo
             35,  # Distancia más cercana para captura
-            player.team
+            player.team,
+            field=self.field,
         )
 
         # Moverse a la posición estratégica individual
@@ -196,7 +199,8 @@ class RobotActionExecutor:
                 player_pos,
                 ball_pos,
                 target_pos,
-                approach_distance=55
+                approach_distance=55,
+                field=self.field,
             )
 
             # Verificar si estamos en buena posición para disparar
@@ -387,7 +391,7 @@ class RobotActionExecutor:
         if position_type == 'support':
             # Posicionamiento de apoyo
             # Calcular posición a 90 grados de la línea pelota-portería
-            goal_pos = [1500, 450]  # Portería rival por defecto
+            goal_pos = list(self.field.goal_right_center)  # Portería rival por defecto
             ball_to_goal = np.array(goal_pos) - np.array(ball_pos)
 
             if np.linalg.norm(ball_to_goal) > 0:
@@ -400,7 +404,7 @@ class RobotActionExecutor:
 
         elif position_type == 'defensive':
             # Posicionamiento defensivo
-            own_goal = [0, 450]  # Portería propia por defecto
+            own_goal = list(self.field.goal_left_center)  # Portería propia por defecto
             ball_to_own_goal = np.array(own_goal) - np.array(ball_pos)
 
             if np.linalg.norm(ball_to_own_goal) > 0:
@@ -425,8 +429,9 @@ class RobotActionExecutor:
             support_pos = ball_pos
 
         # Asegurar que la posición está dentro del campo
-        support_pos[0] = max(30, min(1470, support_pos[0]))
-        support_pos[1] = max(30, min(870, support_pos[1]))
+        clamped = self.field.clamp(support_pos)
+        support_pos[0] = clamped[0]
+        support_pos[1] = clamped[1]
 
         # Moverse a la posición
         target_pos = tuple(support_pos)
