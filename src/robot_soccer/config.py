@@ -3,9 +3,75 @@
 Contiene constantes y variables compartidas entre diferentes módulos.
 """
 
+from dataclasses import dataclass
 from pathlib import Path
 
 import cv2
+
+
+@dataclass
+class FieldGeometry:
+    """Geometría calibrada del campo de juego.
+
+    Encapsula dimensiones del campo, posiciones de arcos y métodos
+    de conversión para que la lógica del juego sea independiente
+    de la resolución (simulación vs cámara).
+    """
+
+    width: int
+    height: int
+    goal_left_x: int
+    goal_left_top_y: int
+    goal_left_bottom_y: int
+    goal_right_x: int
+    goal_right_top_y: int
+    goal_right_bottom_y: int
+    margin: int = 30
+
+    @property
+    def goal_left_center(self):
+        """Centro del arco izquierdo (x, y)."""
+        mid_y = (self.goal_left_top_y + self.goal_left_bottom_y) // 2
+        return (self.goal_left_x, mid_y)
+
+    @property
+    def goal_right_center(self):
+        """Centro del arco derecho (x, y)."""
+        mid_y = (self.goal_right_top_y + self.goal_right_bottom_y) // 2
+        return (self.goal_right_x, mid_y)
+
+    @property
+    def goal_left_size(self):
+        """Tamaño vertical del arco izquierdo en px."""
+        return self.goal_left_bottom_y - self.goal_left_top_y
+
+    @property
+    def goal_right_size(self):
+        """Tamaño vertical del arco derecho en px."""
+        return self.goal_right_bottom_y - self.goal_right_top_y
+
+    @property
+    def center(self):
+        """Centro del campo (x, y)."""
+        return (self.width // 2, self.height // 2)
+
+    def clamp(self, pos):
+        """Restringe una posición dentro de los límites del campo con margen."""
+        x = max(self.margin, min(self.width - self.margin, int(pos[0])))
+        y = max(self.margin, min(self.height - self.margin, int(pos[1])))
+        return (x, y)
+
+    def ratio_to_px(self, ratio):
+        """Convierte un ratio (proporción del ancho) a píxeles."""
+        return int(ratio * self.width)
+
+    def zone_x(self, percent):
+        """Convierte un porcentaje del ancho a coordenada x."""
+        return int(percent * self.width)
+
+    def zone_y(self, percent):
+        """Convierte un porcentaje del alto a coordenada y."""
+        return int(percent * self.height)
 
 BALL_CAPTURE_DISTANCE = 25
 
@@ -73,6 +139,43 @@ ZONA_DERECHA = 1.0 - ZONA_POR_EQUIPO
 LARGO_ARCO = 200
 
 # ==========================================
+# Instancias de geometría del campo
+# ==========================================
+FIELD_SIM = FieldGeometry(
+    width=ANCHO_CAMPO,
+    height=ALTO_CAMPO,
+    goal_left_x=0,
+    goal_left_top_y=(ALTO_CAMPO - LARGO_ARCO) // 2,
+    goal_left_bottom_y=(ALTO_CAMPO + LARGO_ARCO) // 2,
+    goal_right_x=ANCHO_CAMPO,
+    goal_right_top_y=(ALTO_CAMPO - LARGO_ARCO) // 2,
+    goal_right_bottom_y=(ALTO_CAMPO + LARGO_ARCO) // 2,
+    margin=30,
+)
+
+# FIELD_CAM se define más abajo, después de CAMERA_PERSPECTIVE_WIDTH/HEIGHT
+
+# ==========================================
+# Ratios de umbrales de comportamiento
+# ==========================================
+# Proporción del ancho del campo — independiente de resolución
+BT_SHOT_DISTANCE_RATIO = 0.27
+BT_PASS_MIN_RATIO = 0.067
+BT_PASS_MAX_RATIO = 0.40
+BT_BLOCK_RATIO = 0.033
+BT_CAPTURE_RANGE_RATIO = 0.04
+BT_APPROACH_RATIO = 0.017
+BT_CAPTURE_ACTIVATE_RATIO = 0.033
+BT_CAPTURE_CONFIRM_RATIO = 0.023
+BT_INTERCEPT_RATIO = 0.033
+BT_SUPPORT_DISTANCE_RATIO = 0.133
+BT_DEFENDER_WAIT_RATIO = 0.20
+BT_DRIBBLE_SPACING_RATIO = 0.08
+BT_DRIBBLE_GOAL_RATIO = 0.133
+BT_DEFENSIVE_ARRIVAL_RATIO = 0.02
+BT_ATTACKER_PRIORITY_MARGIN_RATIO = 0.133
+
+# ==========================================
 # Configuración de los robots
 # ==========================================
 # Dimensiones físicas de los robots
@@ -112,20 +215,33 @@ FPS = 40  # Frames por segundo
 # Orden: [top-left, top-right, bottom-right, bottom-left]
 # Formato: (x, y) en píxeles
 
-CAMERA_PERSPECTIVE_ENABLED = True  # Habilitar/deshabilitar transformación de perspectiva
+CAMERA_PERSPECTIVE_ENABLED = True  # Habilitar/deshabilitar transformacion de perspectiva
 
 # Puntos de origen (esquinas de la cancha en la imagen de la cámara)
 # Ajusta estos valores usando el script scripts/calibrate_perspective.py
 CAMERA_PERSPECTIVE_SRC_POINTS = [
-    (8, 34),      # Top-left (esquina superior izquierda)
-    (616, 9),     # Top-right (esquina superior derecha)
-    (630, 365),    # Bottom-right (esquina inferior derecha)
-    (18, 393)       # Bottom-left (esquina inferior izquierda)
+    (32, 36),      # Top-left (esquina superior izquierda)
+    (631, 45),     # Top-right (esquina superior derecha)
+    (634, 404),    # Bottom-right (esquina inferior derecha)
+    (18, 394)       # Bottom-left (esquina inferior izquierda)
 ]
 
 # Dimensiones de la imagen de salida (rectángulo destino)
 CAMERA_PERSPECTIVE_WIDTH = 640   # Ancho de la imagen transformada
 CAMERA_PERSPECTIVE_HEIGHT = 480  # Alto de la imagen transformada
+
+# Geometría del campo para cámara (valores default, actualizados por calibración de arcos)
+FIELD_CAM = FieldGeometry(
+    width=CAMERA_PERSPECTIVE_WIDTH,
+    height=CAMERA_PERSPECTIVE_HEIGHT,
+    goal_left_x=27,
+    goal_left_top_y=196,
+    goal_left_bottom_y=295,
+    goal_right_x=616,
+    goal_right_top_y=193,
+    goal_right_bottom_y=294,
+    margin=15,
+)
 
 # ==========================================
 # Configuración de detección de robots (ArUco)
