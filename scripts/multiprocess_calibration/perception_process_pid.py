@@ -334,8 +334,8 @@ def perception_loop_pid(robot_positions_pipe, frame_pipe, robot_id: int, camera_
 
             # ===== ENVIAR DATOS AL PROCESO DE CONTROL (pipe 1, crítico) =====
             try:
-                # Vaciar pipe si tiene datos viejos (non-blocking)
-                if robot_positions_pipe.poll():
+                # Vaciar pipe completo si tiene datos viejos (non-blocking)
+                while robot_positions_pipe.poll():
                     _ = robot_positions_pipe.recv()
 
                 # Enviar nuevo paquete de datos (solo ~100 bytes)

@@ -39,12 +39,12 @@ class RFTransmitter:
     comandos RF a los robots y al tablero.
     """
 
-    def __init__(self, port: str = '/dev/ttyUSB0', baudrate: int = 9600):
+    def __init__(self, port: str = '/dev/ttyUSB0', baudrate: int = 115200):
         """Inicializa el transmisor RF.
 
         Args:
             port: Puerto serial del Arduino transmisor
-            baudrate: Velocidad de comunicación serial (default: 9600)
+            baudrate: Velocidad de comunicación serial (default: 115200)
         """
         self.port = port
         self.baudrate = baudrate

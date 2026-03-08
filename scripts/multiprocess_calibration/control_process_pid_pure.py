@@ -264,6 +264,7 @@ def control_loop_pid(robot_positions_pipe, control_state_pipe, keyboard_pipe, ro
     iteration_count = 0
     start_time = time.time()
     last_stats_time = start_time
+    last_state_send_time = start_time  # Rate limit envío de estado a visualización
 
     log.info("✅ Control PID iniciado - Esperando datos...")
 
@@ -272,43 +273,44 @@ def control_loop_pid(robot_positions_pipe, control_state_pipe, keyboard_pipe, ro
             iteration_count += 1
 
             # ===== RECIBIR DATOS DE PERCEPCIÓN =====
-            robot_detected = False
-            robot_data = None
-
-            if robot_positions_pipe.poll():
+            # Drenar TODOS los mensajes del pipe, quedarse con el más reciente
+            perception_data = None
+            while robot_positions_pipe.poll():
                 try:
                     perception_data = robot_positions_pipe.recv()
-                    robot_detected = perception_data.get('robot_detected', False)
-                    robot_data = perception_data.get('robot_data', None)
-
-                    # Actualizar entidad de robot si detectado
-                    if robot_detected and robot_data:
-                        if robot is None:
-                            robot = RobotEntity(
-                                robot_id,
-                                robot_data['x'],
-                                robot_data['y'],
-                                math.radians(robot_data['angulo'])
-                            )
-                            log.info(f"🤖 Robot {robot_id} detectado en ({robot_data['x']}, {robot_data['y']})")
-                        else:
-                            robot.update(
-                                robot_data['x'],
-                                robot_data['y'],
-                                math.radians(robot_data['angulo'])
-                            )
-                    # Robot no detectado: usar predicción lineal si existe
-                    elif robot is not None:
-                        if not robot.predict():
-                            # Predicción expiró (>0.5s sin detección)
-                            log.warning(f"⚠️  Robot {robot_id} perdido (predicción expirada)")
-                            robot = None
-
                 except Exception as e:
                     log.error(f"Error recibiendo posiciones: {e}")
+                    break
 
-            # Si no hay datos nuevos de percepción, seguir prediciendo
-            elif robot is not None and robot.is_predicted:
+            if perception_data is not None:
+                robot_detected = perception_data.get('robot_detected', False)
+                robot_data = perception_data.get('robot_data', None)
+
+                # Actualizar entidad de robot si detectado
+                if robot_detected and robot_data:
+                    if robot is None:
+                        robot = RobotEntity(
+                            robot_id,
+                            robot_data['x'],
+                            robot_data['y'],
+                            math.radians(robot_data['angulo'])
+                        )
+                        log.info(f"🤖 Robot {robot_id} detectado en ({robot_data['x']}, {robot_data['y']})")
+                    else:
+                        robot.update(
+                            robot_data['x'],
+                            robot_data['y'],
+                            math.radians(robot_data['angulo'])
+                        )
+                # Robot no detectado: usar predicción lineal si existe
+                elif robot is not None:
+                    if not robot.predict():
+                        log.warning(f"⚠️  Robot {robot_id} perdido (predicción expirada)")
+                        robot = None
+
+            # Sin datos nuevos: predecir posición para interpolación suave
+            # entre frames de cámara (~30 FPS → ~33ms entre actualizaciones)
+            elif robot is not None:
                 if not robot.predict():
                     log.warning(f"⚠️  Robot {robot_id} perdido (predicción expirada)")
                     robot = None
@@ -379,24 +381,24 @@ def control_loop_pid(robot_positions_pipe, control_state_pipe, keyboard_pipe, ro
                 rf_controller.set_motors(firmware_id, 0, 0)
                 robot_stopped = True
 
-            # ===== ENVIAR ESTADO A VISUALIZACIÓN =====
-            try:
-                # Vaciar pipe si tiene datos viejos
-                if control_state_pipe.poll():
-                    _ = control_state_pipe.recv()
-
-                # Enviar estado actual
-                control_state_pipe.send({
-                    'pid_params': pid_params.copy(),
-                    'target_waypoint': target_waypoint,
-                    'movement_active': movement_active,
-                    'robot_id': robot_id,
-                    'robot_predicted': robot.is_predicted if robot else False,
-                    'timestamp': time.time()
-                })
-            except Exception:
-                # Continuar aunque falle el envío
-                pass
+            # ===== ENVIAR ESTADO A VISUALIZACIÓN (rate limited) =====
+            # CRÍTICO: No enviar cada iteración (200 Hz) porque el pipe se llena
+            # y send() BLOQUEA, reduciendo el control loop a ~30 Hz (framerate viz).
+            # Enviar a ~25 Hz: suficiente para visualización, sin saturar el pipe.
+            current_time_state = time.time()
+            if current_time_state - last_state_send_time >= 0.04:  # ~25 Hz
+                try:
+                    control_state_pipe.send({
+                        'pid_params': pid_params.copy(),
+                        'target_waypoint': target_waypoint,
+                        'movement_active': movement_active,
+                        'robot_id': robot_id,
+                        'robot_predicted': robot.is_predicted if robot else False,
+                        'timestamp': current_time_state
+                    })
+                    last_state_send_time = current_time_state
+                except Exception:
+                    pass
 
             # ===== ESTADÍSTICAS DE RENDIMIENTO =====
             current_time = time.time()

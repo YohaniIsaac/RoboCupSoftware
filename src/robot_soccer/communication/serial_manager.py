@@ -32,14 +32,14 @@ class SerialManager:
         running (bool): Bandera de control para el hilo de trabajo.
     """
 
-    def __init__(self, port='/dev/ttyUSB0', baud_rate=9600, timeout=1):
+    def __init__(self, port='/dev/ttyUSB0', baud_rate=115200, timeout=1):
         """Inicializa el gestor de comunicación serial.
 
         Args:
             port (str, optional): Puerto serial donde está conectado el Arduino.
                 Defaults to '/dev/ttyUSB0'.
             baud_rate (int, optional): Velocidad de comunicación en baudios.
-                Defaults to 9600.
+                Defaults to 115200.
             timeout (int, optional): Tiempo de espera para operaciones de
                 lectura en segundos. Defaults to 1.
         """
@@ -117,14 +117,17 @@ class SerialManager:
         """Extrae el robot_id de un comando.
 
         Args:
-            command (str): Comando en formato "R{id},{left},{right}\n"
+            command (str): Comando en formato "M,{id},{left},{right}" o "R{id}{cmd}"
 
         Returns:
             int or None: ID del robot o None si no se puede extraer
         """
         try:
+            if command.startswith('M,'):
+                # Formato motor: M,1,50,-50
+                return int(command.split(',')[1])
             if command.startswith('R'):
-                # Formato: R0,100,-100\n
+                # Formato robot discreto: R1F
                 robot_id_str = command[1:].split(',')[0]
                 return int(robot_id_str)
         except (ValueError, IndexError):
@@ -374,7 +377,18 @@ class SerialManager:
                 has_normal = len(self.command_queue) > 0
 
             if not has_high and not has_medium and not has_normal:
-                time.sleep(0.01)  # Pequeña pausa si no hay comandos
+                # Drenar buffer serial mientras idle (evita acumulación
+                # de respuestas de motor no leídas)
+                if self.serial and self.serial.in_waiting > 0:
+                    try:
+                        response = self.serial.readline().decode('utf-8').strip()
+                        if response:
+                            with self.lock:
+                                self.response_buffer.append(response)
+                    except Exception:
+                        pass
+                else:
+                    time.sleep(0.002)  # Pausa mínima si no hay datos
                 continue
 
             # Obtener comando según prioridad (ALTA → MEDIA → NORMAL)
@@ -404,11 +418,13 @@ class SerialManager:
                 else:
                     log.debug("Enviado: %s", command.strip())
 
-                # Leer todas las respuestas disponibles (no solo una línea)
-                # Comandos como "ping" pueden enviar múltiples líneas (~11)
-                max_wait_time = 0.5  # Máximo 500ms esperando respuestas
+                # Leer respuestas disponibles
+                # Motor commands: timeout corto (respuesta llega en <3ms a 115200)
+                # Otros commands (ping, etc): timeout largo (RF roundtrips ~50ms)
+                is_motor_command = command.strip().startswith('M,')
+                max_wait_time = 0.1 if is_motor_command else 0.5
                 start_read_time = time.time()
-                no_data_timeout = 0.05  # 50ms sin datos = fin de respuestas
+                no_data_timeout = 0.005 if is_motor_command else 0.05
 
                 last_response_time = time.time()
 
@@ -434,7 +450,7 @@ class SerialManager:
                             log.warning("Error leyendo respuesta: %s", read_error)
                             break
                     else:
-                        time.sleep(0.01)
+                        time.sleep(0.001)
 
             except Exception as e:
                 log.error("Error en comunicación: %s", e)

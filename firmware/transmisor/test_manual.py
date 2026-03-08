@@ -122,7 +122,7 @@ def main():
     """Función principal."""
     # Configuración del puerto (ajusta según tu sistema)
     port = '/dev/ttyUSB0'
-    baudrate = 9600  # Compatible con firmware actualizado
+    baudrate = 115200  # Compatible con firmware actualizado
 
     print("\n🤖 Test Manual de Transmisor RF")
     print(f"Puerto: {port}")

@@ -11,7 +11,7 @@ from robot_soccer.controllers.rf_transmitter import RFTransmitter, RobotCommand,
 def main():
     """Demuestra el uso del RFTransmitter con robots y tablero."""
     # Crear transmisor (ajusta el puerto según tu sistema)
-    transmitter = RFTransmitter(port='/dev/ttyUSB0', baudrate=9600)
+    transmitter = RFTransmitter(port='/dev/ttyUSB0', baudrate=115200)
 
     # Conectar
     if not transmitter.connect():

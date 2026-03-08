@@ -184,6 +184,7 @@ void loop() {
         break;
     }
 
-    delay(10);  // Pequeña pausa entre transmisiones
+    // Sin delay: máximo throughput para control PID fluido
+    // El rate limiting se maneja desde Python (rf_controller.py)
   }
 }

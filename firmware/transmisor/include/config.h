@@ -9,7 +9,7 @@
 #define RF_ADDRESS "00001"
 
 // Configuración serial
-#define SERIAL_BAUD 9600  // Compatible con Python SerialManager
+#define SERIAL_BAUD 115200  // Alta velocidad para control PID fluido
 
 // Protocolo de comunicación serial
 // Formato: [TARGET][COMMAND][DATA]

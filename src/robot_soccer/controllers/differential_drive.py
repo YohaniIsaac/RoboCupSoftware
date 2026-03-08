@@ -155,6 +155,7 @@ class DifferentialDriveController:
                 'integral_angle': 0,
                 'last_linear_speed': 0,
                 'last_rotation_speed': 0,
+                'rotation_completed_at': 0,
             }
         return self._pid_state[robot_id]
 
@@ -307,12 +308,19 @@ class DifferentialDriveController:
 
         # FASE 1: Error angular MUY grande (>umbral) → Girar en lugar
         # Evita movimientos inestables cuando el robot apunta en dirección muy incorrecta
-        if abs(angle_error) > LARGE_ANGLE_ERROR_THRESHOLD:
+        # Cooldown: tras completar rotación, esperar a que la cámara actualice antes
+        # de re-evaluar, evitando oscilación stop-start con datos obsoletos
+        rotation_cooldown_s = self.LATENCY_COMPENSATION_MS * 2 / 1000.0
+        in_cooldown = (time.time() - state.get('rotation_completed_at', 0)) < rotation_cooldown_s
+
+        if abs(angle_error) > LARGE_ANGLE_ERROR_THRESHOLD and not in_cooldown:
             # Girar en su lugar hasta estar razonablemente orientado
             angle_error_deg = math.degrees(angle_error)
             log.debug("🔄 Robot %d | Error angular grande: %.1f° > %.0f° → Girando en lugar",
                      robot.id, abs(angle_error_deg), ROBOT_LINEAR_START_ANGLE_THRESHOLD_DEG)
-            self.rotate_to_angle(robot, math.degrees(target_heading))
+            reached = self.rotate_to_angle(robot, math.degrees(target_heading))
+            if reached:
+                state['rotation_completed_at'] = time.time()
             return False  # Todavía NO hemos llegado al waypoint
 
         # FASE 2: Error angular pequeño (≤umbral) → Moverse MIENTRAS corrige
@@ -371,7 +379,7 @@ class DifferentialDriveController:
                 limits_info = f"Límites[{expected_min}-{expected_max}PWM]"
             elif zone_linear == "RAMPA":
                 expected_min = self.linear_near_min
-                expected_max = self.min_motor_speed
+                expected_max = self.max_smooth_speed
                 limits_info = f"Límites[{expected_min}-{expected_max}PWM]"
             else:  # THRESHOLD
                 limits_info = "Límites[0-threshold]"
@@ -621,7 +629,7 @@ class DifferentialDriveController:
                 limits_info = f"Límites[{expected_min}-{expected_max}PWM]"
             elif zone == "RAMPA":
                 expected_min = self.rotation_near_min
-                expected_max = self.min_rotation_speed
+                expected_max = self.max_rotation_speed
                 limits_info = f"Límites[{expected_min}-{expected_max}PWM]"
             else:  # THRESHOLD
                 limits_info = "Límites[0-threshold]"
@@ -681,9 +689,10 @@ class DifferentialDriveController:
             ramp_factor = (distance - self.position_threshold) / \
                          (self.distance_near - self.position_threshold)
 
-            # Interpolar entre min_motor_speed y linear_near_min (ambos en PWM)
+            # Interpolar entre max_smooth_speed y linear_near_min (ambos en PWM)
+            # Usa max_smooth_speed como tope para transición suave desde LEJOS
             min_speed_in_ramp = int(self.linear_near_min + \
-                               (self.min_motor_speed - self.linear_near_min) * ramp_factor)
+                               (self.max_smooth_speed - self.linear_near_min) * ramp_factor)
 
             # Forzar velocidad al valor de la rampa (techo, no piso)
             speed_pwm = min(speed_pwm, min_speed_in_ramp)
@@ -725,9 +734,10 @@ class DifferentialDriveController:
             ramp_factor = (angle_error_abs - self.angle_threshold) / \
                          (self.angle_near - self.angle_threshold)
 
-            # Interpolar entre min_rotation_speed y rotation_near_min (ambos en PWM)
+            # Interpolar entre max_rotation_speed y rotation_near_min (ambos en PWM)
+            # Usa max_rotation_speed como tope para transición suave desde LEJOS
             min_rotation_in_ramp = int(self.rotation_near_min + \
-                                  (self.min_rotation_speed - self.rotation_near_min) * ramp_factor)
+                                  (self.max_rotation_speed - self.rotation_near_min) * ramp_factor)
 
             # Forzar velocidad al valor de la rampa (techo, no piso)
             rotation_speed_pwm = min(rotation_speed_pwm, min_rotation_in_ramp)
