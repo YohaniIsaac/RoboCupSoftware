@@ -1,288 +1,48 @@
 {
-  "_comment": "Calibración multi-punto de motores - 5 puntos por robot",
-  "_instructions": "Calibrar en 30, 50, 80, 110, 127 PWM. Dead-zone en PWM mínimo por motor.",
+  "_comment": "Calibración simple: dead zone per-motor per-direction + bias lineal",
   "_format": {
-    "deadzone_left": "PWM mínimo para mover motor izquierdo (0-40)",
-    "deadzone_right": "PWM mínimo para mover motor derecho (0-40)",
-    "calibration_points": [
-      {
-        "pwm": "Velocidad PWM",
-        "max_left": "Factor motor izq (0.5-2.0)",
-        "max_right": "Factor motor der (0.5-2.0)",
-        "bias": "Corrección deriva (-0.5 a 0.5)"
-      }
-    ]
+    "pwm_min": "PWM mínimo útil (donde la cámara detecta al robot en movimiento)",
+    "pwm_max": "PWM máximo útil (donde la cámara aún detecta consistentemente)",
+    "deadzone_left_fwd": "PWM mínimo para arrancar motor izquierdo hacia adelante",
+    "deadzone_left_rev": "PWM mínimo para arrancar motor izquierdo en reversa",
+    "deadzone_right_fwd": "PWM mínimo para arrancar motor derecho hacia adelante",
+    "deadzone_right_rev": "PWM mínimo para arrancar motor derecho en reversa",
+    "bias": "Corrección para línea recta: positivo = más PWM a izquierda, menos a derecha"
   },
   "0": {
     "pwm_min": 17,
     "pwm_max": 29,
-    "deadzone_left": 0,
-    "deadzone_right": 40,
-    "calibration_points": [
-      {
-        "pwm": -29,
-        "max_left": 1.0,
-        "max_right": 1.0,
-        "bias": -0.023
-      },
-      {
-        "pwm": -26,
-        "max_left": 1.0,
-        "max_right": 1.0,
-        "bias": -0.018
-      },
-      {
-        "pwm": -23,
-        "max_left": 1.0,
-        "max_right": 1.0,
-        "bias": -0.014
-      },
-      {
-        "pwm": -20,
-        "max_left": 1.0,
-        "max_right": 1.0,
-        "bias": -0.011
-      },
-      {
-        "pwm": -17,
-        "max_left": 1.0,
-        "max_right": 1.0,
-        "bias": -0.012
-      },
-      {
-        "pwm": 17,
-        "max_left": 1.0,
-        "max_right": 1.0,
-        "bias": 0.008
-      },
-      {
-        "pwm": 20,
-        "max_left": 1.0,
-        "max_right": 1.0,
-        "bias": 0.008
-      },
-      {
-        "pwm": 23,
-        "max_left": 1.0,
-        "max_right": 1.0,
-        "bias": 0.016
-      },
-      {
-        "pwm": 26,
-        "max_left": 1.0,
-        "max_right": 1.0,
-        "bias": 0.025
-      },
-      {
-        "pwm": 29,
-        "max_left": 1.0,
-        "max_right": 1.0,
-        "bias": 0.024
-      }
-    ]
+    "deadzone_left_fwd": 0,
+    "deadzone_left_rev": 0,
+    "deadzone_right_fwd": 40,
+    "deadzone_right_rev": 40,
+    "bias": 0.016
   },
   "1": {
     "pwm_min": 20,
     "pwm_max": 80,
-    "deadzone_left": 0,
-    "deadzone_right": 0,
-    "calibration_points": [
-      {
-        "pwm": -80,
-        "max_left": 1.0,
-        "max_right": 1.0,
-        "bias": 0.0
-      },
-      {
-        "pwm": -65,
-        "max_left": 1.0,
-        "max_right": 1.0,
-        "bias": 0.0
-      },
-      {
-        "pwm": -50,
-        "max_left": 1.0,
-        "max_right": 1.0,
-        "bias": 0.0
-      },
-      {
-        "pwm": -35,
-        "max_left": 1.0,
-        "max_right": 1.0,
-        "bias": 0.0
-      },
-      {
-        "pwm": -20,
-        "max_left": 1.0,
-        "max_right": 1.0,
-        "bias": 0.0
-      },
-      {
-        "pwm": 20,
-        "max_left": 1.0,
-        "max_right": 1.0,
-        "bias": 0.0
-      },
-      {
-        "pwm": 35,
-        "max_left": 1.0,
-        "max_right": 1.0,
-        "bias": 0.0
-      },
-      {
-        "pwm": 50,
-        "max_left": 1.0,
-        "max_right": 1.0,
-        "bias": 0.0
-      },
-      {
-        "pwm": 65,
-        "max_left": 1.0,
-        "max_right": 1.0,
-        "bias": 0.0
-      },
-      {
-        "pwm": 80,
-        "max_left": 1.0,
-        "max_right": 1.0,
-        "bias": 0.0
-      }
-    ]
+    "deadzone_left_fwd": 0,
+    "deadzone_left_rev": 0,
+    "deadzone_right_fwd": 0,
+    "deadzone_right_rev": 0,
+    "bias": 0.0
   },
   "2": {
     "pwm_min": 20,
     "pwm_max": 80,
-    "deadzone_left": 0,
-    "deadzone_right": 0,
-    "calibration_points": [
-      {
-        "pwm": -80,
-        "max_left": 1.0,
-        "max_right": 1.0,
-        "bias": 0.0
-      },
-      {
-        "pwm": -65,
-        "max_left": 1.0,
-        "max_right": 1.0,
-        "bias": 0.0
-      },
-      {
-        "pwm": -50,
-        "max_left": 1.0,
-        "max_right": 1.0,
-        "bias": 0.0
-      },
-      {
-        "pwm": -35,
-        "max_left": 1.0,
-        "max_right": 1.0,
-        "bias": 0.0
-      },
-      {
-        "pwm": -20,
-        "max_left": 1.0,
-        "max_right": 1.0,
-        "bias": 0.0
-      },
-      {
-        "pwm": 20,
-        "max_left": 1.0,
-        "max_right": 1.0,
-        "bias": 0.0
-      },
-      {
-        "pwm": 35,
-        "max_left": 1.0,
-        "max_right": 1.0,
-        "bias": 0.0
-      },
-      {
-        "pwm": 50,
-        "max_left": 1.0,
-        "max_right": 1.0,
-        "bias": 0.0
-      },
-      {
-        "pwm": 65,
-        "max_left": 1.0,
-        "max_right": 1.0,
-        "bias": 0.0
-      },
-      {
-        "pwm": 80,
-        "max_left": 1.0,
-        "max_right": 1.0,
-        "bias": 0.0
-      }
-    ]
+    "deadzone_left_fwd": 0,
+    "deadzone_left_rev": 0,
+    "deadzone_right_fwd": 0,
+    "deadzone_right_rev": 0,
+    "bias": 0.0
   },
   "3": {
     "pwm_min": 20,
     "pwm_max": 80,
-    "deadzone_left": 0,
-    "deadzone_right": 0,
-    "calibration_points": [
-      {
-        "pwm": -80,
-        "max_left": 1.0,
-        "max_right": 1.0,
-        "bias": 0.0
-      },
-      {
-        "pwm": -65,
-        "max_left": 1.0,
-        "max_right": 1.0,
-        "bias": 0.0
-      },
-      {
-        "pwm": -50,
-        "max_left": 1.0,
-        "max_right": 1.0,
-        "bias": 0.0
-      },
-      {
-        "pwm": -35,
-        "max_left": 1.0,
-        "max_right": 1.0,
-        "bias": 0.0
-      },
-      {
-        "pwm": -20,
-        "max_left": 1.0,
-        "max_right": 1.0,
-        "bias": 0.0
-      },
-      {
-        "pwm": 20,
-        "max_left": 1.0,
-        "max_right": 1.0,
-        "bias": 0.0
-      },
-      {
-        "pwm": 35,
-        "max_left": 1.0,
-        "max_right": 1.0,
-        "bias": 0.0
-      },
-      {
-        "pwm": 50,
-        "max_left": 1.0,
-        "max_right": 1.0,
-        "bias": 0.0
-      },
-      {
-        "pwm": 65,
-        "max_left": 1.0,
-        "max_right": 1.0,
-        "bias": 0.0
-      },
-      {
-        "pwm": 80,
-        "max_left": 1.0,
-        "max_right": 1.0,
-        "bias": 0.0
-      }
-    ]
+    "deadzone_left_fwd": 0,
+    "deadzone_left_rev": 0,
+    "deadzone_right_fwd": 0,
+    "deadzone_right_rev": 0,
+    "bias": 0.0
   }
 }
