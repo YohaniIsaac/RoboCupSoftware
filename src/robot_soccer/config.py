@@ -407,9 +407,13 @@ ROBOT_ANGLE_THRESHOLD_DEG = 7  # Error angular aceptable (grados)
 # - Kp (Proporcional): Respuesta inmediata al error de posición
 # - Ki (Integral): Corrige error acumulado (evita offset permanente)
 # - Kd (Derivativo): Reduce overshoot y oscilaciones
-PID_POSITION_KP = 0.008      # Ganancia proporcional de posición
-PID_POSITION_KI = 0.0001     # Ganancia integral de posición
-PID_POSITION_KD = 0.05       # Ganancia derivativa de posición
+#
+# PID basado en TIEMPO (dt): independiente de la frecuencia del control loop.
+# Las unidades son:  Kp=por pixel, Ki=por pixel·segundo, Kd=por pixel/segundo
+# Escala: pid_output × max_smooth_speed (80 PWM) = velocidad final
+PID_POSITION_KP = 10.875199999999971
+PID_POSITION_KI = 0.3000000000000001
+PID_POSITION_KD = 0.0336
 
 # --- PID Angular (Control de Orientación) ---
 # Controla qué tan bien el robot mantiene/corrige su orientación
@@ -417,8 +421,10 @@ PID_POSITION_KD = 0.05       # Ganancia derivativa de posición
 # - ki_angle: Corrige desviaciones acumuladas (bias del robot)
 # - kd_angle: Damping para reducir oscilaciones (muy importante)
 #
-# NOTA: Para rotación pura se usa PID completo (P+I+D)
-#       Para corrección durante movimiento lineal, principalmente usa P
-PID_ANGLE_KP = 0.08          # Ganancia proporcional angular
-PID_ANGLE_KI = 0.001         # Ganancia integral angular (evitar windup)
-PID_ANGLE_KD = 0.12          # Ganancia derivativa angular (damping fuerte)
+# PID basado en TIEMPO (dt): independiente de la frecuencia del control loop.
+# Las unidades son:  Kp=por rad, Ki=por rad·segundo, Kd=por rad/segundo
+# Escala: pid_output × 255 = velocidad de rotación
+# NOTA: kp_angle se comparte con corrección angular durante movimiento lineal
+PID_ANGLE_KP = 2.8422000000008913
+PID_ANGLE_KI = 0.0
+PID_ANGLE_KD = 0.0

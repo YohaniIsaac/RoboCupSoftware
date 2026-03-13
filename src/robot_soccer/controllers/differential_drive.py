@@ -14,7 +14,6 @@ from robot_soccer.config import (
     ROBOT_LINEAR_START_ANGLE_THRESHOLD_DEG,
     ROBOT_POSITION_THRESHOLD,
     ROBOT_ANGLE_THRESHOLD_DEG,
-    MAX_ANGULAR_CORRECTION_PWM,
     MOTOR_MAX_PWM,
     PID_POSITION_KP,
     PID_POSITION_KI,
@@ -104,10 +103,6 @@ class DifferentialDriveController:
         # Medición real: 25 FPS (40ms/frame) + procesamiento (15ms) + RF (10ms) = ~65ms
         self.LATENCY_COMPENSATION_MS = 70  # ms totales de latencia (conservador)
 
-        # Corrección angular máxima durante movimiento lineal (en PWM)
-        # Evita que la corrección haga que un motor vaya muy lento (causa oscilaciones)
-        self.MAX_ANGULAR_CORRECTION = MAX_ANGULAR_CORRECTION_PWM  # Máximo ±10 PWM
-
         # Umbrales de distancia (desde config.py)
         self.position_threshold = ROBOT_POSITION_THRESHOLD
         self.angle_threshold = math.radians(ROBOT_ANGLE_THRESHOLD_DEG)
@@ -124,6 +119,10 @@ class DifferentialDriveController:
         self.angle_near = math.radians(ROBOT_ROTATION_ARRIVAL_ANGLE_DEG)  # Donde empieza rampa (rad)
         self.rotation_near_min = ROBOT_ROTATION_NEAR_MIN  # MIN en la rampa (PWM)
 
+        # Límites de velocidad POR ROBOT (cargados de calibración JSON)
+        # Se inicializan en _get_robot_speed_limits() la primera vez que se usa cada robot
+        self._robot_speed_limits = {}  # {robot_id: (min_speed, max_speed)}
+
         # Factores de compensación para asimetría de calibración
         # Se calculan por robot cuando se obtiene su calibración
         self.rotation_asymmetry_factors = {}  # {robot_id: (cw_factor, ccw_factor)}
@@ -137,6 +136,33 @@ class DifferentialDriveController:
         self.PERIODIC_LOG_INTERVAL = 0.25  # 250ms entre logs periódicos
         self.last_logged_linear_speed = {}  # {robot_id: speed} para movimiento lineal
 
+    def _get_robot_speed_limits(self, robot_id):
+        """Obtiene límites de velocidad PWM desde la calibración JSON del robot.
+
+        Carga pwm_min y pwm_max del archivo de calibración multipoint.
+        Si no hay calibración, usa los valores por defecto de config.py.
+
+        Args:
+            robot_id: ID del robot (0-3, ID de ArUco marker).
+
+        Returns:
+            tuple: (min_speed, max_speed) en PWM.
+        """
+        if robot_id not in self._robot_speed_limits:
+            if (self.rf_controller
+                    and hasattr(self.rf_controller, 'calibration')
+                    and self.rf_controller.calibration is not None):
+                pwm_min, pwm_max = self.rf_controller.calibration.get_pwm_range(robot_id)
+                log.info("Robot %d: velocidad desde calibración JSON [%d, %d] PWM",
+                         robot_id, pwm_min, pwm_max)
+            else:
+                pwm_min = self.min_motor_speed
+                pwm_max = self.max_smooth_speed
+                log.info("Robot %d: velocidad desde config.py [%d, %d] PWM (sin calibración)",
+                         robot_id, pwm_min, pwm_max)
+            self._robot_speed_limits[robot_id] = (pwm_min, pwm_max)
+        return self._robot_speed_limits[robot_id]
+
     def _get_pid_state(self, robot_id):
         """Retorna el estado PID para un robot específico, creándolo si no existe.
 
@@ -149,13 +175,21 @@ class DifferentialDriveController:
         """
         if robot_id not in self._pid_state:
             self._pid_state[robot_id] = {
-                'last_error_pos': (0, 0),
-                'integral_pos': (0, 0),
+                # PID lineal (escalar)
+                'last_distance': 0,
+                'integral_distance': 0,
+                'last_derivative_distance': 0,
+                'last_distance_measurement_time': 0,
+                # PID angular (compartido entre rotación y corrección lineal)
                 'last_error_angle': 0,
                 'integral_angle': 0,
+                'last_derivative_angle': 0,
+                'last_angle_measurement_time': 0,
+                # Tracking
                 'last_linear_speed': 0,
                 'last_rotation_speed': 0,
-                'rotation_completed_at': 0,
+                'in_rotation_mode': False,
+                'last_pid_time': 0,
             }
         return self._pid_state[robot_id]
 
@@ -179,12 +213,13 @@ class DifferentialDriveController:
         if self.rf_controller.calibration is None:
             return (1.0, 1.0)
 
-        # Obtener calibración del robot usando velocidad de referencia
-        # Con calibración multipoint, max_left/max_right varían según velocidad
-        # Usamos 50 PWM como referencia (velocidad media típica en rango 20-80)
-        REFERENCE_SPEED = 50
+        # Obtener calibración del robot usando el max_speed del robot como referencia.
+        # IMPORTANTE: usar el max_speed real del robot (no un valor fijo de 50 PWM)
+        # para evitar que robots con rango estrecho (ej. Robot 0: [17-29]) queden
+        # fuera del rango calibrado y retornen siempre (1.0, 1.0) → sin compensación.
+        _, ref_speed = self._get_robot_speed_limits(robot_id)
         max_left, max_right, _ = self.rf_controller.calibration.get_calibration_at_speed(
-            robot_id, REFERENCE_SPEED
+            robot_id, ref_speed
         )
 
         # Si ambos motores son iguales, no hay asimetría
@@ -221,191 +256,240 @@ class DifferentialDriveController:
         return (cw_compensation, ccw_compensation)
 
     def move_to_position(self, robot, target_pos, target_angle=None):
-        """Calcula y envía comandos para mover el robot a una posición específica.
+        """Mueve el robot a una posición usando control Dual PID (v, ω) estándar.
 
-        Utiliza control PID para navegación suave hacia el objetivo. Si el error
-        angular es grande, primero rota el robot antes de moverse.
+        Arquitectura estándar para tracción diferencial:
+        - PID lineal: distancia → v (velocidad base, ambas ruedas)
+        - PID angular: error_heading → ω (corrección diferencial)
+        - Ambos corren SIMULTÁNEAMENTE en cada ciclo
+        - Cinemática: left = v + ω, right = v - ω
+        - Si error angular > umbral: v=0 (rotación pura, mismo PID angular)
 
         Args:
-            robot: Objeto robot con atributos x, y, angle.
+            robot: Objeto robot con atributos x, y, angle (radianes).
             target_pos (tuple): Posición objetivo como (x, y).
-            target_angle (float, optional): Ángulo objetivo en grados.
+            target_angle (float, optional): Ángulo final en grados.
 
         Returns:
-            bool: True si el robot ha llegado a la posición objetivo, False en caso contrario.
-
-        Example:
-            >>> controller.move_to_position(robot, (100, 200), 45)
-            False  # Robot aún en movimiento
+            bool: True si llegó al objetivo.
         """
-        # Calcular distancia y ángulo al objetivo
-        current_pos = (robot.x, robot.y)
-        dx = target_pos[0] - current_pos[0]
-        dy = target_pos[1] - current_pos[1]
-
+        # === 1. CALCULAR ERRORES ===
+        dx = target_pos[0] - robot.x
+        dy = target_pos[1] - robot.y
         distance = math.sqrt(dx**2 + dy**2)
 
-        # DEBUG: Log de vectores y distancias (solo cuando se inicia el movimiento)
         if not hasattr(self, '_last_target') or self._last_target != target_pos:
-            log.info("📍 Robot(%d, %d) → Target(%d, %d) | dx=%d dy=%d dist=%.1f",
-                     int(current_pos[0]), int(current_pos[1]),
-                     int(target_pos[0]), int(target_pos[1]),
-                     int(dx), int(dy), distance)
+            log.info("📍 Robot(%d, %d) → Target(%d, %d) | dist=%.1f",
+                     int(robot.x), int(robot.y),
+                     int(target_pos[0]), int(target_pos[1]), distance)
             self._last_target = target_pos
 
-        # Obtener estado PID para este robot
         state = self._get_pid_state(robot.id)
+        robot_min_speed, robot_max_speed = self._get_robot_speed_limits(robot.id)
 
-        # ===== PREDICTIVE STOPPING LINEAL =====
-        # Estimar dónde ESTARÁ el robot después de la latencia
-        latency_seconds = self.LATENCY_COMPENSATION_MS / 1000.0
+        # === 2. VERIFICACIÓN DE LLEGADA ===
+        latency_s = self.LATENCY_COMPENSATION_MS / 1000.0
+        speed_norm = abs(state['last_linear_speed']) / 255.0
+        predicted_dist = distance - speed_norm * 200.0 * latency_s
 
-        # Estimar distancia adicional que recorrerá (velocidad actual * latencia)
-        # Convertir PWM (0-255) a velocidad normalizada (0-1) para estimación
-        # Asumimos ~200 px/s a velocidad máxima (depende del campo, ajustar si es necesario)
-        speed_normalized = abs(state['last_linear_speed']) / 255.0
-        estimated_speed_px_per_sec = speed_normalized * 200.0
-        predicted_additional_distance_px = estimated_speed_px_per_sec * latency_seconds
-
-        # Distancia PREDICHA (dónde estará el robot, no dónde está)
-        predicted_distance = distance - predicted_additional_distance_px
-
-        # Si la distancia PREDICHA está dentro del threshold, DETENER AHORA
-        if predicted_distance < self.position_threshold and state['last_linear_speed'] > 0:
-            log.info("🎯 Robot %d STOP PREDICTIVO LINEAL | Dist=%.1f px Predicha=%.1f px < Threshold=%d px",
-                     robot.id, distance, predicted_distance, self.position_threshold)
+        if predicted_dist < self.position_threshold and state['last_linear_speed'] > 0:
+            log.info("🎯 Robot %d STOP PREDICTIVO | Dist=%.1f Pred=%.1f",
+                     robot.id, distance, predicted_dist)
             self._send_motor_commands(robot, 0, 0)
             state['last_linear_speed'] = 0
             if target_angle is not None:
                 return self.rotate_to_angle(robot, target_angle)
             return True
 
-        # Si estamos suficientemente cerca del objetivo (verificación directa)
         if distance < self.position_threshold:
-            log.info("🎯 Waypoint alcanzado: dist=%.1f px < threshold=%d px",
-                    distance, self.position_threshold)
+            log.info("🎯 Waypoint alcanzado: dist=%.1f < %d",
+                     distance, self.position_threshold)
+            self._send_motor_commands(robot, 0, 0)
+            state['last_linear_speed'] = 0
             if target_angle is not None:
-                # Alcanzamos la posición, ajustar orientación final
                 return self.rotate_to_angle(robot, target_angle)
-            else:
-                # Detener el robot
-                self._send_motor_commands(robot, 0, 0)
-                return True
+            return True
 
-        # Calcular ángulo hacia el objetivo (en radianes)
+        # === 3. ERROR ANGULAR (heading hacia el objetivo) ===
         target_heading = math.atan2(dy, dx)
+        angle_error = _normalize_angle(target_heading - robot.angle)
 
-        # El ángulo del robot YA está en radianes (convertido en control_process)
-        current_angle_rad = robot.angle
+        # === 4. CALCULAR dt ===
+        now = time.time()
+        if state['last_pid_time'] == 0:
+            dt = 0.033
+        else:
+            dt = now - state['last_pid_time']
+        state['last_pid_time'] = now
+        dt = max(0.001, min(0.1, dt))
 
-        # Calcular error de ángulo (normalizado entre -pi y pi)
-        angle_error = _normalize_angle(target_heading - current_angle_rad)
+        # === 5. PID ANGULAR → ω (corre SIEMPRE, en ambos modos) ===
+        # Proporcional
+        p_w = self.kp_angle * angle_error
 
-        # ===== CONTROL HÍBRIDO: Girar en lugar vs Corregir mientras se mueve =====
-        # Umbral configurable para decidir comportamiento (desde config.py)
-        # 30° = conservador pero eficiente, 45° = más agresivo
-        LARGE_ANGLE_ERROR_THRESHOLD = math.radians(ROBOT_LINEAR_START_ANGLE_THRESHOLD_DEG)
+        # Integral (con anti-windup y reset al cambiar dirección)
+        if state['last_error_angle'] * angle_error < 0:
+            state['integral_angle'] = 0
+        else:
+            state['integral_angle'] += angle_error * dt
+        max_integral_angle = 3.0  # rad·s
+        state['integral_angle'] = max(-max_integral_angle,
+                                      min(max_integral_angle, state['integral_angle']))
+        i_w = self.ki_angle * state['integral_angle']
 
-        # FASE 1: Error angular MUY grande (>umbral) → Girar en lugar
-        # Evita movimientos inestables cuando el robot apunta en dirección muy incorrecta
-        # Cooldown: tras completar rotación, esperar a que la cámara actualice antes
-        # de re-evaluar, evitando oscilación stop-start con datos obsoletos
-        rotation_cooldown_s = self.LATENCY_COMPENSATION_MS * 2 / 1000.0
-        in_cooldown = (time.time() - state.get('rotation_completed_at', 0)) < rotation_cooldown_s
+        # Derivada (basada en medición, solo cuando hay nuevo frame)
+        angle_changed = abs(angle_error - state['last_error_angle']) > 0.001
+        if angle_changed:
+            dt_meas = now - state.get('last_angle_measurement_time', now)
+            if dt_meas > 0.001:
+                state['last_derivative_angle'] = (
+                    angle_error - state['last_error_angle']) / dt_meas
+            state['last_angle_measurement_time'] = now
+            state['last_error_angle'] = angle_error
+        d_w = self.kd_angle * state.get('last_derivative_angle', 0)
 
-        if abs(angle_error) > LARGE_ANGLE_ERROR_THRESHOLD and not in_cooldown:
-            # Girar en su lugar hasta estar razonablemente orientado
-            angle_error_deg = math.degrees(angle_error)
-            log.debug("🔄 Robot %d | Error angular grande: %.1f° > %.0f° → Girando en lugar",
-                     robot.id, abs(angle_error_deg), ROBOT_LINEAR_START_ANGLE_THRESHOLD_DEG)
-            reached = self.rotate_to_angle(robot, math.degrees(target_heading))
-            if reached:
-                state['rotation_completed_at'] = time.time()
-            return False  # Todavía NO hemos llegado al waypoint
+        omega_raw = p_w + i_w + d_w
 
-        # FASE 2: Error angular pequeño (≤umbral) → Moverse MIENTRAS corrige
-        # La función _calculate_differential_speeds() ajusta velocidades L/R
-        # para corregir la orientación durante el movimiento lineal
+        # === 6. DECISIÓN DE MODO (histéresis) ===
+        # Dos umbrales independientes para evitar switching rápido:
+        #   enter_thresh: si error supera este umbral, entrar a rotación pura
+        #   exit_thresh:  solo salir de rotación cuando error es MUY pequeño
+        #
+        # exit_thresh debe ser próximo al angle_threshold (umbral de llegada),
+        # no al 50% del enter_thresh. Razón: con la corrección angular disponible
+        # durante el movimiento lineal (~5-10 PWM diferencial para Robot 0), el
+        # robot solo puede corregir errores pequeños (<10°). Salir a 15° con
+        # corrección débil y target_heading dinámico causa zigzag.
+        enter_thresh = math.radians(ROBOT_LINEAR_START_ANGLE_THRESHOLD_DEG)
+        exit_thresh = self.angle_threshold + math.radians(3)  # ≈ 10° (angle_threshold + margen)
 
-        # Implementar PID para la posición
-        p_term = self.kp_pos * distance
+        if state['in_rotation_mode']:
+            should_rotate = abs(angle_error) > exit_thresh
+        else:
+            should_rotate = abs(angle_error) > enter_thresh
+        state['in_rotation_mode'] = should_rotate
 
-        # Calcular integral y derivada
-        state['integral_pos'] = (state['integral_pos'][0] + dx, state['integral_pos'][1] + dy)
-        i_term = self.ki_pos * math.sqrt(
-            state['integral_pos'][0] ** 2 + state['integral_pos'][1] ** 2
-        )
+        if should_rotate:
+            # === MODO ROTACIÓN PURA (v=0, mismo PID angular) ===
+            # Para rotación INLINE (dentro de move_to_position), escalamos el PID
+            # directamente al rango del robot sin el perfil de rampa de rotate_to_angle.
+            # Razón: el perfil de rampa tiene piso en min_speed (17 PWM para Robot 0),
+            # y con kp típico el PID cae por debajo de ese piso desde ~35°, produciendo
+            # velocidad constante mínima. La escala directa + clamp da el mismo resultado
+            # para ángulos pequeños pero evita el artefacto de "rampa empieza a 25°".
+            raw_pwm = abs(omega_raw) * robot_max_speed
+            rotation_speed = int(max(robot_min_speed, min(robot_max_speed, raw_pwm)))
 
-        derivative_pos = (dx - state['last_error_pos'][0], dy - state['last_error_pos'][1])
-        d_term = self.kd_pos * math.sqrt(
-            derivative_pos[0] ** 2 + derivative_pos[1] ** 2
-        )
-
-        # Actualizar último error
-        state['last_error_pos'] = (dx, dy)
-
-        # Calcular velocidad base del PID
-        pid_speed = p_term + i_term + d_term
-
-        # Aplicar perfil de velocidad suave (Solución 1, 2 y 4 combinadas)
-        speed = self._apply_velocity_profile(pid_speed, distance)
-
-        # Ajustar velocidad basada en el error de ángulo
-        left_speed, right_speed = self._calculate_differential_speeds(
-            speed, angle_error
-        )
-
-        # ===== LOGGING PERIÓDICO MOVIMIENTO LINEAL =====
-        current_time = time.time()
-        last_logged_linear = self.last_logged_linear_speed.get(robot.id, None)
-        last_periodic_time_linear = self.last_periodic_log_time_linear.get(robot.id, 0)
-
-        speed_changed = (last_logged_linear is None or abs(speed - last_logged_linear) >= 1)
-        periodic_log_due = (current_time - last_periodic_time_linear) >= self.PERIODIC_LOG_INTERVAL
-
-        if speed_changed or periodic_log_due:
-            # Determinar zona
-            if distance <= self.position_threshold:
-                zone_linear = "THRESHOLD"
-            elif distance <= self.distance_near:
-                zone_linear = "RAMPA"
+            # Compensación de asimetría de motores
+            if robot.id not in self.rotation_asymmetry_factors:
+                self.rotation_asymmetry_factors[robot.id] = (
+                    self._calculate_rotation_compensation(robot.id))
+            cw_comp, ccw_comp = self.rotation_asymmetry_factors[robot.id]
+            if angle_error > 0:
+                rotation_speed = int(rotation_speed * ccw_comp)
             else:
-                zone_linear = "LEJOS"
+                rotation_speed = int(rotation_speed * cw_comp)
 
-            # Determinar límites esperados (en PWM)
-            if zone_linear == "LEJOS":
-                expected_min = self.min_motor_speed
-                expected_max = self.max_smooth_speed
-                limits_info = f"Límites[{expected_min}-{expected_max}PWM]"
-            elif zone_linear == "RAMPA":
-                expected_min = self.linear_near_min
-                expected_max = self.max_smooth_speed
-                limits_info = f"Límites[{expected_min}-{expected_max}PWM]"
-            else:  # THRESHOLD
-                limits_info = "Límites[0-threshold]"
-
-            # Log con corrección angular simultánea
-            angle_error_deg = math.degrees(angle_error)
-            if speed_changed:
-                log.info("🚗 Robot %d | Pos(%.1f,%.1f)→(%.1f,%.1f) Dist=%.1fpx | Zona=%s | PWM=%d %s | Error∠=%.1f° | (L=%d R=%d)",
-                        robot.id, robot.x, robot.y, target_pos[0], target_pos[1], distance,
-                        zone_linear, speed, limits_info, angle_error_deg, left_speed, right_speed)
+            if angle_error > 0:
+                left_speed, right_speed = rotation_speed, -rotation_speed
             else:
-                log.info("⏱️  Robot %d | Pos(%.1f,%.1f)→(%.1f,%.1f) Dist=%.1fpx | Zona=%s | PWM=%d %s | Error∠=%.1f° | (L=%d R=%d)",
-                        robot.id, robot.x, robot.y, target_pos[0], target_pos[1], distance,
-                        zone_linear, speed, limits_info, angle_error_deg, left_speed, right_speed)
+                left_speed, right_speed = -rotation_speed, rotation_speed
 
-            self.last_logged_linear_speed[robot.id] = speed
-            self.last_periodic_log_time_linear[robot.id] = current_time
+            state['last_linear_speed'] = 0
+            state['last_rotation_speed'] = rotation_speed
 
-        # Actualizar última velocidad lineal para predicción
-        state['last_linear_speed'] = speed
+            # Logging rotación
+            self._log_periodic(
+                robot, now, 'rotation',
+                angle_error=angle_error,
+                speed=rotation_speed,
+                min_spd=robot_min_speed, max_spd=robot_max_speed,
+                left=left_speed, right=right_speed)
+        else:
+            # === MODO LINEAL + CORRECCIÓN ANGULAR (v>0, ω como diferencial) ===
 
-        # Enviar comandos a los motores
+            # --- PID LINEAL → v (escalar, basado en distancia) ---
+            p_v = self.kp_pos * distance
+
+            # Integral escalar (acumula distancia × tiempo)
+            state['integral_distance'] += distance * dt
+            max_integral_dist = 50.0  # px·s
+            state['integral_distance'] = min(
+                state['integral_distance'], max_integral_dist)
+            i_v = self.ki_pos * state['integral_distance']
+
+            # Derivada escalar CON SIGNO (negativa al acercarse = frena)
+            last_dist = state['last_distance']
+            dist_changed = abs(distance - last_dist) > 0.5
+            if dist_changed:
+                dt_meas_d = now - state.get('last_distance_measurement_time', now)
+                if dt_meas_d > 0.001:
+                    state['last_derivative_distance'] = (
+                        distance - last_dist) / dt_meas_d
+                state['last_distance_measurement_time'] = now
+                state['last_distance'] = distance
+            d_v = self.kd_pos * state.get('last_derivative_distance', 0)
+
+            v_raw = p_v + i_v + d_v
+
+            # Aplicar perfil de velocidad (rampa cerca del objetivo)
+            v = self._apply_velocity_profile(
+                v_raw, distance,
+                min_speed=robot_min_speed, max_speed=robot_max_speed)
+
+            # --- Combinar v + ω (cinemática diferencial estándar) ---
+            omega_pwm = int(omega_raw * robot_max_speed)
+
+            left_speed = v + omega_pwm
+            right_speed = v - omega_pwm
+
+            # Clipear al rango calibrado del robot
+            left_speed = max(robot_min_speed, min(robot_max_speed, left_speed))
+            right_speed = max(robot_min_speed, min(robot_max_speed, right_speed))
+
+            state['last_linear_speed'] = v
+            state['last_rotation_speed'] = 0
+
+            # Logging lineal
+            self._log_periodic(
+                robot, now, 'linear',
+                target_pos=target_pos, distance=distance,
+                angle_error=angle_error, speed=v, omega_pwm=omega_pwm,
+                min_spd=robot_min_speed, max_spd=robot_max_speed,
+                left=left_speed, right=right_speed)
+
         self._send_motor_commands(robot, left_speed, right_speed)
-
-        # Aún no hemos llegado
         return False
+
+    def _log_periodic(self, robot, now, mode, **kwargs):
+        """Log periódico unificado para rotación y movimiento lineal."""
+        last_time = self.last_periodic_log_time.get(robot.id, 0)
+        if (now - last_time) < self.PERIODIC_LOG_INTERVAL:
+            return
+        self.last_periodic_log_time[robot.id] = now
+
+        angle_err_deg = math.degrees(kwargs.get('angle_error', 0))
+        left = kwargs.get('left', 0)
+        right = kwargs.get('right', 0)
+        min_s = kwargs.get('min_spd', 0)
+        max_s = kwargs.get('max_spd', 0)
+
+        if mode == 'rotation':
+            speed = kwargs.get('speed', 0)
+            log.info("🔄 Robot %d | Error∠=%.1f° | PWM=%d [%d-%d] | (L=%d R=%d)",
+                     robot.id, angle_err_deg, abs(speed), min_s, max_s,
+                     left, right)
+        else:
+            tp = kwargs.get('target_pos', (0, 0))
+            dist = kwargs.get('distance', 0)
+            v = kwargs.get('speed', 0)
+            omega = kwargs.get('omega_pwm', 0)
+            zone = "RAMPA" if dist <= self.distance_near else "LEJOS"
+            log.info("🚗 Robot %d | Pos(%.0f,%.0f)→(%.0f,%.0f) d=%.0f %s | "
+                     "v=%d ω=%d [%d-%d] | ∠=%.1f° | (L=%d R=%d)",
+                     robot.id, robot.x, robot.y, tp[0], tp[1],
+                     dist, zone, v, omega, min_s, max_s,
+                     angle_err_deg, left, right)
 
     def rotate_to_angle(self, robot, target_angle_deg):
         """Rota el robot hacia un ángulo específico usando control PID.
@@ -442,8 +526,9 @@ class DifferentialDriveController:
         # Convertir error a radianes
         angle_error = math.radians(angle_error_deg)
 
-        # Obtener estado PID para este robot
+        # Obtener estado PID y límites de velocidad calibrados
         state = self._get_pid_state(robot.id)
+        robot_min_speed, robot_max_speed = self._get_robot_speed_limits(robot.id)
 
         # ===== DETECCIÓN DE CRUCE DEL OBJETIVO =====
         # Si el error cambió de signo Y disminuyó en magnitud, CRUZAMOS el objetivo
@@ -516,36 +601,52 @@ class DifferentialDriveController:
             self.last_logged_rotation_speed[robot.id] = 0
             return True
 
-        # Implementar PID para el ángulo
+        # ===== PID ANGULAR BASADO EN TIEMPO =====
+        now_angle = time.time()
+        if state['last_pid_time'] == 0:
+            dt_angle = 0.033
+        else:
+            dt_angle = now_angle - state['last_pid_time']
+        state['last_pid_time'] = now_angle
+        dt_angle = max(0.001, min(0.1, dt_angle))
+
+        # Proporcional
         p_term = self.kp_angle * angle_error
 
-        # Calcular integral (con anti-windup)
-        # Si el error cambió de signo, resetear integral para evitar overshoot
+        # Integral (con anti-windup, basado en tiempo)
         if (state['last_error_angle'] * angle_error) < 0:
-            # Error cambió de signo → resetear integral
             state['integral_angle'] = 0
             log.debug("🔄 Reset integral angular (cambio de dirección)")
         else:
-            state['integral_angle'] += angle_error
+            state['integral_angle'] += angle_error * dt_angle
 
-        # Anti-windup: limitar integral
-        max_integral = 0.5  # Limitar contribución integral
+        # Anti-windup: limitar integral (en radian·segundos)
+        max_integral = 3.0
         state['integral_angle'] = max(-max_integral, min(max_integral, state['integral_angle']))
 
         i_term = self.ki_angle * state['integral_angle']
 
-        # Calcular derivada
-        derivative = angle_error - state['last_error_angle']
-        d_term = self.kd_angle * derivative
+        # Derivada: solo recalcular cuando el ángulo CAMBIA (nuevo frame de cámara)
+        angle_changed = abs(angle_error - state['last_error_angle']) > 0.001  # ~0.06°
 
-        # Actualizar último error
-        state['last_error_angle'] = angle_error
+        if angle_changed:
+            dt_measurement = now_angle - state.get('last_angle_measurement_time', now_angle)
+            if dt_measurement > 0.001:
+                state['last_derivative_angle'] = (angle_error - state['last_error_angle']) / dt_measurement
+            state['last_angle_measurement_time'] = now_angle
+            state['last_error_angle'] = angle_error
+
+        derivative = state.get('last_derivative_angle', 0)
+        d_term = self.kd_angle * derivative
 
         # Calcular velocidad de rotación base del PID
         pid_rotation_speed = p_term + i_term + d_term
 
         # Aplicar perfil de velocidad suave para rotación
-        rotation_speed = self._apply_rotation_profile(pid_rotation_speed, abs(angle_error))
+        rotation_speed = self._apply_rotation_profile(
+            pid_rotation_speed, abs(angle_error),
+            min_speed=robot_min_speed, max_speed=robot_max_speed
+        )
 
         # Log cuando entra en rampa por primera vez
         angle_error_abs = abs(angle_error)
@@ -622,15 +723,11 @@ class DifferentialDriveController:
             speed_abs = abs(rotation_speed)
             limits_info = ""
 
-            # Comparar con límites configurados
+            # Comparar con límites calibrados per-robot
             if zone == "LEJOS":
-                expected_min = self.min_rotation_speed
-                expected_max = self.max_rotation_speed
-                limits_info = f"Límites[{expected_min}-{expected_max}PWM]"
+                limits_info = f"Límites[{robot_min_speed}-{robot_max_speed}PWM]"
             elif zone == "RAMPA":
-                expected_min = self.rotation_near_min
-                expected_max = self.max_rotation_speed
-                limits_info = f"Límites[{expected_min}-{expected_max}PWM]"
+                limits_info = f"Límites[{robot_min_speed}-{robot_max_speed}PWM]"
             else:  # THRESHOLD
                 limits_info = "Límites[0-threshold]"
 
@@ -653,142 +750,101 @@ class DifferentialDriveController:
         # Aún no hemos alcanzado el ángulo objetivo
         return False
 
-    def _apply_velocity_profile(self, pid_speed, distance):
+    def _apply_velocity_profile(self, pid_speed, distance, min_speed=None, max_speed=None):
         """Aplica perfil de velocidad con rampa de desaceleración.
 
         Zonas:
-        - LEJOS (distance > distance_near): MIN/MAX absolutos
-        - RAMPA (distance_near >= distance > threshold): Rampa lineal MIN → NEAR_MIN
+        - LEJOS (distance > distance_near): PID controla con piso en min_speed
+        - RAMPA (distance_near >= distance > threshold): Techo baja de max → min
         - THRESHOLD (distance <= threshold): Detener
 
         Args:
-            pid_speed (float): Velocidad calculada por el PID (normalizada).
+            pid_speed (float): Velocidad calculada por el PID (normalizada, 0-1+).
             distance (float): Distancia al objetivo en píxeles.
+            min_speed (int, optional): PWM mínimo del robot (de calibración JSON).
+            max_speed (int, optional): PWM máximo del robot (de calibración JSON).
 
         Returns:
-            int: Velocidad ajustada en PWM (0-255).
+            int: Velocidad ajustada en PWM.
         """
+        # Usar límites per-robot o fallback a config.py
+        if min_speed is None:
+            min_speed = self.min_motor_speed
+        if max_speed is None:
+            max_speed = self.max_smooth_speed
+
         # Si ya llegamos al threshold, detener
         if distance <= self.position_threshold:
             return 0
 
-        # Convertir PID (normalizado) a PWM
-        # PID trabaja con valores pequeños (kp=0.008), necesitamos escalar
-        speed_pwm = int(pid_speed * self.max_motor_speed)
+        # Convertir PID a PWM usando max_speed del robot como escala
+        # pid_speed=1.0 → max_speed PWM (100% de la capacidad del robot)
+        speed_pwm = int(pid_speed * max_speed)
 
-        # Limitar al máximo SIEMPRE
-        speed_pwm = min(speed_pwm, self.max_smooth_speed)
+        # Limitar al máximo del robot
+        speed_pwm = min(speed_pwm, max_speed)
 
         # Aplicar mínimo según la zona
         if distance > self.distance_near:
-            # ZONA LEJOS: Aplicar MIN absoluto
-            speed_pwm = max(speed_pwm, self.min_motor_speed)
+            # ZONA LEJOS: Piso en min_speed (PWM mínimo donde el robot se mueve)
+            speed_pwm = max(speed_pwm, min_speed)
         else:
-            # ZONA RAMPA: Desaceleración lineal desde MIN hasta NEAR_MIN
-            # ramp_factor va de 1.0 (en distance_near) a 0.0 (en position_threshold)
+            # ZONA RAMPA: Desaceleración de max_speed → min_speed
             ramp_factor = (distance - self.position_threshold) / \
                          (self.distance_near - self.position_threshold)
 
-            # Interpolar entre max_smooth_speed y linear_near_min (ambos en PWM)
-            # Usa max_smooth_speed como tope para transición suave desde LEJOS
-            min_speed_in_ramp = int(self.linear_near_min + \
-                               (self.max_smooth_speed - self.linear_near_min) * ramp_factor)
+            # Interpolar entre max_speed y min_speed
+            ceiling = int(min_speed + (max_speed - min_speed) * ramp_factor)
 
-            # Forzar velocidad al valor de la rampa (techo, no piso)
-            speed_pwm = min(speed_pwm, min_speed_in_ramp)
+            # Techo: no superar el valor de rampa
+            speed_pwm = min(speed_pwm, ceiling)
+            # Piso: no bajar del mínimo del robot
+            speed_pwm = max(speed_pwm, min_speed)
 
         return speed_pwm
 
-    def _apply_rotation_profile(self, pid_rotation_speed, angle_error_abs):
+    def _apply_rotation_profile(self, pid_rotation_speed, angle_error_abs,
+                                min_speed=None, max_speed=None):
         """Aplica perfil de velocidad angular con rampa de desaceleración.
 
         Zonas:
-        - LEJOS (angle_error > angle_near): MIN/MAX absolutos
-        - RAMPA (angle_near >= angle_error > threshold): Rampa lineal MIN → NEAR_MIN
+        - LEJOS (angle_error > angle_near): PID controla con piso en min_speed
+        - RAMPA (angle_near >= angle_error > threshold): Techo baja de max → min
         - THRESHOLD (angle_error <= threshold): Detener
 
         Args:
-            pid_rotation_speed (float): Velocidad de rotación calculada por PID (normalizada).
+            pid_rotation_speed (float): Velocidad de rotación calculada por PID.
             angle_error_abs (float): Error angular absoluto en radianes.
+            min_speed (int, optional): PWM mínimo del robot (de calibración).
+            max_speed (int, optional): PWM máximo del robot (de calibración).
 
         Returns:
-            int: Velocidad de rotación ajustada en PWM (0-255, positiva).
+            int: Velocidad de rotación ajustada en PWM (positiva).
         """
-        # Si ya llegamos al threshold, detener
+        if min_speed is None:
+            min_speed = self.min_rotation_speed
+        if max_speed is None:
+            max_speed = self.max_rotation_speed
+
         if angle_error_abs <= self.angle_threshold:
             return 0
 
-        # Convertir PID (normalizado) a PWM y tomar valor absoluto
-        rotation_speed_pwm = int(abs(pid_rotation_speed) * self.max_motor_speed)
+        # Escalar PID con max_speed del robot (no max_motor_speed=127)
+        rotation_speed_pwm = int(abs(pid_rotation_speed) * max_speed)
+        rotation_speed_pwm = min(rotation_speed_pwm, max_speed)
 
-        # Limitar al máximo SIEMPRE
-        rotation_speed_pwm = min(rotation_speed_pwm, self.max_rotation_speed)
-
-        # Aplicar mínimo según la zona
         if angle_error_abs > self.angle_near:
-            # ZONA LEJOS: Aplicar MIN absoluto
-            rotation_speed_pwm = max(rotation_speed_pwm, self.min_rotation_speed)
+            # ZONA LEJOS: Piso en min_speed
+            rotation_speed_pwm = max(rotation_speed_pwm, min_speed)
         else:
-            # ZONA RAMPA: Desaceleración lineal desde MIN hasta NEAR_MIN
-            # ramp_factor va de 1.0 (en angle_near) a 0.0 (en angle_threshold)
+            # ZONA RAMPA: Desaceleración de max_speed → min_speed
             ramp_factor = (angle_error_abs - self.angle_threshold) / \
                          (self.angle_near - self.angle_threshold)
-
-            # Interpolar entre max_rotation_speed y rotation_near_min (ambos en PWM)
-            # Usa max_rotation_speed como tope para transición suave desde LEJOS
-            min_rotation_in_ramp = int(self.rotation_near_min + \
-                                  (self.max_rotation_speed - self.rotation_near_min) * ramp_factor)
-
-            # Forzar velocidad al valor de la rampa (techo, no piso)
-            rotation_speed_pwm = min(rotation_speed_pwm, min_rotation_in_ramp)
+            ceiling = int(min_speed + (max_speed - min_speed) * ramp_factor)
+            rotation_speed_pwm = min(rotation_speed_pwm, ceiling)
+            rotation_speed_pwm = max(rotation_speed_pwm, min_speed)
 
         return rotation_speed_pwm
-
-    def _calculate_differential_speeds(self, speed_pwm, angle_error):
-        """Calcula las velocidades diferenciales para los motores.
-
-        Ajusta las velocidades de los motores izquierdo y derecho para
-        lograr el movimiento lineal deseado con corrección angular LIMITADA.
-
-        IMPORTANTE: Diseñado para corrección suave durante movimiento,
-        NO para rotación pura (usa rotate_to_angle para eso).
-
-        Args:
-            speed_pwm (int): Velocidad lineal deseada en PWM (0-255).
-            angle_error (float): Error de ángulo en radianes.
-
-        Returns:
-            tuple: Tupla con velocidades PWM (izquierda, derecha).
-
-        Note:
-            - Limita corrección a MAX_ANGULAR_CORRECTION (PWM) para evitar oscilaciones
-            - Mantiene velocidad lineal promedio cercana a 'speed_pwm'
-            - NO normaliza agresivamente (evita robot muy lento)
-        """
-        # Factor de corrección basado SOLO en proporcional (sin i, sin d)
-        # El kp_angle es bajo (0.08) para corrección suave
-        # Convertir angle_error a corrección en PWM
-        correction_normalized = self.kp_angle * angle_error
-        correction_pwm = int(correction_normalized * self.max_motor_speed)
-
-        # LIMITAR corrección para evitar un motor muy lento
-        # Ejemplo: Si speed=90 PWM y MAX=10 PWM:
-        #   correction máx = ±10 → left=100, right=80 (razonable)
-        #   Sin límite con error 30°: correction=~26 → left=116, right=64 (asimétrico)
-        correction_pwm = max(-self.MAX_ANGULAR_CORRECTION,
-                        min(self.MAX_ANGULAR_CORRECTION, correction_pwm))
-
-        # Calcular velocidades de los motores (en PWM)
-        # INTERCAMBIADAS para coincidir con el sentido de rotación corregido
-        left_speed_pwm = speed_pwm + correction_pwm
-        right_speed_pwm = speed_pwm - correction_pwm
-
-        # Clip individual (sin normalización que reduce velocidad total)
-        # Esto permite que un motor vaya al máximo mientras el otro ajusta
-        left_speed_pwm = max(-self.max_motor_speed, min(self.max_motor_speed, left_speed_pwm))
-        right_speed_pwm = max(-self.max_motor_speed, min(self.max_motor_speed, right_speed_pwm))
-
-        return left_speed_pwm, right_speed_pwm
 
     def _send_motor_commands(self, robot, left_speed_pwm, right_speed_pwm):
         """Envía comandos PWM a los motores del robot.

@@ -101,9 +101,15 @@ def visualization_loop_pid(frame_pipe, control_state_pipe, keyboard_pipe,
     last_robot_id = 0
     last_robot_predicted = False
 
+    # Modo de ajuste: 'fine' (±0.01) o 'coarse' (±0.1)
+    adjust_mode = 'fine'
+    STEP_FINE = 0.01
+    STEP_COARSE = 0.1
+    step = STEP_FINE  # valor actual según el modo
+
     # Configuración de ventana
     window_name = 'Calibracion PID (3 Procesos)'
-    panel_height = 350
+    panel_height = 370
 
     # Callback de mouse para establecer waypoints
     def mouse_callback(event, x, y, flags, param):
@@ -199,6 +205,7 @@ def visualization_loop_pid(frame_pipe, control_state_pipe, keyboard_pipe,
                                 (0, 255, 255), 1, cv2.LINE_AA)
 
                 # ===== GENERAR PANEL DE INFORMACIÓN =====
+                step = STEP_FINE if adjust_mode == 'fine' else STEP_COARSE
                 panel = np.zeros((panel_height, frame_width, 3), dtype=np.uint8)
 
                 # Línea 1: Estado del robot
@@ -228,38 +235,49 @@ def visualization_loop_pid(frame_pipe, control_state_pipe, keyboard_pipe,
                 cv2.putText(panel, movement_text, (10, 60),
                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, movement_color, 2)
 
-                # Línea 3-8: Parámetros PID (3 de posición + 3 de ángulo)
-                y_offset = 90
+                # Línea 3: Modo de ajuste (prominente)
+                step = STEP_FINE if adjust_mode == 'fine' else STEP_COARSE
+                if adjust_mode == 'fine':
+                    mode_text = f"MODO: FINO  ±{STEP_FINE}  (a = cambiar a GRUESO ±{STEP_COARSE})"
+                    mode_color = (100, 255, 100)
+                else:
+                    mode_text = f"MODO: GRUESO ±{STEP_COARSE}  (a = cambiar a FINO ±{STEP_FINE})"
+                    mode_color = (0, 165, 255)
+                cv2.putText(panel, mode_text, (10, 90),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.55, mode_color, 2)
+
+                # Líneas 4-9: Parámetros PID (3 de posición + 3 de ángulo)
+                y_offset = 120
                 pid_texts = [
-                    f"PID Posicion KP: {last_pid_params['kp_pos']:.4f}  (1/q: ±0.001)",
-                    f"PID Posicion KI: {last_pid_params['ki_pos']:.5f}  (2/w: ±0.0001)",
-                    f"PID Posicion KD: {last_pid_params['kd_pos']:.3f}  (3/e: ±0.01)",
-                    f"PID Angulo KP:   {last_pid_params['kp_angle']:.3f}  (4/r: ±0.01)",
-                    f"PID Angulo KI:   {last_pid_params['ki_angle']:.4f}  (5/t: ±0.001)",
-                    f"PID Angulo KD:   {last_pid_params['kd_angle']:.3f}  (6/y: ±0.01)",
+                    f"PID Posicion KP: {last_pid_params['kp_pos']:.4f}  (1/q: +/-{step})",
+                    f"PID Posicion KI: {last_pid_params['ki_pos']:.4f}  (2/w: +/-{step})",
+                    f"PID Posicion KD: {last_pid_params['kd_pos']:.4f}  (3/e: +/-{step})",
+                    f"PID Angulo  KP:  {last_pid_params['kp_angle']:.4f}  (4/r: +/-{step})",
+                    f"PID Angulo  KI:  {last_pid_params['ki_angle']:.4f}  (5/t: +/-{step})",
+                    f"PID Angulo  KD:  {last_pid_params['kd_angle']:.4f}  (6/y: +/-{step})",
                 ]
 
                 for i, text in enumerate(pid_texts):
                     cv2.putText(panel, text, (10, y_offset + i * 30),
                                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (200, 200, 255), 1)
 
-                # Línea 9: FPS de percepción
+                # Línea: FPS de percepción
                 fps_value = last_perception_stats.get('fps', 0.0)
                 fps_text = f"FPS Percepcion: {fps_value:.1f} (objetivo: 28-40)"
                 fps_color = (0, 255, 0) if fps_value >= 28 else (0, 165, 255)
-                cv2.putText(panel, fps_text, (10, 280),
+                cv2.putText(panel, fps_text, (10, 305),
                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, fps_color, 2)
 
-                # Línea 10: Estadísticas de detección
+                # Línea: Estadísticas de detección
                 detection_rate = last_perception_stats.get('detection_rate', 0.0)
                 frames_count = last_perception_stats.get('frames_analyzed', 0)
                 det_text = f"Deteccion: {detection_rate * 100:.1f}% | Frames: {frames_count}"
-                cv2.putText(panel, det_text, (10, 310),
+                cv2.putText(panel, det_text, (10, 335),
                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (100, 255, 255), 1)
 
-                # Línea 11: Controles
-                controls_text = "ESPACIO=Mover | g=Guardar PID | z=Reset PID | ESC=Salir"
-                cv2.putText(panel, controls_text, (10, 340),
+                # Línea: Controles
+                controls_text = "ESPACIO=Mover | g=Guardar | z=Reset | a=Modo | ESC=Salir"
+                cv2.putText(panel, controls_text, (10, 362),
                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (150, 150, 150), 1)
 
                 # Combinar panel + frame
@@ -283,65 +301,47 @@ def visualization_loop_pid(frame_pipe, control_state_pipe, keyboard_pipe,
             param = None
             delta = None
 
+            # Toggle modo fino/grueso (tecla 'a')
+            if key == ord('a'):
+                adjust_mode = 'coarse' if adjust_mode == 'fine' else 'fine'
+                step = STEP_FINE if adjust_mode == 'fine' else STEP_COARSE
+                log.info("🎛️  Modo ajuste: %s (paso ±%.3f)", adjust_mode.upper(), step)
+
             # Ajuste PID Posición KP (teclas 1/q)
-            if key == ord('1'):
-                command = 'adjust_pid'
-                param = 'kp_pos'
-                delta = 0.001
+            elif key == ord('1'):
+                command, param, delta = 'adjust_pid', 'kp_pos', step
             elif key == ord('q'):
-                command = 'adjust_pid'
-                param = 'kp_pos'
-                delta = -0.001
+                command, param, delta = 'adjust_pid', 'kp_pos', -step
 
             # Ajuste PID Posición KI (teclas 2/w)
             elif key == ord('2'):
-                command = 'adjust_pid'
-                param = 'ki_pos'
-                delta = 0.0001
+                command, param, delta = 'adjust_pid', 'ki_pos', step
             elif key == ord('w'):
-                command = 'adjust_pid'
-                param = 'ki_pos'
-                delta = -0.0001
+                command, param, delta = 'adjust_pid', 'ki_pos', -step
 
             # Ajuste PID Posición KD (teclas 3/e)
             elif key == ord('3'):
-                command = 'adjust_pid'
-                param = 'kd_pos'
-                delta = 0.01
+                command, param, delta = 'adjust_pid', 'kd_pos', step
             elif key == ord('e'):
-                command = 'adjust_pid'
-                param = 'kd_pos'
-                delta = -0.01
+                command, param, delta = 'adjust_pid', 'kd_pos', -step
 
             # Ajuste PID Ángulo KP (teclas 4/r)
             elif key == ord('4'):
-                command = 'adjust_pid'
-                param = 'kp_angle'
-                delta = 0.01
+                command, param, delta = 'adjust_pid', 'kp_angle', step
             elif key == ord('r'):
-                command = 'adjust_pid'
-                param = 'kp_angle'
-                delta = -0.01
+                command, param, delta = 'adjust_pid', 'kp_angle', -step
 
             # Ajuste PID Ángulo KI (teclas 5/t)
             elif key == ord('5'):
-                command = 'adjust_pid'
-                param = 'ki_angle'
-                delta = 0.001
+                command, param, delta = 'adjust_pid', 'ki_angle', step
             elif key == ord('t'):
-                command = 'adjust_pid'
-                param = 'ki_angle'
-                delta = -0.001
+                command, param, delta = 'adjust_pid', 'ki_angle', -step
 
             # Ajuste PID Ángulo KD (teclas 6/y)
             elif key == ord('6'):
-                command = 'adjust_pid'
-                param = 'kd_angle'
-                delta = 0.01
+                command, param, delta = 'adjust_pid', 'kd_angle', step
             elif key == ord('y'):
-                command = 'adjust_pid'
-                param = 'kd_angle'
-                delta = -0.01
+                command, param, delta = 'adjust_pid', 'kd_angle', -step
 
             # Guardar parámetros PID (tecla 'g')
             elif key == ord('g'):
