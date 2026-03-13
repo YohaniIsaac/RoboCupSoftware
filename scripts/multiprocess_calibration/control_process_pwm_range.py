@@ -528,7 +528,7 @@ def control_loop_pwm_range(robot_positions_pipe, frame_pipe, robot_id, serial_po
                     calibration.save()
                     print(f"✅ Rango guardado para Robot {robot_id}")
                     print("⚠️  Los puntos de calibración fueron regenerados con valores neutros")
-                    print(f"   Ejecuta 'calibrate_robot_motors_multipoint.py --robot-id {robot_id}' para calibrar\n")
+                    print(f"   Ejecuta 'calibrate_robot_bias.py --robot-id {robot_id}' para calibrar bias\n")
 
             time.sleep(0.001)
 
@@ -563,5 +563,5 @@ def control_loop_pwm_range(robot_positions_pipe, frame_pipe, robot_id, serial_po
         print("   2. Encuentra PWM_max: PWM más alto donde la cámara detecta al robot")
         print("   3. Ajusta rango con n/m (min) y ,/. (max)")
         print("   4. Presiona 'g' para guardar")
-        print("   5. Calibra con: calibrate_robot_motors_multipoint.py --robot-id " + str(robot_id))
+        print("   5. Calibra bias: calibrate_robot_bias.py --robot-id " + str(robot_id))
         print("=" * 70 + "\n")
