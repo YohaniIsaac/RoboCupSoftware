@@ -119,9 +119,12 @@ class RFController:
         right_val = int(max(-127, min(127, right_speed)))
 
         # Aplicar calibración individual si está habilitada
+        # NOTA: robot_id aquí es firmware ID (1-4), pero la calibración JSON
+        # usa Python IDs (0-3) como claves. Convertir antes de aplicar.
         if self.enable_calibration and self.calibration:
+            python_id = robot_id - 1
             left_val_calibrated, right_val_calibrated = self.calibration.apply_calibration(
-                robot_id, left_val, right_val
+                python_id, left_val, right_val
             )
             left_val = left_val_calibrated
             right_val = right_val_calibrated
