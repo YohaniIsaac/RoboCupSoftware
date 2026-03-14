@@ -23,6 +23,10 @@ from ..controllers.robot_calibration_multipoint import (
 
 log = logging.getLogger(__name__)
 
+# ===== DEBUG: Control de logging de rate limiting =====
+# Cambiar a True para activar los logs de comandos ignorados/enviados
+DEBUG_RATE_LIMITING = False
+
 
 class RFController:
     """Controlador para la comunicación por radiofrecuencia con robots de fútbol.
@@ -63,6 +67,9 @@ class RFController:
 
         # Guardar último comando por robot para evitar logs repetidos
         self.last_commands = {}  # {robot_id: (left_val, right_val)}
+
+        # Contador de comandos ignorados seguidos (para logging agrupado)
+        self.ignored_commands_count = {}  # {robot_id: count}
 
         # Rate limiter configurable: Mínimo entre comandos al mismo robot
         # (firmware tiene delay(10), más overhead de procesamiento)
@@ -149,6 +156,15 @@ class RFController:
             return True  # Ignorar comando (demasiado pronto y cambio pequeño)
 
         # ===== LOGGING =====
+        # Si se ignoraron comandos antes de este, mostrar cuántos se ignoraron
+        ignored_count = self.ignored_commands_count.get(robot_id, 0)
+        if DEBUG_RATE_LIMITING and ignored_count > 0:
+            log.warning(
+                f"Robot {robot_id}: IGNORADOS: {ignored_count} comandos | "
+                f"Ahora enviando PWM:({left_val},{right_val})"
+            )
+            self.ignored_commands_count[robot_id] = 0  # Resetear contador
+
         # Solo loguear cuando se DETIENE el robot
         if is_stop_command and last_cmd != (0, 0):
             log.info("⏹️  Robot %i DETENIDO", robot_id)
@@ -186,6 +202,10 @@ class RFController:
         # PRIORIDAD NORMAL: Movimiento regular
         else:
             success = self.serial_manager.send_command(command)
+
+        # Logging de comando enviado exitosamente
+        if DEBUG_RATE_LIMITING:
+            log.info(f"Robot {robot_id}: >>> COMANDO ENVIADO | PWM:({left_val},{right_val})")
 
         return success
 

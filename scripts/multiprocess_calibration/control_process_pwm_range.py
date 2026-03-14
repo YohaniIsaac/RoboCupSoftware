@@ -93,23 +93,33 @@ def control_loop_pwm_range(robot_positions_pipe, control_state_pipe, keyboard_pi
         firmware_id = robot_id + 1
         rf_controller.set_motors(firmware_id, left_speed, right_speed)
 
-    def send_state_to_viz():
-        """Envía estado actual a visualización."""
-        try:
-            control_state_pipe.send({
-                'current_pwm': current_pwm,
-                'movement_active': movement_active,
-                'movement_direction': movement_direction,
-                'movement_duration': movement_duration,
-                'pwm_min': pwm_min_temp,
-                'pwm_max': pwm_max_temp,
-                'session_stats': session_stats.copy(),
-                'total_detections': global_stats['total_detections'],
-                'robot_id': robot_id,
-                'timestamp': time.time()
-            })
-        except Exception as e:
-            log.warning(f"⚠️  Error enviando estado a viz: {e}")
+    def send_state_to_viz(current_time):
+        """Envía estado actual a visualización con rate limiting (~25 Hz).
+        
+        IMPORTANTE: Sin rate limiting, el pipe se satura y pipe.send() BLOQUEA
+        hasta que haya espacio, causando pausas de ~0.6-0.7s en el loop de control.
+        Esto hace que el robot se mueva en "saltos" en lugar de fluido.
+        Ver: https://github.com/anomalyco/opencode/issues (problema similar)
+        """
+        nonlocal last_state_send_time
+        # Rate limiting: enviar solo cada 40ms (~25 Hz) para evitar saturar el pipe
+        if current_time - last_state_send_time >= 0.04:
+            try:
+                control_state_pipe.send({
+                    'current_pwm': current_pwm,
+                    'movement_active': movement_active,
+                    'movement_direction': movement_direction,
+                    'movement_duration': movement_duration,
+                    'pwm_min': pwm_min_temp,
+                    'pwm_max': pwm_max_temp,
+                    'session_stats': session_stats.copy(),
+                    'total_detections': global_stats['total_detections'],
+                    'robot_id': robot_id,
+                    'timestamp': current_time
+                })
+                last_state_send_time = current_time
+            except Exception as e:
+                log.warning(f"⚠️  Error enviando estado a viz: {e}")
 
     def reset_session():
         """Resetea estadísticas de sesión."""
@@ -119,6 +129,7 @@ def control_loop_pwm_range(robot_positions_pipe, control_state_pipe, keyboard_pi
 
     # Flags de control
     exit_requested = False
+    last_state_send_time = 0.0
 
     try:
         while not exit_requested:
@@ -257,8 +268,8 @@ def control_loop_pwm_range(robot_positions_pipe, control_state_pipe, keyboard_pi
                 except Exception as e:
                     log.warning(f"⚠️  Error recibiendo datos de percepción: {e}")
 
-            # ===== ENVIAR ESTADO A VISUALIZACIÓN =====
-            send_state_to_viz()
+            # ===== ENVIAR ESTADO A VISUALIZACIÓN (rate limited ~25 Hz) =====
+            send_state_to_viz(current_time)
 
             time.sleep(0.001)
 
