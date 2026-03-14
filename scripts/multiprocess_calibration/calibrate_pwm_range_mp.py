@@ -76,6 +76,9 @@ def run_pwm_range_finder(robot_id, serial_port='/dev/ttyUSB0', camera_id=None):
         # Pipe 4: Visualización → Control (comandos teclado)
         viz_to_control_send, viz_to_control_recv = multiprocessing.Pipe()
 
+        # Pipe 5: Control → Percepción (señal de reset de estadísticas)
+        control_to_perception_send, control_to_perception_recv = multiprocessing.Pipe()
+
         # Lista de procesos
         processes = []
 
@@ -89,7 +92,8 @@ def run_pwm_range_finder(robot_id, serial_port='/dev/ttyUSB0', camera_id=None):
                 robot_id,
                 camera_id,
                 shm.name,                    # Shared memory para frames
-                frame_counter
+                frame_counter,
+                control_to_perception_send   # Pipe para reset de estadísticas
             ),
             name="PerceptionFast"
         )
@@ -103,6 +107,7 @@ def run_pwm_range_finder(robot_id, serial_port='/dev/ttyUSB0', camera_id=None):
                 perception_to_control_recv,  # Recibe datos posición de Percepción
                 control_to_viz_send,        # Envía estado a Visualización
                 viz_to_control_recv,       # Recibe comandos de Visualización
+                control_to_perception_send, # Envía señales a Percepción (reset stats)
                 robot_id,
                 serial_port
             ),

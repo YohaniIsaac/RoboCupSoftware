@@ -203,7 +203,8 @@ def _frame_sender_thread(frame_queue, metadata_pipe, shm_name, frame_shape, fram
 
 
 def perception_loop_pid(robot_positions_pipe, frame_pipe, robot_id: int, camera_id: int,
-                        shm_name: str = None, frame_counter=None):
+                        shm_name: str = None, frame_counter=None,
+                        control_to_perception_pipe=None):
     """Bucle principal del proceso de percepción ULTRA-RÁPIDO para calibración PID.
 
     Arquitectura de 3 procesos:
@@ -306,6 +307,17 @@ def perception_loop_pid(robot_positions_pipe, frame_pipe, robot_id: int, camera_
 
     try:
         while True:
+            # ===== RECIBIR COMANDOS DESDE CONTROL (señal de reset) =====
+            if control_to_perception_pipe is not None:
+                while control_to_perception_pipe.poll():
+                    try:
+                        cmd = control_to_perception_pipe.recv()
+                        if cmd.get('command') == 'reset_stats':
+                            stats.reset()
+                            log.debug("📊 Percepción: Estadísticas reseteadas")
+                    except Exception:
+                        pass
+
             # Capturar frame
             ret, frame = cap.read()
             if not ret:

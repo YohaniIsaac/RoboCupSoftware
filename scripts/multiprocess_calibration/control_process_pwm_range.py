@@ -28,13 +28,14 @@ log = logging.getLogger(__name__)
 
 
 def control_loop_pwm_range(robot_positions_pipe, control_state_pipe, keyboard_pipe,
-                          robot_id, serial_port):
+                          control_to_perception_pipe, robot_id, serial_port):
     """Bucle principal del proceso de control para PWM range.
 
     Args:
         robot_positions_pipe: Pipe para recibir datos de posición desde percepción
         control_state_pipe: Pipe para enviar estado a visualización
         keyboard_pipe: Pipe para recibir comandos de teclado desde visualización
+        control_to_perception_pipe: Pipe para enviar señales a percepción (reset stats)
         robot_id: ID del robot a probar (0-3)
         serial_port: Puerto serial para comunicación RF
     """
@@ -155,6 +156,12 @@ def control_loop_pwm_range(robot_positions_pipe, control_state_pipe, keyboard_pi
                         movement_direction = value if value else 1
                         movement_start_time = current_time
                         reset_session()
+                        
+                        # Enviar señal de reset a percepción para empezar a contar desde 0
+                        try:
+                            control_to_perception_pipe.send({'command': 'reset_stats'})
+                        except Exception:
+                            pass
                         
                         if movement_direction > 0:
                             send_motor_command(current_pwm, current_pwm)
