@@ -1,7 +1,13 @@
 """Proceso de control para calibración de bias (deriva en línea recta).
 
 Mueve el robot hacia adelante a velocidad media y permite ajustar
-el bias hasta que vaya recto. Muestra la trayectoria en pantalla.
+el bias hasta que vaya recto. La visualización está en otro proceso.
+
+Este proceso:
+- Recibe datos de posición desde percepción
+- Recibe comandos de teclado desde visualización
+- Envía estado a visualización para mostrar
+- Controla los motores via RF
 """
 
 import logging
@@ -9,24 +15,29 @@ import sys
 import time
 from pathlib import Path
 
-import cv2
 import numpy as np
 
-# Agregar src al path
 ROOT_DIR = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(ROOT_DIR / "src"))
 
-# pylint: disable=wrong-import-position
 from robot_soccer.communication.rf_controller import RFController
 from robot_soccer.controllers.robot_calibration_multipoint import RobotCalibrationMultipoint
 
 log = logging.getLogger(__name__)
 
-WINDOW_NAME = 'Calibracion de Bias'
 
+def control_loop_bias(robot_positions_pipe, control_state_pipe, keyboard_pipe,
+                    control_to_perception_pipe, robot_id, serial_port):
+    """Bucle principal para calibración de bias (separado de UI).
 
-def control_loop_bias(robot_positions_pipe, _frame_pipe, robot_id, serial_port):
-    """Bucle principal para calibración de bias."""
+    Args:
+        robot_positions_pipe: Pipe para recibir datos de posición desde percepción
+        control_state_pipe: Pipe para enviar estado a visualización
+        keyboard_pipe: Pipe para recibir comandos de teclado desde visualización
+        control_to_perception_pipe: Pipe para enviar señales a percepción (reset stats)
+        robot_id: ID del robot (0-3)
+        serial_port: Puerto serial
+    """
     log.info("Proceso de calibracion bias iniciado para Robot %d", robot_id)
 
     # Cargar calibración
@@ -53,9 +64,9 @@ def control_loop_bias(robot_positions_pipe, _frame_pipe, robot_id, serial_port):
 
     # Estado
     moving = False
-    trail = []  # Lista de (x, y) para dibujar trayectoria
-    max_trail = 500
     saved = False
+    max_trail = 500
+    trail = []  # Lista de (x, y) para dibujar trayectoria
 
     def send_cmd(left, right):
         if rf:
@@ -64,11 +75,102 @@ def control_loop_bias(robot_positions_pipe, _frame_pipe, robot_id, serial_port):
     def stop():
         send_cmd(0, 0)
 
-    try:
-        while True:
-            now = time.time()
+    def send_state_to_viz(current_time):
+        """Envía estado actual a visualización con rate limiting (~25 Hz).
 
-            # Enviar comandos continuos si está moviendo
+        IMPORTANTE: Sin rate limiting, el pipe se satura y pipe.send() BLOQUEA
+        hasta que haya espacio, causando pausas de ~0.6-0.7s en el loop de control.
+        """
+        nonlocal last_state_send_time
+        if current_time - last_state_send_time >= 0.04:  # 40ms = 25 Hz
+            try:
+                control_state_pipe.send({
+                    'current_bias': current_bias,
+                    'test_pwm': test_pwm,
+                    'moving': moving,
+                    'trail': trail[-50:] if len(trail) > 50 else trail.copy(),
+                    'robot_detected': detected,
+                    'robot_data': {'x': robot_x, 'y': robot_y, 'angulo': robot_angle} if detected else None,
+                    'saved': saved,
+                    'robot_id': robot_id,
+                    'timestamp': current_time
+                })
+                last_state_send_time = current_time
+            except Exception as e:
+                log.warning(f"Error enviando estado a viz: {e}")
+
+    # Flags de control
+    exit_requested = False
+    last_state_send_time = 0.0
+    robot_x, robot_y = None, None
+    robot_angle = None
+    detected = False
+
+    try:
+        while not exit_requested:
+            current_time = time.time()
+
+            # ===== PROCESAR COMANDOS DE TECLADO (desde visualización) =====
+            while keyboard_pipe.poll():
+                try:
+                    cmd = keyboard_pipe.recv()
+                    command = cmd.get('command', '')
+                    param = cmd.get('param')
+                    delta = cmd.get('delta')
+
+                    if command == 'exit':
+                        exit_requested = True
+                        log.info("Comando exit recibido")
+                        stop()
+                        break
+
+                    elif command == 'toggle_movement':
+                        if not moving:
+                            moving = True
+                            trail.clear()
+                            saved = False
+                            log.info(f"Moviendo: PWM={test_pwm}, bias={current_bias:+.4f}")
+                        else:
+                            moving = False
+                            stop()
+                            log.info("Detenido")
+
+                    elif command == 'stop_movement':
+                        moving = False
+                        stop()
+                        log.info("Movimiento detenido")
+
+                    elif command == 'clear_trail':
+                        trail.clear()
+                        log.info("Trail limpiado")
+
+                    elif command == 'adjust_bias':
+                        if param == 'bias':
+                            delta_val = delta if delta else 0
+                            current_bias += delta_val
+                            current_bias = max(-0.5, min(0.5, current_bias))
+                            saved = False
+                            log.info(f"Bias: {current_bias:+.4f}")
+
+                    elif command == 'adjust_pwm':
+                        if param == 'pwm':
+                            delta_val = delta if delta else 0
+                            test_pwm = max(pwm_min, min(pwm_max, test_pwm + delta_val))
+                            log.info(f"PWM: {test_pwm}")
+
+                    elif command == 'save_bias':
+                        calibration.set_bias(robot_id, current_bias)
+                        calibration.save()
+                        saved = True
+                        log.info(f"Bias {current_bias:+.4f} guardado para Robot {robot_id}")
+
+                except Exception as e:
+                    log.warning(f"Error procesando comando: {e}")
+
+            if exit_requested:
+                break
+
+            # ===== ENVIAR COMANDOS DE MOTOR =====
             if moving:
                 bias_pwm = current_bias * 127
                 left = test_pwm + bias_pwm
@@ -77,7 +179,7 @@ def control_loop_bias(robot_positions_pipe, _frame_pipe, robot_id, serial_port):
                 right = max(-127, min(127, int(right)))
                 send_cmd(left, right)
 
-            # Recibir posición del robot
+            # ===== RECIBIR POSICIÓN DEL ROBOT =====
             robot_x, robot_y = None, None
             robot_angle = None
             detected = False
@@ -85,159 +187,19 @@ def control_loop_bias(robot_positions_pipe, _frame_pipe, robot_id, serial_port):
                 data = robot_positions_pipe.recv()
                 if data.get('robot_detected'):
                     rd = data['robot_data']
-                    robot_x, robot_y = rd['x'], rd['y']
-                    robot_angle = rd['angle']
+                    robot_x = rd.get('x')
+                    robot_y = rd.get('y')
+                    robot_angle = rd.get('angulo')
                     detected = True
 
-            # Agregar al trail si se está moviendo y hay detección
-            if moving and detected:
-                trail.append((robot_x, robot_y))
+            # ===== ACTUALIZAR TRAIL =====
+            if moving and detected and robot_x is not None and robot_y is not None:
+                trail.append((int(robot_x), int(robot_y)))
                 if len(trail) > max_trail:
                     trail.pop(0)
 
-            # === DIBUJAR ===
-            frame = np.zeros((480, 640, 3), dtype=np.uint8)
-
-            # Trail (trayectoria)
-            if len(trail) > 1:
-                for i in range(1, len(trail)):
-                    # Color gradiente: rojo viejo → verde reciente
-                    t = i / len(trail)
-                    color = (0, int(255 * t), int(255 * (1 - t)))
-                    cv2.line(frame, trail[i - 1], trail[i], color, 2)
-
-            # Robot actual
-            if detected:
-                cv2.circle(frame, (robot_x, robot_y), 8, (0, 255, 0), -1)
-                angle_rad = np.radians(robot_angle)
-                end_x = int(robot_x + 30 * np.cos(angle_rad))
-                end_y = int(robot_y + 30 * np.sin(angle_rad))
-                cv2.line(frame, (robot_x, robot_y), (end_x, end_y), (0, 255, 0), 2)
-            else:
-                cv2.putText(frame, "Robot no detectado", (200, 240),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
-
-            # === PANEL SUPERIOR ===
-            panel = np.zeros((200, 640, 3), dtype=np.uint8)
-
-            # Estado movimiento
-            if moving:
-                bias_pwm = current_bias * 127
-                l_pwm = int(test_pwm + bias_pwm)
-                r_pwm = int(test_pwm - bias_pwm)
-                status = f"MOVIENDO: L={l_pwm} R={r_pwm} (PWM base={test_pwm})"
-                cv2.putText(panel, status, (10, 30),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 255), 2)
-            else:
-                cv2.putText(panel, "DETENIDO - ESPACIO para mover, ESC para salir",
-                            (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (180, 180, 180), 1)
-
-            # Bias actual
-            bias_color = (0, 255, 0) if abs(current_bias) < 0.001 else (255, 255, 255)
-            cv2.putText(panel, f"Bias: {current_bias:+.4f}", (10, 65),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, bias_color, 2)
-
-            # Efecto del bias
-            bias_pwm_val = current_bias * 127
-            cv2.putText(panel, f"  Efecto: L{bias_pwm_val:+.1f} PWM, R{-bias_pwm_val:+.1f} PWM",
-                        (280, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (180, 180, 180), 1)
-
-            # Controles
-            cv2.putText(panel, "ESPACIO=mover  x=parar  c=limpiar trail", (10, 100),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (150, 150, 150), 1)
-            cv2.putText(panel,
-                        "LEFT/RIGHT: bias +/-0.002 | a/d: +/-0.01 | UP/DOWN: PWM +/-1",
-                        (10, 125), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (150, 150, 150), 1)
-            cv2.putText(panel, "g=guardar  ESC=salir", (10, 150),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (150, 150, 150), 1)
-
-            # Indicador drift
-            if len(trail) >= 20:
-                # Comparar posición X del inicio vs final del trail
-                x_start = trail[0][0]
-                x_end = trail[-1][0]
-                y_travel = abs(trail[-1][1] - trail[0][1])
-                if y_travel > 30:  # Solo si hubo movimiento significativo
-                    x_drift = x_end - x_start
-                    if abs(x_drift) > 5:
-                        direction = "DERECHA" if x_drift > 0 else "IZQUIERDA"
-                        drift_color = (0, 165, 255)
-                        cv2.putText(panel, f"Drift: {x_drift:+.0f}px hacia {direction}",
-                                    (10, 180), cv2.FONT_HERSHEY_SIMPLEX, 0.6,
-                                    drift_color, 2)
-                    else:
-                        cv2.putText(panel, "Drift: RECTO", (10, 180),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-
-            # Estado guardado
-            if saved:
-                cv2.putText(panel, "GUARDADO", (540, 30),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-
-            combined = np.vstack([panel, frame])
-            cv2.imshow(WINDOW_NAME, combined)
-
-            # === TECLAS ===
-            key = cv2.waitKey(1) & 0xFF
-
-            if key == 27:  # ESC
-                break
-
-            elif key == ord(' '):  # ESPACIO - mover/parar toggle
-                if not moving:
-                    moving = True
-                    trail.clear()
-                    saved = False
-                    print(f"Moviendo: PWM={test_pwm}, bias={current_bias:+.4f}")
-                else:
-                    moving = False
-                    stop()
-                    print("Detenido")
-
-            elif key == ord('x'):  # Parar
-                moving = False
-                stop()
-
-            elif key == ord('c'):  # Limpiar trail
-                trail.clear()
-
-            elif key == 81:  # LEFT - bias -0.002
-                current_bias -= 0.002
-                current_bias = max(-0.5, current_bias)
-                saved = False
-                print(f"Bias: {current_bias:+.4f}")
-
-            elif key == 83:  # RIGHT - bias +0.002
-                current_bias += 0.002
-                current_bias = min(0.5, current_bias)
-                saved = False
-                print(f"Bias: {current_bias:+.4f}")
-
-            elif key == ord('a'):  # bias -0.01
-                current_bias -= 0.01
-                current_bias = max(-0.5, current_bias)
-                saved = False
-                print(f"Bias: {current_bias:+.4f}")
-
-            elif key == ord('d'):  # bias +0.01
-                current_bias += 0.01
-                current_bias = min(0.5, current_bias)
-                saved = False
-                print(f"Bias: {current_bias:+.4f}")
-
-            elif key == 82:  # UP - PWM +1
-                test_pwm = min(pwm_max, test_pwm + 1)
-                print(f"PWM: {test_pwm}")
-
-            elif key == 84:  # DOWN - PWM -1
-                test_pwm = max(pwm_min, test_pwm - 1)
-                print(f"PWM: {test_pwm}")
-
-            elif key == ord('g'):  # Guardar
-                calibration.set_bias(robot_id, current_bias)
-                calibration.save()
-                saved = True
-                print(f"Bias {current_bias:+.4f} guardado para Robot {robot_id}")
+            # ===== ENVIAR ESTADO A VISUALIZACIÓN (rate limited ~25 Hz) =====
+            send_state_to_viz(current_time)
 
             time.sleep(0.001)
 
@@ -249,5 +211,4 @@ def control_loop_bias(robot_positions_pipe, _frame_pipe, robot_id, serial_port):
         stop()
         if rf:
             rf.shutdown()
-        cv2.destroyAllWindows()
         print(f"\nBias final: {current_bias:+.4f} {'(GUARDADO)' if saved else '(NO guardado)'}")
