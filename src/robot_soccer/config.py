@@ -411,9 +411,9 @@ ROBOT_ANGLE_THRESHOLD_DEG = 7  # Error angular aceptable (grados)
 # PID basado en TIEMPO (dt): independiente de la frecuencia del control loop.
 # Las unidades son:  Kp=por pixel, Ki=por pixel·segundo, Kd=por pixel/segundo
 # Escala: pid_output × max_smooth_speed (80 PWM) = velocidad final
-PID_POSITION_KP = 10.875199999999971
-PID_POSITION_KI = 0.3000000000000001
-PID_POSITION_KD = 0.0336
+PID_POSITION_KP = 5.505199999999991
+PID_POSITION_KI = 0.1499999999999998
+PID_POSITION_KD = 0.0836
 
 # --- PID Angular (Control de Orientación) ---
 # Controla qué tan bien el robot mantiene/corrige su orientación
@@ -425,6 +425,6 @@ PID_POSITION_KD = 0.0336
 # Las unidades son:  Kp=por rad, Ki=por rad·segundo, Kd=por rad/segundo
 # Escala: pid_output × 255 = velocidad de rotación
 # NOTA: kp_angle se comparte con corrección angular durante movimiento lineal
-PID_ANGLE_KP = 2.8422000000008913
-PID_ANGLE_KI = 0.0
-PID_ANGLE_KD = 0.0
+PID_ANGLE_KP = 0.3522000000008896
+PID_ANGLE_KI = 0.02
+PID_ANGLE_KD = 0.05
