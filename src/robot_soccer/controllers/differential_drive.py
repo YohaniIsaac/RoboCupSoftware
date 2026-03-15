@@ -67,6 +67,7 @@ class DifferentialDriveController:
         wheel_radius=0.025,
         wheel_distance=0.1,
         max_motor_speed=MOTOR_MAX_PWM,
+        enable_debug_pid_logging=False,
     ):
         """Inicializa el controlador con parámetros físicos del robot.
 
@@ -75,6 +76,7 @@ class DifferentialDriveController:
             wheel_radius (float): Radio de las ruedas en metros. Por defecto 0.025.
             wheel_distance (float): Distancia entre ruedas en metros. Por defecto 0.1.
             max_motor_speed (int): Velocidad máxima PWM (0-255). Por defecto 255.
+            enable_debug_pid_logging (bool): Habilita logging detallado de PID para calibración.
 
         Note:
             Los parámetros PID se inicializan con valores predeterminados que pueden
@@ -85,6 +87,7 @@ class DifferentialDriveController:
         self.wheel_distance = wheel_distance
         self.max_motor_speed = max_motor_speed
         self.rf_controller = rf_controller
+        self.enable_debug_pid_logging = enable_debug_pid_logging
 
         # Estado PID por robot (evita corrupción con múltiples robots)
         self._pid_state = {}  # {robot_id: dict con estado PID}
@@ -135,6 +138,10 @@ class DifferentialDriveController:
         self.last_periodic_log_time_linear = {}  # {robot_id: timestamp} para movimiento lineal
         self.PERIODIC_LOG_INTERVAL = 0.25  # 250ms entre logs periódicos
         self.last_logged_linear_speed = {}  # {robot_id: speed} para movimiento lineal
+
+        # Para logging detallado de PID (calibración) - cada 100ms
+        self.last_pid_debug_log_time = {}  # {robot_id: timestamp}
+        self.PID_DEBUG_LOG_INTERVAL = 0.1  # 100ms entre logs de PID
 
     def _get_robot_speed_limits(self, robot_id):
         """Obtiene límites de velocidad PWM desde la calibración JSON del robot.
@@ -350,6 +357,16 @@ class DifferentialDriveController:
 
         omega_raw = p_w + i_w + d_w
 
+        # Guardar términos PID angulares para logging combinado
+        p_w_stored = p_w
+        i_w_stored = i_w
+        d_w_stored = d_w
+
+        # Inicializar términos PID lineales (para logging en modo rotación pura)
+        p_v_stored = i_v_stored = d_v_stored = 0.0
+        v_raw_stored = v_stored = 0.0
+        distance_stored = angle_error_stored = 0.0
+
         # === 6. DECISIÓN DE MODO (histéresis) ===
         # Dos umbrales independientes para evitar switching rápido:
         #   enter_thresh: si error supera este umbral, entrar a rotación pura
@@ -398,6 +415,18 @@ class DifferentialDriveController:
             state['last_linear_speed'] = 0
             state['last_rotation_speed'] = rotation_speed
 
+            # === DEBUG PID LOGGING COMBINADO (calibración) - throttled a 100ms ===
+            if self.enable_debug_pid_logging:
+                last_log = self.last_pid_debug_log_time.get(robot.id, 0)
+                if now - last_log >= self.PID_DEBUG_LOG_INTERVAL:
+                    self.last_pid_debug_log_time[robot.id] = now
+                    err_deg = math.degrees(angle_error)
+                    log.debug("🔧[PID] R%d | ANG: err∠=%+6.1f° P=%+.3f I=%+.3f D=%+.3f | ROT: speed=%d | PWM: L=%+3d R=%+3d | KP=%.3f/%.3f KI=%.3f/%.3f KD=%.3f/%.3f",
+                              robot.id, err_deg, p_w_stored, i_w_stored, d_w_stored,
+                              rotation_speed, left_speed, right_speed,
+                              self.kp_angle, self.kp_pos, self.ki_angle, self.ki_pos,
+                              self.kd_angle, self.kd_pos)
+
             # Logging rotación
             self._log_periodic(
                 robot, now, 'rotation',
@@ -437,6 +466,15 @@ class DifferentialDriveController:
                 v_raw, distance,
                 min_speed=robot_min_speed, max_speed=robot_max_speed)
 
+            # Guardar términos PID lineales para logging combinado
+            p_v_stored = p_v
+            i_v_stored = i_v
+            d_v_stored = d_v
+            v_raw_stored = v_raw
+            v_stored = v
+            distance_stored = distance
+            angle_error_stored = angle_error
+
             # --- Combinar v + ω (cinemática diferencial estándar) ---
             omega_pwm = int(omega_raw * robot_max_speed)
 
@@ -449,6 +487,19 @@ class DifferentialDriveController:
 
             state['last_linear_speed'] = v
             state['last_rotation_speed'] = 0
+
+            # === DEBUG PID LOGGING COMBINADO (calibración) - throttled a 100ms ===
+            if self.enable_debug_pid_logging:
+                last_log = self.last_pid_debug_log_time.get(robot.id, 0)
+                if now - last_log >= self.PID_DEBUG_LOG_INTERVAL:
+                    self.last_pid_debug_log_time[robot.id] = now
+                    err_deg = math.degrees(angle_error_stored)
+                    log.debug("🔧[PID] R%d | ANG: err∠=%+6.1f° P=%+.3f I=%+.3f D=%+.3f | LIN: dist=%5.0fpx P=%+.2f I=%+.2f D=%+.2f | PWM: L=%+3d R=%+3d | KP=%.3f/%.3f KI=%.3f/%.3f KD=%.3f/%.3f",
+                              robot.id, err_deg, p_w_stored, i_w_stored, d_w_stored,
+                              distance_stored, p_v_stored, i_v_stored, d_v_stored,
+                              left_speed, right_speed,
+                              self.kp_angle, self.kp_pos, self.ki_angle, self.ki_pos,
+                              self.kd_angle, self.kd_pos)
 
             # Logging lineal
             self._log_periodic(
@@ -886,13 +937,3 @@ class DifferentialDriveController:
 
         # Actualizar velocidad angular
         robot.dw = math.degrees(angular_velocity)
-
-        log.debug(
-            "Robot %i - PWM: L=%d, R=%d - Linear: (%.2f, %.2f) - Angular: %.2f",
-            robot.id,
-            left_speed_pwm,
-            right_speed_pwm,
-            robot.dx,
-            robot.dy,
-            robot.dw,
-        )

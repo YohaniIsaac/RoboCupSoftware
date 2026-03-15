@@ -22,6 +22,10 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(ROOT_DIR / "src"))
 
+# Habilitar logging DEBUG para PID logging detallado (calibración)
+logging.getLogger('robot_soccer.controllers.differential_drive').setLevel(logging.DEBUG)
+logging.getLogger().setLevel(logging.DEBUG)
+
 from robot_soccer.communication.rf_controller import RFController
 from robot_soccer.config import (
     PID_ANGLE_KD,
@@ -247,8 +251,11 @@ def control_loop_pid(robot_positions_pipe, control_state_pipe, keyboard_pipe, ro
     # Parámetros PID de calibración
     pid_params = _load_default_pid()
 
-    # Controlador
-    controller = DifferentialDriveController(rf_controller=rf_controller)
+    # Controlador con logging detallado de PID habilitado
+    controller = DifferentialDriveController(
+        rf_controller=rf_controller,
+        enable_debug_pid_logging=True
+    )
     _update_pid_controller(controller, pid_params)
 
     # Estado del control
