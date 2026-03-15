@@ -74,9 +74,16 @@ def visualization_loop_behavior(perception_pipe, control_state_pipe, keyboard_pi
     last_robot_available = False
     last_robot_pos = None
 
+    zoom_level = 2.0
+    zoom_min = 1.0
+    zoom_max = 4.0
+    zoom_center = None  # (x, y) - center of zoom view
+
     window_name = 'Calibracion Behavior (3 Procesos)'
     panel_height = 370
     frame_height = CAMERA_PERSPECTIVE_HEIGHT  # 480
+    frame_width = CAMERA_PERSPECTIVE_WIDTH    # 640
+    split_width = 320  # Width of each video pane
 
     def mouse_callback(event, x, y, flags, param):
         if event == cv2.EVENT_LBUTTONDOWN:
@@ -84,15 +91,27 @@ def visualization_loop_behavior(perception_pipe, control_state_pipe, keyboard_pi
                 log.debug("Click en panel, ignorado")
             else:
                 actual_y = y - panel_height
+                if x < split_width:
+                    if zoom_center is not None:
+                        zx, zy = zoom_center
+                        wx = int(zx + (x - split_width / 2) / zoom_level)
+                        wy = int(zy + (actual_y - frame_height / 2) / zoom_level)
+                        wx = max(0, min(frame_width - 1, wx))
+                        wy = max(0, min(frame_height - 1, wy))
+                    else:
+                        wx, wy = x, actual_y
+                else:
+                    wx = x - split_width
+                    wy = actual_y
                 try:
                     if keyboard_pipe.poll():
                         _ = keyboard_pipe.recv()
                     keyboard_pipe.send({
                         'command': 'set_waypoint',
-                        'waypoint': [x, actual_y],
+                        'waypoint': [wx, wy],
                         'timestamp': time.time()
                     })
-                    log.info(f"Waypoint establecido: ({x}, {actual_y})")
+                    log.info(f"Waypoint establecido: ({wx}, {wy})")
                 except Exception as e:
                     log.warning(f"Error enviando waypoint: {e}")
 
@@ -130,41 +149,111 @@ def visualization_loop_behavior(perception_pipe, control_state_pipe, keyboard_pi
                     log.warning(f"⚠️  Error recibiendo estado control: {e}")
 
             if last_frame is not None:
-                vis_frame = last_frame.copy()
+                # Update zoom center based on robot or waypoint
+                if last_robot_pos:
+                    zoom_center = tuple(last_robot_pos)
+                elif last_target_waypoint and zoom_center is None:
+                    zoom_center = tuple(last_target_waypoint)
 
+                # Create full frame with overlays
+                full_frame = last_frame.copy()
+
+                # Draw robot on full frame
                 if last_robot_pos:
                     rx, ry = last_robot_pos
-                    cv2.circle(vis_frame, (rx, ry), 20, (0, 255, 0), 2)
+                    cv2.circle(full_frame, (rx, ry), 20, (0, 255, 0), 2)
                     if last_robot_data and 'angulo' in last_robot_data:
                         angle_rad = math.radians(last_robot_data['angulo'])
                         end_x = int(rx + 30 * math.cos(angle_rad))
                         end_y = int(ry + 30 * math.sin(angle_rad))
-                        cv2.line(vis_frame, (rx, ry), (end_x, end_y), (0, 255, 0), 2)
+                        cv2.line(full_frame, (rx, ry), (end_x, end_y), (0, 255, 0), 2)
 
+                # Draw waypoint on full frame
                 if last_target_waypoint:
                     wx, wy = last_target_waypoint
-                    cv2.circle(vis_frame, (wx, wy), 15, (0, 255, 0), 2)
-                    cv2.circle(vis_frame, (wx, wy), 3, (0, 255, 0), -1)
+                    cv2.circle(full_frame, (wx, wy), 15, (0, 255, 0), 2)
+                    cv2.circle(full_frame, (wx, wy), 3, (0, 255, 0), -1)
                     if last_robot_pos:
-                        cv2.line(vis_frame, last_robot_pos, (wx, wy), (255, 255, 0), 1)
+                        cv2.line(full_frame, last_robot_pos, (wx, wy), (255, 255, 0), 1)
+
+                # Draw zoom rectangle on full frame if zoom_center is set
+                if zoom_center:
+                    zx, zy = zoom_center
+                    crop_h = int(frame_height / zoom_level)
+                    crop_w = int(frame_width / zoom_level)
+                    x1 = max(0, zx - crop_w // 2)
+                    y1 = max(0, zy - crop_h // 2)
+                    x2 = min(frame_width, x1 + crop_w)
+                    y2 = min(frame_height, y1 + crop_h)
+                    cv2.rectangle(full_frame, (x1, y1), (x2, y2), (0, 255, 255), 2)
+
+                # Create zoom view (crop around zoom_center)
+                if zoom_center:
+                    zx, zy = int(zoom_center[0]), int(zoom_center[1])
+                    crop_h = int(frame_height / zoom_level)
+                    crop_w = int(frame_width / zoom_level)
+                    x1 = max(0, zx - crop_w // 2)
+                    y1 = max(0, zy - crop_h // 2)
+                    x2 = min(frame_width, x1 + crop_w)
+                    y2 = min(frame_height, y1 + crop_h)
+
+                    zoom_frame = full_frame[y1:y2, x1:x2]
+                    zoom_frame = cv2.resize(zoom_frame, (split_width, frame_height), interpolation=cv2.INTER_LINEAR)
+
+                    # Draw zoom center indicator
+                    center_x = split_width // 2
+                    center_y = frame_height // 2
+                    cv2.line(zoom_frame, (center_x - 10, center_y), (center_x + 10, center_y), (0, 255, 255), 1)
+                    cv2.line(zoom_frame, (center_x, center_y - 10), (center_x, center_y + 10), (0, 255, 255), 1)
+
+                    # Draw robot and waypoint on zoom frame
+                    if last_robot_pos:
+                        rx, ry = last_robot_pos
+                        zrx = int((rx - x1) * zoom_level)
+                        zry = int((ry - y1) * zoom_level)
+                        if 0 <= zrx < split_width and 0 <= zry < frame_height:
+                            cv2.circle(zoom_frame, (zrx, zry), int(20 * zoom_level), (0, 255, 0), 2)
+
+                    if last_target_waypoint:
+                        wx, wy = last_target_waypoint
+                        zwx = int((wx - x1) * zoom_level)
+                        zwy = int((wy - y1) * zoom_level)
+                        if 0 <= zwx < split_width and 0 <= zwy < frame_height:
+                            cv2.circle(zoom_frame, (zwx, zwy), int(15 * zoom_level), (0, 255, 0), 2)
+                else:
+                    zoom_frame = cv2.resize(full_frame, (split_width, frame_height))
+
+                # Scale full frame for right pane
+                full_scaled = cv2.resize(full_frame, (split_width, frame_height))
+
+                # Combine zoom + full side by side
+                video_frame = np.hstack([zoom_frame, full_scaled])
+
+                # Add labels
+                cv2.putText(video_frame, "ZOOM", (5, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+                cv2.putText(video_frame, f"x{zoom_level:.1f}", (55, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+                cv2.putText(video_frame, "FULL", (split_width + 5, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
 
                 status_text = "MOVING" if last_movement_active else "STOPPED"
                 status_color = (0, 255, 0) if last_movement_active else (0, 0, 255)
-                cv2.putText(vis_frame, status_text, (10, 30),
-                           cv2.FONT_HERSHEY_SIMPLEX, 1, status_color, 2)
+                cv2.putText(video_frame, status_text, (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.8, status_color, 2)
 
                 panel = _draw_behavior_panel(last_behavior_params, last_robot_pos,
                                              last_target_waypoint, last_robot_available,
                                              last_robot_detected, panel_height, CAMERA_PERSPECTIVE_WIDTH)
-                combined = np.vstack([panel, vis_frame])
+                combined = np.vstack([panel, video_frame])
                 cv2.imshow(window_name, combined)
             else:
                 panel = _draw_behavior_panel(last_behavior_params, last_robot_pos,
                                              last_target_waypoint, last_robot_available,
                                              last_robot_detected, panel_height, CAMERA_PERSPECTIVE_WIDTH)
-                placeholder = np.zeros((frame_height, CAMERA_PERSPECTIVE_WIDTH, 3), dtype=np.uint8)
-                cv2.putText(placeholder, "Esperando frames...", (180, 240),
-                           cv2.FONT_HERSHEY_SIMPLEX, 1, (128, 128, 128), 2)
+                placeholder_zoom = np.zeros((frame_height, split_width, 3), dtype=np.uint8)
+                placeholder_full = np.zeros((frame_height, split_width, 3), dtype=np.uint8)
+                cv2.putText(placeholder_zoom, "Esperando frames...", (50, 240),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (128, 128, 128), 2)
+                cv2.putText(placeholder_full, "Esperando frames...", (50, 240),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (128, 128, 128), 2)
+                placeholder = np.hstack([placeholder_zoom, placeholder_full])
                 combined = np.vstack([panel, placeholder])
                 cv2.imshow(window_name, combined)
 
@@ -228,6 +317,29 @@ def visualization_loop_behavior(perception_pipe, control_state_pipe, keyboard_pi
                         waypoint_delta = [-10, 0]
                     elif key == 83:
                         waypoint_delta = [10, 0]
+
+                elif key == ord('+') or key == ord('='):
+                    zoom_level = min(zoom_max, zoom_level + 0.5)
+                    log.info(f"Zoom: x{zoom_level:.1f}")
+                elif key == ord('-') or key == ord('_'):
+                    zoom_level = max(zoom_min, zoom_level - 0.5)
+                    log.info(f"Zoom: x{zoom_level:.1f}")
+                elif key == ord('v') or key == ord('V'):
+                    if last_robot_pos:
+                        zoom_center = tuple(last_robot_pos)
+                        log.info(f"Zoom centrado en robot: {zoom_center}")
+                elif key == ord('w') or key == ord('W'):
+                    if last_target_waypoint:
+                        zoom_center = tuple(last_target_waypoint)
+                        log.info(f"Zoom centrado en waypoint: {zoom_center}")
+                elif key == ord('c') or key == ord('C'):
+                    zoom_center = None
+                    log.info("Zoom centrado en origen (0,0)")
+                elif key == ord('r') or key == ord('R'):
+                    zoom_level = 2.0
+                    if last_robot_pos:
+                        zoom_center = tuple(last_robot_pos)
+                    log.info(f"Zoom reseteado: x{zoom_level}")
 
                 if command:
                     try:
@@ -341,6 +453,10 @@ def _draw_behavior_panel(behavior_params, robot_pos, waypoint, robot_available, 
         "ESPACIO: START/STOP",
         "X: Cancelar waypoint",
         "ENTER: Guardar a config.py",
+        "+/-: Zoom in/out",
+        "V: Centrar zoom en robot",
+        "W: Centrar zoom en waypoint",
+        "R: Reset zoom (2x, robot)",
         "ESC: Salir",
     ]
 
