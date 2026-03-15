@@ -96,7 +96,7 @@ def visualization_loop_pwm_range(frame_pipe, control_state_pipe, keyboard_pipe,
         return
 
     last_frame_counter = 0
-    window_name = 'Calibración PWM Range'
+    window_name = 'Calibracion PWM Range'
 
     # Crear ventana ANTES del loop principal
     cv2.namedWindow(window_name)
