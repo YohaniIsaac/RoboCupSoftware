@@ -570,24 +570,19 @@ def control_loop_behavior_pure(perception_pipe, control_state_pipe, keyboard_pip
             if perception_pipe.poll():
                 try:
                     data = perception_pipe.recv()
-                    robots_list = data.get('robots', [])
+                    robot_detected = data.get('robot_detected', False)
+                    robot_data = data.get('robot_data', None)
 
-                    robot_found = None
-                    for r in robots_list:
-                        if r['id'] == robot_id:
-                            robot_found = r
-                            break
-
-                    if robot_found:
-                        angle_rad = math.radians(robot_found['angulo'])
+                    if robot_detected and robot_data:
+                        angle_rad = math.radians(robot_data['angulo'])
                         if robot is None:
-                            robot = RobotEntity(robot_id, robot_found['x'], robot_found['y'], angle_rad)
-                            log.info(f"🤖 Robot {robot_id} detectado en ({robot_found['x']:.0f}, {robot_found['y']:.0f})")
+                            robot = RobotEntity(robot_id, robot_data['x'], robot_data['y'], angle_rad)
+                            log.info(f"Robot {robot_id} detectado en ({robot_data['x']:.0f}, {robot_data['y']:.0f})")
                         else:
-                            robot.update(robot_found['x'], robot_found['y'], angle_rad)
+                            robot.update(robot_data['x'], robot_data['y'], angle_rad)
                     else:
                         if robot is not None:
-                            log.warning(f"⚠️  Robot {robot_id} perdido")
+                            log.warning(f"Robot {robot_id} perdido")
                         robot = None
 
                 except Exception as e:
