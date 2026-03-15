@@ -76,21 +76,25 @@ def visualization_loop_behavior(perception_pipe, control_state_pipe, keyboard_pi
 
     window_name = 'Calibracion Behavior (3 Procesos)'
     panel_height = 370
+    frame_height = CAMERA_PERSPECTIVE_HEIGHT  # 480
 
     def mouse_callback(event, x, y, flags, param):
-        if event == cv2.EVENT_LBUTTONDOWN and y > panel_height:
-            actual_y = y - panel_height
-            try:
-                if keyboard_pipe.poll():
-                    _ = keyboard_pipe.recv()
-                keyboard_pipe.send({
-                    'command': 'set_waypoint',
-                    'waypoint': [x, actual_y],
-                    'timestamp': time.time()
-                })
-                log.info(f"🎯 Waypoint establecido: ({x}, {actual_y})")
-            except Exception as e:
-                log.warning(f"⚠️  Error enviando waypoint: {e}")
+        if event == cv2.EVENT_LBUTTONDOWN:
+            if y < panel_height:
+                log.debug("Click en panel, ignorado")
+            else:
+                actual_y = y - panel_height
+                try:
+                    if keyboard_pipe.poll():
+                        _ = keyboard_pipe.recv()
+                    keyboard_pipe.send({
+                        'command': 'set_waypoint',
+                        'waypoint': [x, actual_y],
+                        'timestamp': time.time()
+                    })
+                    log.info(f"Waypoint establecido: ({x}, {actual_y})")
+                except Exception as e:
+                    log.warning(f"Error enviando waypoint: {e}")
 
     cv2.namedWindow(window_name)
     cv2.setMouseCallback(window_name, mouse_callback)
@@ -149,17 +153,20 @@ def visualization_loop_behavior(perception_pipe, control_state_pipe, keyboard_pi
                 cv2.putText(vis_frame, status_text, (10, 30),
                            cv2.FONT_HERSHEY_SIMPLEX, 1, status_color, 2)
 
-                cv2.imshow(window_name, vis_frame)
+                panel = _draw_behavior_panel(last_behavior_params, last_robot_pos,
+                                             last_target_waypoint, last_robot_available,
+                                             last_robot_detected, panel_height, CAMERA_PERSPECTIVE_WIDTH)
+                combined = np.vstack([panel, vis_frame])
+                cv2.imshow(window_name, combined)
             else:
-                placeholder = np.zeros((panel_height + 480, 640, 3), dtype=np.uint8)
-                cv2.putText(placeholder, "Esperando frames...", (200, 240),
+                panel = _draw_behavior_panel(last_behavior_params, last_robot_pos,
+                                             last_target_waypoint, last_robot_available,
+                                             last_robot_detected, panel_height, CAMERA_PERSPECTIVE_WIDTH)
+                placeholder = np.zeros((frame_height, CAMERA_PERSPECTIVE_WIDTH, 3), dtype=np.uint8)
+                cv2.putText(placeholder, "Esperando frames...", (180, 240),
                            cv2.FONT_HERSHEY_SIMPLEX, 1, (128, 128, 128), 2)
-                cv2.imshow(window_name, placeholder)
-
-            panel = _draw_behavior_panel(last_behavior_params, last_robot_pos,
-                                         last_target_waypoint, last_robot_available,
-                                         last_robot_detected)
-            cv2.imshow('Behavior Control Panel', panel)
+                combined = np.vstack([panel, placeholder])
+                cv2.imshow(window_name, combined)
 
             key = cv2.waitKey(1) & 0xFF
 
@@ -251,9 +258,9 @@ def visualization_loop_behavior(perception_pipe, control_state_pipe, keyboard_pi
         log.info("🔌 Ventana cerrada, shared memory desconectada")
 
 
-def _draw_behavior_panel(behavior_params, robot_pos, waypoint, robot_available, robot_detected):
+def _draw_behavior_panel(behavior_params, robot_pos, waypoint, robot_available, robot_detected, panel_height=370, panel_width=640):
     """Dibuja el panel de control de comportamiento."""
-    panel = np.zeros((370, 650, 3), dtype=np.uint8)
+    panel = np.zeros((panel_height, panel_width, 3), dtype=np.uint8)
 
     y_offset = 30
     line_height = 25
