@@ -395,8 +395,8 @@ ROBOT_LINEAR_START_ANGLE_THRESHOLD_DEG = 30.0  # Grados (30° = conservador, 45�
 MAX_ANGULAR_CORRECTION_PWM = 10  # Máximo ±10 PWM de diferencia L/R para corrección angular
 
 # --- Thresholds de Precisión ---
-ROBOT_POSITION_THRESHOLD = 16  # Distancia para considerar waypoint alcanzado (píxeles)
-ROBOT_ANGLE_THRESHOLD_DEG = 7  # Error angular aceptable (grados)
+ROBOT_POSITION_THRESHOLD = 32  # Distancia para considerar waypoint alcanzado (píxeles)
+ROBOT_ANGLE_THRESHOLD_DEG = 3  # Error angular aceptable (grados)
 
 # =============================================================================
 # Parámetros de Control PID

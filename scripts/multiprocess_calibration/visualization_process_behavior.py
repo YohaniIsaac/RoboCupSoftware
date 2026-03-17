@@ -4,7 +4,7 @@ Este proceso maneja TODA la interfaz de usuario:
 - Recibe frames procesados desde percepción (shared memory)
 - Recibe metadata de percepción (pipe)
 - Recibe estado del controlador behavior desde control (pipe)
-- Dibuja overlays (robot, waypoint, orientación)
+- Dibuja overlays (robot, waypoint, orientación, error angular)
 - Muestra panel de información con parámetros behavior
 - Captura teclas y mouse
 - Envía comandos al proceso de control
@@ -33,34 +33,18 @@ log = logging.getLogger(__name__)
 
 def visualization_loop_behavior(perception_pipe, control_state_pipe, keyboard_pipe,
                                  shm_name: str = None, frame_counter=None):
-    """Bucle principal del proceso de visualización para calibración behavior.
-
-    Args:
-        perception_pipe: Pipe para recibir metadata desde percepción (sin frames)
-        control_state_pipe: Pipe para recibir estado desde control (behavior params, waypoint, etc.)
-        keyboard_pipe: Pipe para enviar comandos a control (teclado/mouse)
-        shm_name: Nombre de la shared memory para leer frames
-        frame_counter: multiprocessing.Value('i') contador atómico de frames
-    """
-    log.info("🖥️  Proceso de visualización iniciado (Behavior - 3 procesos)")
-    log.info("   Responsabilidades:")
-    log.info("     ✓ Leer frames de shared memory")
-    log.info("     ✓ Recibir metadata de percepción (pipe)")
-    log.info("     ✓ Recibir estado de control")
-    log.info("     ✓ Mostrar UI con cv2.imshow()")
-    log.info("     ✓ Capturar teclas y mouse")
-    log.info("     ✓ Enviar comandos a control")
+    """Bucle principal del proceso de visualización para calibración behavior."""
+    log.info("Proceso de visualización iniciado (Behavior - 3 procesos)")
 
     frame_shape = (CAMERA_PERSPECTIVE_HEIGHT, CAMERA_PERSPECTIVE_WIDTH, 3)
     shm = shared_memory.SharedMemory(name=shm_name)
     shared_array = np.ndarray(frame_shape, dtype=np.uint8, buffer=shm.buf)
     last_frame_counter = 0
-    log.info(f"📦 Conectado a shared memory: {shm_name}")
+    log.info(f"Conectado a shared memory: {shm_name}")
 
     last_frame = None
     last_robot_detected = False
     last_robot_data = None
-    last_perception_stats = {}
 
     last_behavior_params = {
         'position_threshold': 16,
@@ -73,52 +57,84 @@ def visualization_loop_behavior(perception_pipe, control_state_pipe, keyboard_pi
     last_robot_id = 0
     last_robot_available = False
     last_robot_pos = None
+    last_robot_angle_deg = None
+    last_angle_error_deg = None
+    last_target_heading_deg = None
+    last_movement_mode = None
+
+    # Waypoint persistence: keeps showing where the target was after arrival
+    reached_waypoint = None       # waypoint that was reached (persists until new one is set)
+    prev_target_waypoint = None   # to detect transition to None
 
     zoom_level = 2.0
     zoom_min = 1.0
     zoom_max = 4.0
-    zoom_center = None  # (x, y) - center of zoom view
+    zoom_center = None
 
     window_name = 'Calibracion Behavior (3 Procesos)'
     panel_height = 370
     frame_height = CAMERA_PERSPECTIVE_HEIGHT  # 480
     frame_width = CAMERA_PERSPECTIVE_WIDTH    # 640
-    split_width = 320  # Width of each video pane
+
+    # Layout: zoom (left, 640x480) + right column (320x480) with mini full view (320x240)
+    zoom_w, zoom_h = frame_width, frame_height           # 640x480
+    mini_w, mini_h = frame_width // 2, frame_height // 2  # 320x240
+    right_col_w = mini_w                                   # 320
+    total_w = zoom_w + right_col_w                         # 960
 
     def mouse_callback(event, x, y, flags, param):
-        if event == cv2.EVENT_LBUTTONDOWN:
-            if y < panel_height:
-                log.debug("Click en panel, ignorado")
+        nonlocal reached_waypoint
+        if event != cv2.EVENT_LBUTTONDOWN or y <= panel_height:
+            return
+        actual_y = y - panel_height
+
+        if x < zoom_w:
+            # Click on zoom view: map to full-frame coords
+            if zoom_center is not None:
+                zx, zy = zoom_center
+                crop_h = int(frame_height / zoom_level)
+                crop_w = int(frame_width / zoom_level)
+                x1 = max(0, zx - crop_w // 2)
+                y1 = max(0, zy - crop_h // 2)
+                x2 = min(frame_width, x1 + crop_w)
+                y2 = min(frame_height, y1 + crop_h)
+                if x2 - x1 < crop_w:
+                    x1 = max(0, x2 - crop_w)
+                if y2 - y1 < crop_h:
+                    y1 = max(0, y2 - crop_h)
+                wx = int(x1 + x * crop_w / zoom_w)
+                wy = int(y1 + actual_y * crop_h / zoom_h)
             else:
-                actual_y = y - panel_height
-                if x < split_width:
-                    if zoom_center is not None:
-                        zx, zy = zoom_center
-                        wx = int(zx + (x - split_width / 2) / zoom_level)
-                        wy = int(zy + (actual_y - frame_height / 2) / zoom_level)
-                        wx = max(0, min(frame_width - 1, wx))
-                        wy = max(0, min(frame_height - 1, wy))
-                    else:
-                        wx, wy = x, actual_y
-                else:
-                    wx = x - split_width
-                    wy = actual_y
-                try:
-                    if keyboard_pipe.poll():
-                        _ = keyboard_pipe.recv()
-                    keyboard_pipe.send({
-                        'command': 'set_waypoint',
-                        'waypoint': [wx, wy],
-                        'timestamp': time.time()
-                    })
-                    log.info(f"Waypoint establecido: ({wx}, {wy})")
-                except Exception as e:
-                    log.warning(f"Error enviando waypoint: {e}")
+                wx, wy = x, actual_y
+        elif actual_y < mini_h:
+            # Click on mini full view (top-right)
+            rx = x - zoom_w
+            wx = int(rx * frame_width / mini_w)
+            wy = int(actual_y * frame_height / mini_h)
+        else:
+            return  # Click on info area below mini view, ignore
+
+        wx = max(0, min(frame_width - 1, wx))
+        wy = max(0, min(frame_height - 1, wy))
+
+        # New waypoint set → clear reached marker
+        reached_waypoint = None
+
+        try:
+            if keyboard_pipe.poll():
+                _ = keyboard_pipe.recv()
+            keyboard_pipe.send({
+                'command': 'set_waypoint',
+                'waypoint': [wx, wy],
+                'timestamp': time.time()
+            })
+            log.info(f"Waypoint establecido: ({wx}, {wy})")
+        except Exception as e:
+            log.warning(f"Error enviando waypoint: {e}")
 
     cv2.namedWindow(window_name)
     cv2.setMouseCallback(window_name, mouse_callback)
-
-    log.info("✅ Ventana de visualización creada")
+    log.info("Ventana de visualización creada")
 
     try:
         while True:
@@ -132,62 +148,52 @@ def visualization_loop_behavior(perception_pipe, control_state_pipe, keyboard_pi
                     perception_data = perception_pipe.recv()
                     last_robot_detected = perception_data.get('robot_detected', False)
                     last_robot_data = perception_data.get('robot_data')
-                    last_perception_stats = perception_data.get('stats', {})
                 except Exception as e:
-                    log.warning(f"⚠️  Error recibiendo metadata: {e}")
+                    log.warning(f"Error recibiendo metadata: {e}")
 
             if control_state_pipe.poll():
                 try:
                     control_data = control_state_pipe.recv()
                     last_behavior_params = control_data.get('behavior_params', last_behavior_params)
-                    last_target_waypoint = control_data.get('target_waypoint')
+                    new_target = control_data.get('target_waypoint')
                     last_movement_active = control_data.get('movement_active', False)
                     last_robot_id = control_data.get('robot_id', 0)
                     last_robot_available = control_data.get('robot_available', False)
                     last_robot_pos = control_data.get('robot_pos')
+                    last_robot_angle_deg = control_data.get('robot_angle_deg')
+                    last_angle_error_deg = control_data.get('angle_error_deg')
+                    last_target_heading_deg = control_data.get('target_heading_deg')
+                    last_movement_mode = control_data.get('movement_mode')
+
+                    # Detect waypoint reached: target went from something to None
+                    if prev_target_waypoint is not None and new_target is None:
+                        reached_waypoint = list(prev_target_waypoint)
+                    # Detect new waypoint set: clear reached marker
+                    if new_target is not None and (prev_target_waypoint is None or
+                            new_target != prev_target_waypoint):
+                        reached_waypoint = None
+
+                    prev_target_waypoint = list(new_target) if new_target else None
+                    last_target_waypoint = new_target
                 except Exception as e:
-                    log.warning(f"⚠️  Error recibiendo estado control: {e}")
+                    log.warning(f"Error recibiendo estado control: {e}")
 
             if last_frame is not None:
-                # Update zoom center based on robot or waypoint
                 if last_robot_pos:
                     zoom_center = tuple(last_robot_pos)
                 elif last_target_waypoint and zoom_center is None:
                     zoom_center = tuple(last_target_waypoint)
 
-                # Create full frame with overlays
                 full_frame = last_frame.copy()
 
-                # Draw robot on full frame
-                if last_robot_pos:
-                    rx, ry = last_robot_pos
-                    cv2.circle(full_frame, (rx, ry), 20, (0, 255, 0), 2)
-                    if last_robot_data and 'angulo' in last_robot_data:
-                        angle_rad = math.radians(last_robot_data['angulo'])
-                        end_x = int(rx + 30 * math.cos(angle_rad))
-                        end_y = int(ry + 30 * math.sin(angle_rad))
-                        cv2.line(full_frame, (rx, ry), (end_x, end_y), (0, 255, 0), 2)
+                # --- Draw overlays on full frame ---
+                _draw_overlays(full_frame, last_robot_pos, last_robot_data,
+                               last_target_waypoint, last_robot_angle_deg,
+                               last_angle_error_deg, last_target_heading_deg,
+                               last_movement_mode, last_behavior_params,
+                               last_movement_active, reached_waypoint)
 
-                # Draw waypoint on full frame
-                if last_target_waypoint:
-                    wx, wy = last_target_waypoint
-                    cv2.circle(full_frame, (wx, wy), 15, (0, 255, 0), 2)
-                    cv2.circle(full_frame, (wx, wy), 3, (0, 255, 0), -1)
-                    if last_robot_pos:
-                        cv2.line(full_frame, last_robot_pos, (wx, wy), (255, 255, 0), 1)
-
-                # Draw zoom rectangle on full frame if zoom_center is set
-                if zoom_center:
-                    zx, zy = zoom_center
-                    crop_h = int(frame_height / zoom_level)
-                    crop_w = int(frame_width / zoom_level)
-                    x1 = max(0, zx - crop_w // 2)
-                    y1 = max(0, zy - crop_h // 2)
-                    x2 = min(frame_width, x1 + crop_w)
-                    y2 = min(frame_height, y1 + crop_h)
-                    cv2.rectangle(full_frame, (x1, y1), (x2, y2), (0, 255, 255), 2)
-
-                # Create zoom view (crop around zoom_center)
+                # --- Create zoom view (full resolution 640x480, no distortion) ---
                 if zoom_center:
                     zx, zy = int(zoom_center[0]), int(zoom_center[1])
                     crop_h = int(frame_height / zoom_level)
@@ -196,69 +202,118 @@ def visualization_loop_behavior(perception_pipe, control_state_pipe, keyboard_pi
                     y1 = max(0, zy - crop_h // 2)
                     x2 = min(frame_width, x1 + crop_w)
                     y2 = min(frame_height, y1 + crop_h)
+                    if x2 - x1 < crop_w:
+                        x1 = max(0, x2 - crop_w)
+                    if y2 - y1 < crop_h:
+                        y1 = max(0, y2 - crop_h)
 
-                    zoom_frame = full_frame[y1:y2, x1:x2]
-                    zoom_frame = cv2.resize(zoom_frame, (split_width, frame_height), interpolation=cv2.INTER_LINEAR)
+                    zoom_raw = last_frame[y1:y2, x1:x2].copy()
+                    zoom_frame = cv2.resize(zoom_raw, (zoom_w, zoom_h),
+                                           interpolation=cv2.INTER_LINEAR)
 
-                    # Draw zoom center indicator
-                    center_x = split_width // 2
-                    center_y = frame_height // 2
-                    cv2.line(zoom_frame, (center_x - 10, center_y), (center_x + 10, center_y), (0, 255, 255), 1)
-                    cv2.line(zoom_frame, (center_x, center_y - 10), (center_x, center_y + 10), (0, 255, 255), 1)
-
-                    # Draw robot and waypoint on zoom frame
-                    if last_robot_pos:
-                        rx, ry = last_robot_pos
-                        zrx = int((rx - x1) * zoom_level)
-                        zry = int((ry - y1) * zoom_level)
-                        if 0 <= zrx < split_width and 0 <= zry < frame_height:
-                            cv2.circle(zoom_frame, (zrx, zry), int(20 * zoom_level), (0, 255, 0), 2)
-
-                    if last_target_waypoint:
-                        wx, wy = last_target_waypoint
-                        zwx = int((wx - x1) * zoom_level)
-                        zwy = int((wy - y1) * zoom_level)
-                        if 0 <= zwx < split_width and 0 <= zwy < frame_height:
-                            cv2.circle(zoom_frame, (zwx, zwy), int(15 * zoom_level), (0, 255, 0), 2)
+                    _draw_overlays_zoom(zoom_frame, last_robot_pos, last_robot_data,
+                                        last_target_waypoint, last_robot_angle_deg,
+                                        last_angle_error_deg, last_target_heading_deg,
+                                        last_movement_mode, last_behavior_params,
+                                        last_movement_active, reached_waypoint,
+                                        x1, y1, crop_w, crop_h,
+                                        zoom_w, zoom_h, zoom_level)
                 else:
-                    zoom_frame = cv2.resize(full_frame, (split_width, frame_height))
+                    zoom_frame = full_frame.copy()
+                    x1 = y1 = x2 = y2 = 0
 
-                # Scale full frame for right pane
-                full_scaled = cv2.resize(full_frame, (split_width, frame_height))
+                # --- Mini full view (320x240, proportional, no distortion) ---
+                mini_full = cv2.resize(full_frame, (mini_w, mini_h),
+                                       interpolation=cv2.INTER_AREA)
 
-                # Combine zoom + full side by side
-                video_frame = np.hstack([zoom_frame, full_scaled])
+                # Draw zoom region rectangle on mini view
+                if zoom_center:
+                    sx = mini_w / frame_width
+                    sy = mini_h / frame_height
+                    cv2.rectangle(mini_full,
+                                  (int(x1 * sx), int(y1 * sy)),
+                                  (int(x2 * sx), int(y2 * sy)),
+                                  (0, 255, 255), 1)
 
-                # Add labels
-                cv2.putText(video_frame, "ZOOM", (5, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
-                cv2.putText(video_frame, f"x{zoom_level:.1f}", (55, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
-                cv2.putText(video_frame, "FULL", (split_width + 5, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+                # --- Build right column (320x480): mini on top, info below ---
+                right_col = np.zeros((zoom_h, right_col_w, 3), dtype=np.uint8)
+                right_col[0:mini_h, 0:mini_w] = mini_full
 
+                # Info area below mini view
+                info_y = mini_h + 20
+                cv2.putText(right_col, "FULL VIEW", (5, mini_h + 15),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1)
+
+                # Status
                 status_text = "MOVING" if last_movement_active else "STOPPED"
                 status_color = (0, 255, 0) if last_movement_active else (0, 0, 255)
-                cv2.putText(video_frame, status_text, (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.8, status_color, 2)
+                cv2.putText(right_col, status_text, (5, info_y + 15),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.6, status_color, 2)
+
+                # Angular error info
+                if last_angle_error_deg is not None and last_movement_active:
+                    cv2.putText(right_col, f"Err: {last_angle_error_deg:+.1f} deg",
+                               (5, info_y + 40), cv2.FONT_HERSHEY_SIMPLEX, 0.45,
+                               (255, 255, 255), 1)
+                    if last_movement_mode:
+                        mode_labels = {'rotating': 'GIRANDO', 'linear': 'LINEAL',
+                                       'arrived_angle': 'ALINEADO'}
+                        mode_color = (0, 100, 255) if last_movement_mode == 'rotating' else (0, 255, 200)
+                        cv2.putText(right_col, mode_labels.get(last_movement_mode, ''),
+                                   (5, info_y + 60), cv2.FONT_HERSHEY_SIMPLEX, 0.45,
+                                   mode_color, 1)
+
+                # Distance info
+                if last_robot_pos and last_target_waypoint:
+                    dx = last_target_waypoint[0] - last_robot_pos[0]
+                    dy = last_target_waypoint[1] - last_robot_pos[1]
+                    dist = math.sqrt(dx * dx + dy * dy)
+                    pos_thresh = last_behavior_params['position_threshold']
+                    dist_color = (0, 255, 0) if dist < pos_thresh else (255, 255, 255)
+                    cv2.putText(right_col, f"Dist: {dist:.0f}px (th={pos_thresh})",
+                               (5, info_y + 85), cv2.FONT_HERSHEY_SIMPLEX, 0.4,
+                               dist_color, 1)
+
+                # Reached waypoint info
+                if reached_waypoint:
+                    cv2.putText(right_col, f"Llegada: ({reached_waypoint[0]}, {reached_waypoint[1]})",
+                               (5, info_y + 110), cv2.FONT_HERSHEY_SIMPLEX, 0.4,
+                               (150, 150, 255), 1)
+                    if last_robot_pos:
+                        dx = last_robot_pos[0] - reached_waypoint[0]
+                        dy = last_robot_pos[1] - reached_waypoint[1]
+                        offset = math.sqrt(dx * dx + dy * dy)
+                        cv2.putText(right_col, f"Error pos: {offset:.1f}px",
+                                   (5, info_y + 130), cv2.FONT_HERSHEY_SIMPLEX, 0.4,
+                                   (150, 150, 255), 1)
+
+                # Zoom label on left frame
+                cv2.putText(zoom_frame, f"ZOOM x{zoom_level:.1f}", (5, 18),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 255), 1)
+
+                # Combine: zoom (left 640x480) + right column (320x480)
+                video_frame = np.hstack([zoom_frame, right_col])
 
                 panel = _draw_behavior_panel(last_behavior_params, last_robot_pos,
                                              last_target_waypoint, last_robot_available,
-                                             last_robot_detected, panel_height, CAMERA_PERSPECTIVE_WIDTH)
+                                             last_robot_detected, last_angle_error_deg,
+                                             last_movement_mode, reached_waypoint,
+                                             panel_height, total_w)
                 combined = np.vstack([panel, video_frame])
                 cv2.imshow(window_name, combined)
             else:
                 panel = _draw_behavior_panel(last_behavior_params, last_robot_pos,
                                              last_target_waypoint, last_robot_available,
-                                             last_robot_detected, panel_height, CAMERA_PERSPECTIVE_WIDTH)
-                placeholder_zoom = np.zeros((frame_height, split_width, 3), dtype=np.uint8)
-                placeholder_full = np.zeros((frame_height, split_width, 3), dtype=np.uint8)
-                cv2.putText(placeholder_zoom, "Esperando frames...", (50, 240),
+                                             last_robot_detected, None, None, None,
+                                             panel_height, total_w)
+                placeholder = np.zeros((zoom_h, total_w, 3), dtype=np.uint8)
+                cv2.putText(placeholder, "Esperando frames...",
+                           (total_w // 2 - 100, zoom_h // 2),
                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (128, 128, 128), 2)
-                cv2.putText(placeholder_full, "Esperando frames...", (50, 240),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (128, 128, 128), 2)
-                placeholder = np.hstack([placeholder_zoom, placeholder_full])
                 combined = np.vstack([panel, placeholder])
                 cv2.imshow(window_name, combined)
 
             key = cv2.waitKey(1) & 0xFF
-
             if key != 255:
                 command = None
                 param = None
@@ -267,11 +322,11 @@ def visualization_loop_behavior(perception_pipe, control_state_pipe, keyboard_pi
 
                 if key == 27:
                     command = 'exit'
-                    log.info("ESC presionado - Enviando comando de salida")
                 elif key == ord(' '):
                     command = 'toggle_movement'
                 elif key == ord('x') or key == ord('X'):
                     command = 'cancel_waypoint'
+                    reached_waypoint = None
                 elif key == ord('\r') or key == ord('\n'):
                     command = 'save_params'
                 elif key == ord('9'):
@@ -308,6 +363,7 @@ def visualization_loop_behavior(perception_pipe, control_state_pipe, keyboard_pi
                     delta = 1
                 elif key in [82, 84, 81, 83] and last_robot_pos:
                     command = 'move_waypoint'
+                    reached_waypoint = None  # New waypoint movement clears reached
                     waypoint_delta = [0, 0]
                     if key == 82:
                         waypoint_delta = [0, -10]
@@ -318,151 +374,348 @@ def visualization_loop_behavior(perception_pipe, control_state_pipe, keyboard_pi
                     elif key == 83:
                         waypoint_delta = [10, 0]
 
-                elif key == ord('+') or key == ord('='):
+                elif key == ord('+'):
                     zoom_level = min(zoom_max, zoom_level + 0.5)
-                    log.info(f"Zoom: x{zoom_level:.1f}")
-                elif key == ord('-') or key == ord('_'):
+                elif key == ord('_'):
                     zoom_level = max(zoom_min, zoom_level - 0.5)
-                    log.info(f"Zoom: x{zoom_level:.1f}")
                 elif key == ord('v') or key == ord('V'):
                     if last_robot_pos:
                         zoom_center = tuple(last_robot_pos)
-                        log.info(f"Zoom centrado en robot: {zoom_center}")
                 elif key == ord('w') or key == ord('W'):
                     if last_target_waypoint:
                         zoom_center = tuple(last_target_waypoint)
-                        log.info(f"Zoom centrado en waypoint: {zoom_center}")
                 elif key == ord('c') or key == ord('C'):
                     zoom_center = None
-                    log.info("Zoom centrado en origen (0,0)")
                 elif key == ord('r') or key == ord('R'):
                     zoom_level = 2.0
                     if last_robot_pos:
                         zoom_center = tuple(last_robot_pos)
-                    log.info(f"Zoom reseteado: x{zoom_level}")
 
                 if command:
                     try:
                         if keyboard_pipe.poll():
                             _ = keyboard_pipe.recv()
-
                         msg = {'command': command, 'timestamp': time.time()}
                         if param:
                             msg['param'] = param
                             msg['delta'] = delta
                         if waypoint_delta:
                             msg['delta'] = waypoint_delta
-
                         keyboard_pipe.send(msg)
-
                         if command == 'exit':
                             break
                     except Exception as e:
-                        log.warning(f"⚠️  Error enviando comando: {e}")
+                        log.warning(f"Error enviando comando: {e}")
 
     except KeyboardInterrupt:
-        log.info("⏹️  Proceso de visualización detenido por usuario")
+        log.info("Proceso de visualización detenido por usuario")
     except Exception as e:
-        log.error(f"❌ Error en proceso de visualización: {e}", exc_info=True)
+        log.error(f"Error en proceso de visualización: {e}", exc_info=True)
     finally:
         shm.close()
         cv2.destroyAllWindows()
-        log.info("🔌 Ventana cerrada, shared memory desconectada")
+        log.info("Ventana cerrada, shared memory desconectada")
 
 
-def _draw_behavior_panel(behavior_params, robot_pos, waypoint, robot_available, robot_detected, panel_height=370, panel_width=640):
+def _draw_overlays(frame, robot_pos, robot_data, waypoint,
+                   robot_angle_deg, angle_error_deg, target_heading_deg,
+                   movement_mode, behavior_params, movement_active,
+                   reached_waypoint):
+    """Draw robot, waypoint, trajectory and angular info on a frame."""
+    # Draw reached waypoint (persistent marker, dimmer)
+    if reached_waypoint:
+        rwx, rwy = int(reached_waypoint[0]), int(reached_waypoint[1])
+        cross_size = 8
+        color_reached = (120, 120, 200)  # dim blue-ish
+        cv2.line(frame, (rwx - cross_size, rwy), (rwx + cross_size, rwy),
+                color_reached, 1, cv2.LINE_AA)
+        cv2.line(frame, (rwx, rwy - cross_size), (rwx, rwy + cross_size),
+                color_reached, 1, cv2.LINE_AA)
+        cv2.putText(frame, "llegada", (rwx + 10, rwy - 5),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.3, color_reached, 1, cv2.LINE_AA)
+
+    # Draw active waypoint as a subtle cross
+    if waypoint:
+        wx, wy = int(waypoint[0]), int(waypoint[1])
+        cross_size = 8
+        color_wp = (100, 255, 100)
+        cv2.line(frame, (wx - cross_size, wy), (wx + cross_size, wy),
+                color_wp, 1, cv2.LINE_AA)
+        cv2.line(frame, (wx, wy - cross_size), (wx, wy + cross_size),
+                color_wp, 1, cv2.LINE_AA)
+
+        # Position threshold circle
+        pos_thresh = behavior_params.get('position_threshold', 16)
+        cv2.circle(frame, (wx, wy), pos_thresh, (100, 255, 100), 1, cv2.LINE_AA)
+
+    # Draw robot
+    if robot_pos:
+        rx, ry = robot_pos
+        cv2.circle(frame, (rx, ry), 14, (0, 200, 0), 2, cv2.LINE_AA)
+
+        # Robot heading arrow
+        if robot_data and 'angulo' in robot_data:
+            angle_rad = math.radians(robot_data['angulo'])
+            arrow_len = 25
+            end_x = int(rx + arrow_len * math.cos(angle_rad))
+            end_y = int(ry + arrow_len * math.sin(angle_rad))
+            cv2.arrowedLine(frame, (rx, ry), (end_x, end_y),
+                           (0, 200, 0), 2, cv2.LINE_AA, tipLength=0.3)
+
+        # Trajectory line + target heading + angular error
+        if waypoint:
+            wx, wy = int(waypoint[0]), int(waypoint[1])
+            cv2.line(frame, (rx, ry), (wx, wy), (200, 200, 0), 1, cv2.LINE_AA)
+
+            if target_heading_deg is not None:
+                th_rad = math.radians(target_heading_deg)
+                th_len = 20
+                thx = int(rx + th_len * math.cos(th_rad))
+                thy = int(ry + th_len * math.sin(th_rad))
+                cv2.arrowedLine(frame, (rx, ry), (thx, thy),
+                               (255, 255, 0), 1, cv2.LINE_AA, tipLength=0.35)
+
+            if angle_error_deg is not None and robot_data and 'angulo' in robot_data:
+                _draw_angle_error_arc(frame, rx, ry, robot_data['angulo'],
+                                      angle_error_deg, movement_mode)
+
+
+def _draw_angle_error_arc(frame, cx, cy, robot_angle_deg, angle_error_deg, movement_mode):
+    """Draw an arc showing the angular error between robot heading and target heading."""
+    arc_radius = 30
+    start_angle = robot_angle_deg
+    end_angle = start_angle + angle_error_deg
+
+    if movement_mode == 'rotating':
+        arc_color = (0, 100, 255)
+    elif movement_mode == 'linear':
+        arc_color = (0, 255, 200)
+    else:
+        arc_color = (0, 255, 0)
+
+    if abs(angle_error_deg) > 1:
+        cv2.ellipse(frame, (cx, cy), (arc_radius, arc_radius),
+                    0, start_angle, end_angle, arc_color, 2, cv2.LINE_AA)
+
+        text_angle = math.radians(start_angle + angle_error_deg / 2)
+        tx = int(cx + (arc_radius + 12) * math.cos(text_angle))
+        ty = int(cy + (arc_radius + 12) * math.sin(text_angle))
+        cv2.putText(frame, f"{angle_error_deg:+.0f}", (tx - 12, ty + 4),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.32, arc_color, 1, cv2.LINE_AA)
+
+
+def _draw_overlays_zoom(frame, robot_pos, robot_data, waypoint,
+                         robot_angle_deg, angle_error_deg, target_heading_deg,
+                         movement_mode, behavior_params, movement_active,
+                         reached_waypoint,
+                         crop_x1, crop_y1, crop_w, crop_h,
+                         out_w, out_h, zoom_level):
+    """Draw overlays on the zoom frame with coordinate transformation."""
+    sx = out_w / crop_w
+    sy = out_h / crop_h
+
+    def to_zoom(px, py):
+        return int((px - crop_x1) * sx), int((py - crop_y1) * sy)
+
+    def in_bounds(zx, zy):
+        return -50 <= zx < out_w + 50 and -50 <= zy < out_h + 50
+
+    # Reached waypoint (persistent dim marker)
+    if reached_waypoint:
+        zwx, zwy = to_zoom(reached_waypoint[0], reached_waypoint[1])
+        if in_bounds(zwx, zwy):
+            cross_size = int(10 * zoom_level)
+            color_reached = (120, 120, 200)
+            cv2.line(frame, (zwx - cross_size, zwy), (zwx + cross_size, zwy),
+                    color_reached, 1, cv2.LINE_AA)
+            cv2.line(frame, (zwx, zwy - cross_size), (zwx, zwy + cross_size),
+                    color_reached, 1, cv2.LINE_AA)
+            cv2.putText(frame, "llegada", (zwx + cross_size + 3, zwy - 3),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.35, color_reached, 1, cv2.LINE_AA)
+
+    # Waypoint cross
+    if waypoint:
+        zwx, zwy = to_zoom(waypoint[0], waypoint[1])
+        if in_bounds(zwx, zwy):
+            cross_size = int(10 * zoom_level)
+            color_wp = (100, 255, 100)
+            cv2.line(frame, (zwx - cross_size, zwy), (zwx + cross_size, zwy),
+                    color_wp, 1, cv2.LINE_AA)
+            cv2.line(frame, (zwx, zwy - cross_size), (zwx, zwy + cross_size),
+                    color_wp, 1, cv2.LINE_AA)
+
+            pos_thresh = behavior_params.get('position_threshold', 16)
+            scaled_thresh = int(pos_thresh * sx)
+            cv2.circle(frame, (zwx, zwy), scaled_thresh, (100, 255, 100), 1, cv2.LINE_AA)
+
+    # Robot
+    if robot_pos:
+        zrx, zry = to_zoom(robot_pos[0], robot_pos[1])
+        if in_bounds(zrx, zry):
+            robot_r = int(14 * sx)
+            cv2.circle(frame, (zrx, zry), robot_r, (0, 200, 0), 2, cv2.LINE_AA)
+
+            # Heading arrow
+            if robot_data and 'angulo' in robot_data:
+                angle_rad = math.radians(robot_data['angulo'])
+                arrow_len = int(30 * sx)
+                end_x = int(zrx + arrow_len * math.cos(angle_rad))
+                end_y = int(zry + arrow_len * math.sin(angle_rad))
+                cv2.arrowedLine(frame, (zrx, zry), (end_x, end_y),
+                               (0, 200, 0), 2, cv2.LINE_AA, tipLength=0.25)
+
+            # Target heading arrow
+            if waypoint and target_heading_deg is not None:
+                th_rad = math.radians(target_heading_deg)
+                th_len = int(25 * sx)
+                thx = int(zrx + th_len * math.cos(th_rad))
+                thy = int(zry + th_len * math.sin(th_rad))
+                cv2.arrowedLine(frame, (zrx, zry), (thx, thy),
+                               (255, 255, 0), 1, cv2.LINE_AA, tipLength=0.3)
+
+            # Trajectory line
+            if waypoint:
+                zwx, zwy = to_zoom(waypoint[0], waypoint[1])
+                cv2.line(frame, (zrx, zry), (zwx, zwy), (200, 200, 0), 1, cv2.LINE_AA)
+
+            # Angular error arc (scaled)
+            if angle_error_deg is not None and robot_data and 'angulo' in robot_data:
+                arc_radius = int(35 * sx)
+                start_angle = robot_data['angulo']
+                end_angle = start_angle + angle_error_deg
+
+                if movement_mode == 'rotating':
+                    arc_color = (0, 100, 255)
+                elif movement_mode == 'linear':
+                    arc_color = (0, 255, 200)
+                else:
+                    arc_color = (0, 255, 0)
+
+                if abs(angle_error_deg) > 1:
+                    cv2.ellipse(frame, (zrx, zry), (arc_radius, arc_radius),
+                                0, start_angle, end_angle, arc_color, 2, cv2.LINE_AA)
+
+                    text_angle = math.radians(start_angle + angle_error_deg / 2)
+                    tx = int(zrx + (arc_radius + 15) * math.cos(text_angle))
+                    ty = int(zry + (arc_radius + 15) * math.sin(text_angle))
+                    cv2.putText(frame, f"{angle_error_deg:+.0f}",
+                               (tx - 14, ty + 5),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.4, arc_color, 1, cv2.LINE_AA)
+
+
+def _draw_behavior_panel(behavior_params, robot_pos, waypoint, robot_available,
+                          robot_detected, angle_error_deg, movement_mode,
+                          reached_waypoint, panel_height=370, panel_width=960):
     """Dibuja el panel de control de comportamiento."""
     panel = np.zeros((panel_height, panel_width, 3), dtype=np.uint8)
 
-    y_offset = 30
-    line_height = 25
+    y = 25
+    lh = 22
 
-    cv2.putText(panel, "=== CALIBRACION DE COMPORTAMIENTO ===", (10, y_offset),
-               cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-    y_offset += line_height * 2
+    cv2.putText(panel, "CALIBRACION DE COMPORTAMIENTO", (10, y),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+    y += lh + 8
 
+    # Status
     if robot_available:
-        status_color = (0, 255, 0)
-        status_text = f"Robot detectado" if robot_detected else "Robot NO visible"
+        status_color = (0, 255, 0) if robot_detected else (0, 100, 255)
+        status_text = "Robot detectado" if robot_detected else "Robot NO visible"
     else:
         status_color = (0, 0, 255)
         status_text = "Robot NO conectado"
+    cv2.putText(panel, status_text, (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.45, status_color, 1)
+    y += lh + 6
 
-    cv2.putText(panel, status_text, (10, y_offset),
-               cv2.FONT_HERSHEY_SIMPLEX, 0.5, status_color, 1)
-    y_offset += line_height * 2
+    # Angular error display
+    if angle_error_deg is not None:
+        err_color = (0, 255, 0) if abs(angle_error_deg) < behavior_params['angle_threshold'] else (0, 100, 255)
+        cv2.putText(panel, f"Error angular: {angle_error_deg:+.1f} deg", (10, y),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.45, err_color, 1)
+        if movement_mode:
+            mode_label = {'rotating': 'GIRANDO', 'linear': 'LINEAL', 'arrived_angle': 'ALINEADO'}
+            cv2.putText(panel, mode_label.get(movement_mode, movement_mode),
+                       (280, y), cv2.FONT_HERSHEY_SIMPLEX, 0.45, err_color, 1)
+    y += lh + 4
 
-    cv2.putText(panel, "=== UMBRALES DE PRECISION ===", (10, y_offset),
-               cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
-    y_offset += line_height
+    # --- Left column: thresholds ---
+    col_left_x = 10
+    col_right_x = panel_width // 2
 
-    cv2.putText(panel, f"Posicion: {behavior_params['position_threshold']}px (9/0)", (10, y_offset),
-               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-    y_offset += line_height
-    cv2.putText(panel, "  -> Distancia para considerar waypoint alcanzado", (20, y_offset),
-               cv2.FONT_HERSHEY_SIMPLEX, 0.4, (180, 180, 180), 1)
-    y_offset += int(line_height * 1.5)
+    cv2.putText(panel, "UMBRALES DE PRECISION", (col_left_x, y),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+    y_left = y + lh
 
-    cv2.putText(panel, f"Angular: {behavior_params['angle_threshold']}deg (-/=)", (10, y_offset),
-               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-    y_offset += line_height
-    cv2.putText(panel, "  -> Error angular aceptable", (20, y_offset),
-               cv2.FONT_HERSHEY_SIMPLEX, 0.4, (180, 180, 180), 1)
-    y_offset += line_height * 2
+    cv2.putText(panel, f"Posicion: {behavior_params['position_threshold']}px", (col_left_x, y_left),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1)
+    cv2.putText(panel, "(9/0)", (250, y_left), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (150, 150, 150), 1)
+    y_left += lh
 
-    cv2.putText(panel, "=== POLITICA DE MOVIMIENTO ===", (10, y_offset),
-               cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
-    y_offset += line_height
+    cv2.putText(panel, f"Angular: {behavior_params['angle_threshold']} deg", (col_left_x, y_left),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1)
+    cv2.putText(panel, "(-/=)", (250, y_left), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (150, 150, 150), 1)
+    y_left += lh + 6
 
-    cv2.putText(panel, f"Inicio lineal: {behavior_params['linear_start_angle_threshold']}deg ([/])", (10, y_offset),
-               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-    y_offset += line_height
-    cv2.putText(panel, "  -> Angulo max para moverse linealmente", (20, y_offset),
-               cv2.FONT_HERSHEY_SIMPLEX, 0.4, (180, 180, 180), 1)
-    y_offset += line_height
-    cv2.putText(panel, "  -> Mayor valor = menos giros en lugar", (20, y_offset),
-               cv2.FONT_HERSHEY_SIMPLEX, 0.4, (180, 180, 180), 1)
-    y_offset += line_height * 2
+    cv2.putText(panel, "POLITICA DE MOVIMIENTO", (col_left_x, y_left),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+    y_left += lh
 
-    cv2.putText(panel, "=== CORRECCION ANGULAR ===", (10, y_offset),
-               cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
-    y_offset += line_height
+    cv2.putText(panel, f"Inicio lineal: {behavior_params['linear_start_angle_threshold']} deg", (col_left_x, y_left),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1)
+    cv2.putText(panel, "([/])", (250, y_left), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (150, 150, 150), 1)
+    y_left += int(lh * 0.8)
+    cv2.putText(panel, "Angulo max para avanzar (mayor = menos giros)", (20, y_left),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.33, (150, 150, 150), 1)
+    y_left += lh + 4
 
-    cv2.putText(panel, f"Max correccion: {behavior_params['max_angular_correction_pwm']} PWM (,/.)", (10, y_offset),
-               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-    y_offset += line_height
-    cv2.putText(panel, "  -> Max diferencia L/R durante mov. lineal", (20, y_offset),
-               cv2.FONT_HERSHEY_SIMPLEX, 0.4, (180, 180, 180), 1)
-    y_offset += line_height * 2
+    cv2.putText(panel, f"Max correccion: {behavior_params['max_angular_correction_pwm']} PWM", (col_left_x, y_left),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1)
+    cv2.putText(panel, "(,/.)", (250, y_left), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (150, 150, 150), 1)
+    y_left += int(lh * 0.8)
+    cv2.putText(panel, "(no usado - Dual PID v+w lo reemplaza)", (20, y_left),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.33, (100, 100, 150), 1)
 
+    # --- Right column: waypoint info + controls ---
+    y_right = y + lh
+
+    # Waypoint info
     if waypoint:
-        cv2.putText(panel, f"Waypoint: ({waypoint[0]}, {waypoint[1]})", (10, y_offset),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+        cv2.putText(panel, f"Waypoint: ({waypoint[0]}, {waypoint[1]})", (col_right_x, y_right),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 0), 1)
     else:
-        cv2.putText(panel, "Sin waypoint (usar flechas o click)", (10, y_offset),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (128, 128, 128), 1)
-    y_offset += line_height * 2
+        cv2.putText(panel, "Sin waypoint (click o flechas)", (col_right_x, y_right),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.45, (128, 128, 128), 1)
+    y_right += lh
 
-    cv2.putText(panel, "=== CONTROLES ===", (10, y_offset),
-               cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 200, 0), 2)
-    y_offset += line_height
+    if reached_waypoint:
+        cv2.putText(panel, f"Llegada: ({reached_waypoint[0]}, {reached_waypoint[1]})", (col_right_x, y_right),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.45, (150, 150, 255), 1)
+        y_right += lh
+        if robot_pos:
+            dx = robot_pos[0] - reached_waypoint[0]
+            dy = robot_pos[1] - reached_waypoint[1]
+            offset = math.sqrt(dx * dx + dy * dy)
+            cv2.putText(panel, f"Error de posicion: {offset:.1f}px", (col_right_x, y_right),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.45, (150, 150, 255), 1)
+    y_right += lh + 8
+
+    # Controls
+    cv2.putText(panel, "CONTROLES", (col_right_x, y_right),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 200, 0), 1)
+    y_right += lh
 
     controls = [
-        "Flechas: Mover waypoint",
-        "Click: Establecer waypoint",
+        "Flechas/Click: Waypoint",
         "ESPACIO: START/STOP",
         "X: Cancelar waypoint",
-        "ENTER: Guardar a config.py",
-        "+/-: Zoom in/out",
-        "V: Centrar zoom en robot",
-        "W: Centrar zoom en waypoint",
-        "R: Reset zoom (2x, robot)",
+        "ENTER: Guardar config",
+        "+/_: Zoom in/out",
+        "V/W/C/R: Zoom control",
         "ESC: Salir",
     ]
 
-    for control in controls:
-        cv2.putText(panel, control, (10, y_offset),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.4, (200, 200, 200), 1)
-        y_offset += line_height
+    for ctrl in controls:
+        cv2.putText(panel, ctrl, (col_right_x, y_right),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.33, (200, 200, 200), 1)
+        y_right += lh - 3
 
     return panel

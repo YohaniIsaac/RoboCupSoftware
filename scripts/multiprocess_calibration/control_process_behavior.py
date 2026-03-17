@@ -649,6 +649,37 @@ def control_loop_behavior_pure(perception_pipe, control_state_pipe, keyboard_pip
 
             if current_time - last_state_send_time >= STATE_SEND_INTERVAL:
                 try:
+                    # Calcular datos de navegación para visualización
+                    angle_error_deg = None
+                    target_heading_deg = None
+                    movement_mode = None
+                    robot_angle_deg = None
+
+                    if robot and target_waypoint:
+                        dx = target_waypoint[0] - robot.x
+                        dy = target_waypoint[1] - robot.y
+                        target_heading_rad = math.atan2(dy, dx)
+                        target_heading_deg = math.degrees(target_heading_rad)
+                        angle_error_rad = target_heading_rad - robot.angle
+                        # Normalize to [-pi, pi]
+                        while angle_error_rad > math.pi:
+                            angle_error_rad -= 2 * math.pi
+                        while angle_error_rad < -math.pi:
+                            angle_error_rad += 2 * math.pi
+                        angle_error_deg = math.degrees(angle_error_rad)
+
+                        enter_thresh = behavior_params['linear_start_angle_threshold']
+                        angle_thresh = behavior_params['angle_threshold']
+                        if abs(angle_error_deg) > enter_thresh:
+                            movement_mode = 'rotating'
+                        elif abs(angle_error_deg) > angle_thresh:
+                            movement_mode = 'linear'
+                        else:
+                            movement_mode = 'arrived_angle'
+
+                    if robot:
+                        robot_angle_deg = math.degrees(robot.angle)
+
                     control_state_pipe.send({
                         'behavior_params': behavior_params.copy(),
                         'target_waypoint': target_waypoint,
@@ -657,6 +688,10 @@ def control_loop_behavior_pure(perception_pipe, control_state_pipe, keyboard_pip
                         'robot_available': robot_available,
                         'robot_detected': robot is not None,
                         'robot_pos': (int(robot.x), int(robot.y)) if robot else None,
+                        'robot_angle_deg': robot_angle_deg,
+                        'angle_error_deg': angle_error_deg,
+                        'target_heading_deg': target_heading_deg,
+                        'movement_mode': movement_mode,
                         'timestamp': current_time
                     })
                     last_state_send_time = current_time

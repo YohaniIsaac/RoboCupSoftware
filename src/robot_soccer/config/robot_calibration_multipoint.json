@@ -11,12 +11,12 @@
   },
   "0": {
     "pwm_min": 17,
-    "pwm_max": 29,
+    "pwm_max": 32,
     "deadzone_left_fwd": 0,
     "deadzone_left_rev": 0,
     "deadzone_right_fwd": 40,
     "deadzone_right_rev": 40,
-    "bias": 0.016
+    "bias": 0.022
   },
   "1": {
     "pwm_min": 20,
