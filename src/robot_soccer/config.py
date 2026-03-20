@@ -335,7 +335,7 @@ ESTADO_RETROCEDER = "RETROCEDE A DEFENDER ARCO ALIADO"
 # Rangos de colores HSV para detección
 # ==========================================
 # Rango para color naranja (pelota)
-RANGO_COLOR_NARANJO = ((15, 114, 141), (30, 255, 255))  # Rango HSV para pelota naranja
+RANGO_COLOR_NARANJO = ((8, 116, 159), (30, 200, 255))  # Rango HSV para pelota naranja
 
 # Rangos para colores de equipos
 RANGO_COLOR_ROJO = ((0, 100, 20), (8, 255, 255), (175, 100, 20), (179, 255, 255))
@@ -345,11 +345,11 @@ RANGO_COLOR_CIAN = ((85, 150, 150), (95, 255, 255), None, None)
 
 # Parámetros de detección de pelota (morfología y HoughCircles)
 BALL_DETECTION_KERNEL_SIZE = 3  # Tamaño del kernel morfológico
-BALL_DETECTION_MORPH_ITERATIONS = 3  # Iteraciones de apertura/cierre
-BALL_DETECTION_HOUGH_PARAM1 = 40  # Umbral Canny
-BALL_DETECTION_HOUGH_PARAM2 = 6  # Umbral acumulador
-BALL_DETECTION_MIN_RADIUS = 2  # Radio mínimo (px)
-BALL_DETECTION_MAX_RADIUS = 9  # Radio máximo (px)
+BALL_DETECTION_MORPH_ITERATIONS = 4  # Iteraciones de apertura/cierre
+BALL_DETECTION_HOUGH_PARAM1 = 7  # Umbral Canny
+BALL_DETECTION_HOUGH_PARAM2 = 7  # Umbral acumulador
+BALL_DETECTION_MIN_RADIUS = 5  # Radio mínimo (px)
+BALL_DETECTION_MAX_RADIUS = 10  # Radio máximo (px)
 
 # =============================================================================
 # Parámetros de Control de Movimiento del Robot
