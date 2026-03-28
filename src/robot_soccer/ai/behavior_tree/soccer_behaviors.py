@@ -19,6 +19,9 @@ from robot_soccer.config import (
     BT_DEFENDER_WAIT_RATIO, BT_DRIBBLE_GOAL_RATIO, BT_DRIBBLE_SPACING_RATIO,
     BT_DEFENSIVE_ARRIVAL_RATIO, BT_ATTACKER_PRIORITY_MARGIN_RATIO,
     ROBOT_POSITION_THRESHOLD,
+    CAPTURE_ACTIVATE_DISTANCE_PX,
+    CAPTURE_OVERSHOOT_PX,
+    CAPTURE_CONFIRM_DISTANCE_PX,
 )
 
 from .base import (
@@ -593,21 +596,13 @@ def capture_ball(blackboard):
     # Calcular distancia a la pelota
     distance_to_ball = blackboard.player.distance_to_ball(blackboard.ball)
 
-    # Umbral unificado: mismo valor que move_to_ball usa para retornar SUCCESS.
-    # Garantiza que cuando move_to_ball pasa el control, capture_ball SIEMPRE activa.
-    # cámara (640px): max(21, 38)=38px > PID_stop(32px) ✓
-    # simulación (1500px): max(50, 38)=50px (valor original) ✓
-    capture_px = max(
-        blackboard.field.ratio_to_px(BT_CAPTURE_ACTIVATE_RATIO),
-        ROBOT_POSITION_THRESHOLD + 6
-    )
-
-    log.info("[capture_ball] Robot %d | dist=%.1fpx | umbral=%.0fpx | has_ball=%s",
-             blackboard.player.id, distance_to_ball, capture_px,
+    log.info("[capture_ball] Robot %d | dist=%.1fpx | activa=%.0fpx confirma=%.0fpx | has_ball=%s",
+             blackboard.player.id, distance_to_ball,
+             CAPTURE_ACTIVATE_DISTANCE_PX, CAPTURE_CONFIRM_DISTANCE_PX,
              blackboard.player.has_ball())
 
-    if distance_to_ball < capture_px:
-        # PASO 1: Orientarse hacia la pelota (solo para ajustes pequeños)
+    if distance_to_ball < CAPTURE_ACTIVATE_DISTANCE_PX:
+        # PASO 1: Orientarse hacia la pelota (solo ajustes pequeños ≤10°)
         angle_to_ball = np.degrees(
             np.arctan2(ball_pos[1] - player_pos[1], ball_pos[0] - player_pos[0])
         )
@@ -615,24 +610,44 @@ def capture_ball(blackboard):
         angle_diff = abs((angle_to_ball - current_angle + 180) % 360 - 180)
 
         if angle_diff > 10:
-            log.info("[capture_ball] Orientando hacia pelota | diff=%.1f°", angle_diff)
+            log.info("[capture_ball] Orientando | diff=%.1f°", angle_diff)
             blackboard.command_manager.rotate_robot_to(
                 blackboard.player.id, angle_to_ball
             )
             return NodeStatus.RUNNING
 
-        # PASO 2: ACTIVAR DRIBBLER
-        log.info("[capture_ball] ACTIVANDO DRIBBLER | dist=%.1fpx < %.0fpx",
-                 distance_to_ball, capture_px)
+        # PASO 2: ACTIVAR DRIBBLER (pre-spin antes del contacto)
+        log.info("[capture_ball] DRIBBLER ON | dist=%.1fpx", distance_to_ball)
         blackboard.command_manager.capture_ball(blackboard.player.id)
 
-        # PASO 3: Confirmar captura (mismo umbral → confirma en la misma iteración)
-        blackboard.player._has_ball = True
-        blackboard.last_action = "ball_captured_with_motor"
-        log.info("[capture_ball] CAPTURA CONFIRMADA | dist=%.1fpx", distance_to_ball)
-        return NodeStatus.SUCCESS
+        # PASO 3: CREEP FORWARD — target OVERSHOOT_PX más allá de la pelota.
+        # El PID para a ROBOT_POSITION_THRESHOLD antes del target, colocando el
+        # dribbler físicamente encima de la pelota.
+        # Geometría: robot para a (OVERSHOOT - ROBOT_THRESHOLD) px del centro pelota.
+        robot_to_ball = ball_pos - player_pos
+        dist = np.linalg.norm(robot_to_ball)
+        if dist > 0:
+            forward = robot_to_ball / dist
+            overshoot = ball_pos + forward * CAPTURE_OVERSHOOT_PX
+            overshoot_target = (int(overshoot[0]), int(overshoot[1]))
+            blackboard.command_manager.move_robot_to(
+                blackboard.player.id, overshoot_target
+            )
+            log.info("[capture_ball] CREEP → overshoot(%d,%d) | distancia_final≈%dpx",
+                     overshoot_target[0], overshoot_target[1],
+                     max(0, CAPTURE_OVERSHOOT_PX - ROBOT_POSITION_THRESHOLD))
 
-    log.info("[capture_ball] Fuera de rango (%.1fpx > %.0fpx)", distance_to_ball, capture_px)
+        # PASO 4: Confirmar captura (robot dentro del dribbler)
+        if distance_to_ball < CAPTURE_CONFIRM_DISTANCE_PX:
+            blackboard.player._has_ball = True
+            blackboard.last_action = "ball_captured_with_motor"
+            log.info("[capture_ball] CAPTURA CONFIRMADA | dist=%.1fpx", distance_to_ball)
+            return NodeStatus.SUCCESS
+
+        return NodeStatus.RUNNING
+
+    log.info("[capture_ball] Fuera de rango (%.1fpx > %.0fpx)",
+             distance_to_ball, CAPTURE_ACTIVATE_DISTANCE_PX)
     return NodeStatus.RUNNING
 
 

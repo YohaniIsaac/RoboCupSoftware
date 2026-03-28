@@ -398,6 +398,25 @@ MAX_ANGULAR_CORRECTION_PWM = 10  # Máximo ±10 PWM de diferencia L/R para corre
 ROBOT_POSITION_THRESHOLD = 32  # Distancia para considerar waypoint alcanzado (píxeles)
 ROBOT_ANGLE_THRESHOLD_DEG = 3  # Error angular aceptable (grados)
 
+# --- Captura de pelota con dribbler ---
+# Distancia (ArUco center → ball center) a la que se activa el dribbler y
+# se emite el target de overshoot. Debe superar ROBOT_POSITION_THRESHOLD.
+# Calibrar con scripts/calibrate_behavior_thresholds.py (teclas U/J)
+CAPTURE_ACTIVATE_DISTANCE_PX = 38   # px — activar dribbler + iniciar creep
+
+# Píxeles MÁS ALLÁ del centro de la pelota donde apunta el creep.
+# El PID se detiene a ROBOT_POSITION_THRESHOLD antes de este punto,
+# lo que coloca el dribbler físicamente sobre la pelota.
+# Fórmula: robot para a (CAPTURE_OVERSHOOT_PX - ROBOT_POSITION_THRESHOLD) px del centro pelota
+# Calibrar con scripts/calibrate_behavior_thresholds.py (teclas I/K)
+CAPTURE_OVERSHOOT_PX = 15           # px — cuánto pasar la pelota
+
+# Distancia a la que se confirma la captura (_has_ball = True).
+# Con CAPTURE_OVERSHOOT_PX=15 y ROBOT_POSITION_THRESHOLD=32,
+# el robot para a ~17px del centro → usa 20px como margen.
+# Calibrar con scripts/calibrate_behavior_thresholds.py (teclas O/L)
+CAPTURE_CONFIRM_DISTANCE_PX = 20    # px — confirmar pelota en dribbler
+
 # =============================================================================
 # Parámetros de Control PID
 # =============================================================================

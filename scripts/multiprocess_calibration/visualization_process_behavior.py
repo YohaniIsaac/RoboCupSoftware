@@ -50,7 +50,10 @@ def visualization_loop_behavior(perception_pipe, control_state_pipe, keyboard_pi
         'position_threshold': 16,
         'angle_threshold': 7,
         'linear_start_angle_threshold': 30,
-        'max_angular_correction_pwm': 10
+        'max_angular_correction_pwm': 10,
+        'capture_activate_px': 38,
+        'capture_overshoot_px': 15,
+        'capture_confirm_px': 20,
     }
     last_target_waypoint = None
     last_movement_active = False
@@ -72,7 +75,7 @@ def visualization_loop_behavior(perception_pipe, control_state_pipe, keyboard_pi
     zoom_center = None
 
     window_name = 'Calibracion Behavior (3 Procesos)'
-    panel_height = 370
+    panel_height = 430
     frame_height = CAMERA_PERSPECTIVE_HEIGHT  # 480
     frame_width = CAMERA_PERSPECTIVE_WIDTH    # 640
 
@@ -361,6 +364,30 @@ def visualization_loop_behavior(perception_pipe, control_state_pipe, keyboard_pi
                     command = 'adjust_threshold'
                     param = 'max_angular_correction_pwm'
                     delta = 1
+                elif key == ord('u') or key == ord('U'):
+                    command = 'adjust_threshold'
+                    param = 'capture_activate_px'
+                    delta = 1
+                elif key == ord('j') or key == ord('J'):
+                    command = 'adjust_threshold'
+                    param = 'capture_activate_px'
+                    delta = -1
+                elif key == ord('i') or key == ord('I'):
+                    command = 'adjust_threshold'
+                    param = 'capture_overshoot_px'
+                    delta = 1
+                elif key == ord('k') or key == ord('K'):
+                    command = 'adjust_threshold'
+                    param = 'capture_overshoot_px'
+                    delta = -1
+                elif key == ord('o') or key == ord('O'):
+                    command = 'adjust_threshold'
+                    param = 'capture_confirm_px'
+                    delta = 1
+                elif key == ord('l') or key == ord('L'):
+                    command = 'adjust_threshold'
+                    param = 'capture_confirm_px'
+                    delta = -1
                 elif key in [82, 84, 81, 83] and last_robot_pos:
                     command = 'move_waypoint'
                     reached_waypoint = None  # New waypoint movement clears reached
@@ -605,7 +632,7 @@ def _draw_overlays_zoom(frame, robot_pos, robot_data, waypoint,
 
 def _draw_behavior_panel(behavior_params, robot_pos, waypoint, robot_available,
                           robot_detected, angle_error_deg, movement_mode,
-                          reached_waypoint, panel_height=370, panel_width=960):
+                          reached_waypoint, panel_height=430, panel_width=960):
     """Dibuja el panel de control de comportamiento."""
     panel = np.zeros((panel_height, panel_width, 3), dtype=np.uint8)
 
@@ -673,6 +700,25 @@ def _draw_behavior_panel(behavior_params, robot_pos, waypoint, robot_available,
     y_left += int(lh * 0.8)
     cv2.putText(panel, "(no usado - Dual PID v+w lo reemplaza)", (20, y_left),
                cv2.FONT_HERSHEY_SIMPLEX, 0.33, (100, 100, 150), 1)
+    y_left += lh + 4
+
+    cv2.putText(panel, "CAPTURA DE BALON", (col_left_x, y_left),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+    y_left += lh
+
+    cv2.putText(panel, f"Activar: {behavior_params.get('capture_activate_px', 38)}px", (col_left_x, y_left),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1)
+    cv2.putText(panel, "(U/J)", (250, y_left), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (150, 150, 150), 1)
+    y_left += lh
+
+    cv2.putText(panel, f"Overshoot: {behavior_params.get('capture_overshoot_px', 15)}px", (col_left_x, y_left),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1)
+    cv2.putText(panel, "(I/K)", (250, y_left), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (150, 150, 150), 1)
+    y_left += lh
+
+    cv2.putText(panel, f"Confirmar: {behavior_params.get('capture_confirm_px', 20)}px", (col_left_x, y_left),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1)
+    cv2.putText(panel, "(O/L)", (250, y_left), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (150, 150, 150), 1)
 
     # --- Right column: waypoint info + controls ---
     y_right = y + lh
@@ -708,6 +754,8 @@ def _draw_behavior_panel(behavior_params, robot_pos, waypoint, robot_available,
         "ESPACIO: START/STOP",
         "X: Cancelar waypoint",
         "ENTER: Guardar config",
+        "U/J: Activar +/-  I/K: Overshoot +/-",
+        "O/L: Confirmar +/-",
         "+/_: Zoom in/out",
         "V/W/C/R: Zoom control",
         "ESC: Salir",

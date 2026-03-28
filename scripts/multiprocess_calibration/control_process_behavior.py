@@ -28,6 +28,9 @@ from robot_soccer.config import (
     ROBOT_ANGLE_THRESHOLD_DEG,
     ROBOT_LINEAR_START_ANGLE_THRESHOLD_DEG,
     MAX_ANGULAR_CORRECTION_PWM,
+    CAPTURE_ACTIVATE_DISTANCE_PX,
+    CAPTURE_OVERSHOOT_PX,
+    CAPTURE_CONFIRM_DISTANCE_PX,
 )
 
 log = logging.getLogger(__name__)
@@ -91,6 +94,9 @@ def control_loop_behavior(robot_positions_pipe, frame_pipe, robot_id, serial_por
         'angle_threshold': ROBOT_ANGLE_THRESHOLD_DEG,
         'linear_start_angle_threshold': ROBOT_LINEAR_START_ANGLE_THRESHOLD_DEG,
         'max_angular_correction_pwm': MAX_ANGULAR_CORRECTION_PWM,
+        'capture_activate_px': CAPTURE_ACTIVATE_DISTANCE_PX,
+        'capture_overshoot_px': CAPTURE_OVERSHOOT_PX,
+        'capture_confirm_px': CAPTURE_CONFIRM_DISTANCE_PX,
     }
 
     # Controlador
@@ -255,7 +261,7 @@ def _update_behavior_controller(controller, behavior_params):
 
 def _draw_behavior_panel(behavior_params, robot, waypoint, robot_available):
     """Dibuja el panel de control de comportamiento."""
-    panel = np.zeros((600, 650, 3), dtype=np.uint8)
+    panel = np.zeros((700, 650, 3), dtype=np.uint8)
 
     y_offset = 30
     line_height = 25
@@ -323,6 +329,32 @@ def _draw_behavior_panel(behavior_params, robot, waypoint, robot_available):
                cv2.FONT_HERSHEY_SIMPLEX, 0.4, (180, 180, 180), 1)
     y_offset += line_height
     cv2.putText(panel, "  -> Mayor valor = mas capacidad de corregir", (20, y_offset),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.4, (180, 180, 180), 1)
+    y_offset += line_height * 2
+
+    # Captura de balón
+    cv2.putText(panel, "=== CAPTURA DE BALON ===", (10, y_offset),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+    y_offset += line_height
+
+    cv2.putText(panel, f"Activar dribbler: {behavior_params['capture_activate_px']}px (U/J)", (10, y_offset),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+    y_offset += line_height
+    cv2.putText(panel, "  -> Distancia al balon para activar dribbler", (20, y_offset),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.4, (180, 180, 180), 1)
+    y_offset += int(line_height * 1.2)
+
+    cv2.putText(panel, f"Overshoot: {behavior_params['capture_overshoot_px']}px (I/K)", (10, y_offset),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+    y_offset += line_height
+    cv2.putText(panel, "  -> Px mas alla del balon como objetivo PID", (20, y_offset),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.4, (180, 180, 180), 1)
+    y_offset += int(line_height * 1.2)
+
+    cv2.putText(panel, f"Confirmar captura: {behavior_params['capture_confirm_px']}px (O/L)", (10, y_offset),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+    y_offset += line_height
+    cv2.putText(panel, "  -> Distancia al balon para confirmar captura", (20, y_offset),
                cv2.FONT_HERSHEY_SIMPLEX, 0.4, (180, 180, 180), 1)
     y_offset += line_height * 2
 
@@ -460,6 +492,36 @@ def _handle_keyboard_behavior(key, robot, target_waypoint, behavior_params,
         result['action'] = 'update_behavior'
         log.info(f"max_angular_correction_pwm: {behavior_params['max_angular_correction_pwm']} PWM")
 
+    # Captura: distancia de activación (U/J ±1 px)
+    elif key == ord('u') or key == ord('U'):
+        behavior_params['capture_activate_px'] = min(100, behavior_params['capture_activate_px'] + 1)
+        result['action'] = 'update_behavior'
+        log.info(f"capture_activate_px: {behavior_params['capture_activate_px']}px")
+    elif key == ord('j') or key == ord('J'):
+        behavior_params['capture_activate_px'] = max(10, behavior_params['capture_activate_px'] - 1)
+        result['action'] = 'update_behavior'
+        log.info(f"capture_activate_px: {behavior_params['capture_activate_px']}px")
+
+    # Captura: overshoot (I/K ±1 px)
+    elif key == ord('i') or key == ord('I'):
+        behavior_params['capture_overshoot_px'] = min(50, behavior_params['capture_overshoot_px'] + 1)
+        result['action'] = 'update_behavior'
+        log.info(f"capture_overshoot_px: {behavior_params['capture_overshoot_px']}px")
+    elif key == ord('k') or key == ord('K'):
+        behavior_params['capture_overshoot_px'] = max(0, behavior_params['capture_overshoot_px'] - 1)
+        result['action'] = 'update_behavior'
+        log.info(f"capture_overshoot_px: {behavior_params['capture_overshoot_px']}px")
+
+    # Captura: distancia de confirmación (O/L ±1 px)
+    elif key == ord('o') or key == ord('O'):
+        behavior_params['capture_confirm_px'] = min(50, behavior_params['capture_confirm_px'] + 1)
+        result['action'] = 'update_behavior'
+        log.info(f"capture_confirm_px: {behavior_params['capture_confirm_px']}px")
+    elif key == ord('l') or key == ord('L'):
+        behavior_params['capture_confirm_px'] = max(5, behavior_params['capture_confirm_px'] - 1)
+        result['action'] = 'update_behavior'
+        log.info(f"capture_confirm_px: {behavior_params['capture_confirm_px']}px")
+
     return result
 
 
@@ -477,6 +539,9 @@ def _save_behavior_to_config(behavior_params):
         'ROBOT_ANGLE_THRESHOLD_DEG': f"{behavior_params['angle_threshold']}",
         'ROBOT_LINEAR_START_ANGLE_THRESHOLD_DEG': f"{behavior_params['linear_start_angle_threshold']:.1f}",
         'MAX_ANGULAR_CORRECTION_PWM': f"{behavior_params['max_angular_correction_pwm']}",
+        'CAPTURE_ACTIVATE_DISTANCE_PX': f"{behavior_params['capture_activate_px']}",
+        'CAPTURE_OVERSHOOT_PX': f"{behavior_params['capture_overshoot_px']}",
+        'CAPTURE_CONFIRM_DISTANCE_PX': f"{behavior_params['capture_confirm_px']}",
     }
 
     new_lines = []
@@ -546,6 +611,9 @@ def control_loop_behavior_pure(perception_pipe, control_state_pipe, keyboard_pip
         'angle_threshold': ROBOT_ANGLE_THRESHOLD_DEG,
         'linear_start_angle_threshold': ROBOT_LINEAR_START_ANGLE_THRESHOLD_DEG,
         'max_angular_correction_pwm': MAX_ANGULAR_CORRECTION_PWM,
+        'capture_activate_px': CAPTURE_ACTIVATE_DISTANCE_PX,
+        'capture_overshoot_px': CAPTURE_OVERSHOOT_PX,
+        'capture_confirm_px': CAPTURE_CONFIRM_DISTANCE_PX,
     }
 
     controller = DifferentialDriveController(rf_controller=rf_controller)
@@ -621,7 +689,17 @@ def control_loop_behavior_pure(perception_pipe, control_state_pipe, keyboard_pip
                         param = cmd.get('param')
                         delta = cmd.get('delta', 0)
                         if param in behavior_params:
-                            behavior_params[param] = max(1, behavior_params[param] + delta)
+                            _param_bounds = {
+                                'position_threshold': (5, 50),
+                                'angle_threshold': (1, 30),
+                                'linear_start_angle_threshold': (5, 90),
+                                'max_angular_correction_pwm': (0, 50),
+                                'capture_activate_px': (10, 100),
+                                'capture_overshoot_px': (0, 50),
+                                'capture_confirm_px': (5, 50),
+                            }
+                            lo, hi = _param_bounds.get(param, (0, 9999))
+                            behavior_params[param] = max(lo, min(hi, behavior_params[param] + delta))
                             controller.position_threshold = behavior_params['position_threshold']
                             controller.angle_threshold = math.radians(behavior_params['angle_threshold'])
                             log.info(f"  {param}: {behavior_params[param]}")
