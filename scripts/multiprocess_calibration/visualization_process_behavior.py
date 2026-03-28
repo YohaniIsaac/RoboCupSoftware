@@ -54,6 +54,7 @@ def visualization_loop_behavior(perception_pipe, control_state_pipe, keyboard_pi
         'capture_activate_px': 38,
         'capture_overshoot_px': 15,
         'capture_confirm_px': 20,
+        'creep_speed_pwm': 30,
     }
     last_target_waypoint = None
     last_movement_active = False
@@ -64,6 +65,10 @@ def visualization_loop_behavior(perception_pipe, control_state_pipe, keyboard_pi
     last_angle_error_deg = None
     last_target_heading_deg = None
     last_movement_mode = None
+    last_capture_phase = 'idle'
+    last_ball_waypoint = None
+    last_overshoot_target = None
+    last_dribbler_on = False
 
     # Waypoint persistence: keeps showing where the target was after arrival
     reached_waypoint = None       # waypoint that was reached (persists until new one is set)
@@ -75,7 +80,7 @@ def visualization_loop_behavior(perception_pipe, control_state_pipe, keyboard_pi
     zoom_center = None
 
     window_name = 'Calibracion Behavior (3 Procesos)'
-    panel_height = 430
+    panel_height = 450
     frame_height = CAMERA_PERSPECTIVE_HEIGHT  # 480
     frame_width = CAMERA_PERSPECTIVE_WIDTH    # 640
 
@@ -167,6 +172,10 @@ def visualization_loop_behavior(perception_pipe, control_state_pipe, keyboard_pi
                     last_angle_error_deg = control_data.get('angle_error_deg')
                     last_target_heading_deg = control_data.get('target_heading_deg')
                     last_movement_mode = control_data.get('movement_mode')
+                    last_capture_phase = control_data.get('capture_phase', 'idle')
+                    last_ball_waypoint = control_data.get('ball_waypoint')
+                    last_overshoot_target = control_data.get('overshoot_target')
+                    last_dribbler_on = control_data.get('dribbler_on', False)
 
                     # Detect waypoint reached: target went from something to None
                     if prev_target_waypoint is not None and new_target is None:
@@ -194,7 +203,9 @@ def visualization_loop_behavior(perception_pipe, control_state_pipe, keyboard_pi
                                last_target_waypoint, last_robot_angle_deg,
                                last_angle_error_deg, last_target_heading_deg,
                                last_movement_mode, last_behavior_params,
-                               last_movement_active, reached_waypoint)
+                               last_movement_active, reached_waypoint,
+                               last_ball_waypoint, last_overshoot_target,
+                               last_capture_phase, last_dribbler_on)
 
                 # --- Create zoom view (full resolution 640x480, no distortion) ---
                 if zoom_center:
@@ -220,7 +231,9 @@ def visualization_loop_behavior(perception_pipe, control_state_pipe, keyboard_pi
                                         last_movement_mode, last_behavior_params,
                                         last_movement_active, reached_waypoint,
                                         x1, y1, crop_w, crop_h,
-                                        zoom_w, zoom_h, zoom_level)
+                                        zoom_w, zoom_h, zoom_level,
+                                        last_ball_waypoint, last_overshoot_target,
+                                        last_capture_phase, last_dribbler_on)
                 else:
                     zoom_frame = full_frame.copy()
                     x1 = y1 = x2 = y2 = 0
@@ -247,11 +260,29 @@ def visualization_loop_behavior(perception_pipe, control_state_pipe, keyboard_pi
                 cv2.putText(right_col, "FULL VIEW", (5, mini_h + 15),
                            cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1)
 
-                # Status
-                status_text = "MOVING" if last_movement_active else "STOPPED"
-                status_color = (0, 255, 0) if last_movement_active else (0, 0, 255)
+                # Status + capture phase
+                phase_labels = {
+                    'idle': 'STOPPED',
+                    'approach': 'FASE 1: APPROACH',
+                    'capture': 'FASE 2: CAPTURE',
+                }
+                if last_movement_active:
+                    status_text = phase_labels.get(last_capture_phase, 'MOVING')
+                else:
+                    if last_capture_phase == 'approach':
+                        status_text = 'FASE 1 OK → D'
+                    elif last_capture_phase == 'capture':
+                        status_text = 'FASE 2 OK'
+                    else:
+                        status_text = 'STOPPED'
+                status_color = (0, 255, 0) if last_movement_active else (0, 100, 255)
                 cv2.putText(right_col, status_text, (5, info_y + 15),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.6, status_color, 2)
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, status_color, 2)
+
+                # Dribbler indicator
+                if last_dribbler_on:
+                    cv2.putText(right_col, "DRIBBLER ON", (200, info_y + 15),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 80), 2)
 
                 # Angular error info
                 if last_angle_error_deg is not None and last_movement_active:
@@ -327,6 +358,8 @@ def visualization_loop_behavior(perception_pipe, control_state_pipe, keyboard_pi
                     command = 'exit'
                 elif key == ord(' '):
                     command = 'toggle_movement'
+                elif key == ord('d') or key == ord('D'):
+                    command = 'start_capture'
                 elif key == ord('x') or key == ord('X'):
                     command = 'cancel_waypoint'
                     reached_waypoint = None
@@ -388,6 +421,14 @@ def visualization_loop_behavior(perception_pipe, control_state_pipe, keyboard_pi
                     command = 'adjust_threshold'
                     param = 'capture_confirm_px'
                     delta = -1
+                elif key == ord('n') or key == ord('N'):
+                    command = 'adjust_threshold'
+                    param = 'creep_speed_pwm'
+                    delta = -1
+                elif key == ord('m') or key == ord('M'):
+                    command = 'adjust_threshold'
+                    param = 'creep_speed_pwm'
+                    delta = 1
                 elif key in [82, 84, 81, 83] and last_robot_pos:
                     command = 'move_waypoint'
                     reached_waypoint = None  # New waypoint movement clears reached
@@ -447,7 +488,9 @@ def visualization_loop_behavior(perception_pipe, control_state_pipe, keyboard_pi
 def _draw_overlays(frame, robot_pos, robot_data, waypoint,
                    robot_angle_deg, angle_error_deg, target_heading_deg,
                    movement_mode, behavior_params, movement_active,
-                   reached_waypoint):
+                   reached_waypoint,
+                   ball_waypoint=None, overshoot_target=None,
+                   capture_phase='idle', dribbler_on=False):
     """Draw robot, waypoint, trajectory and angular info on a frame."""
     # Draw reached waypoint (persistent marker, dimmer)
     if reached_waypoint:
@@ -461,6 +504,33 @@ def _draw_overlays(frame, robot_pos, robot_data, waypoint,
         cv2.putText(frame, "llegada", (rwx + 10, rwy - 5),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.3, color_reached, 1, cv2.LINE_AA)
 
+    # --- Capture circles around ball_waypoint ---
+    bw = ball_waypoint if ball_waypoint else waypoint
+    if bw:
+        bx, by = int(bw[0]), int(bw[1])
+        activate_r = behavior_params.get('capture_activate_px', 38)
+        confirm_r = behavior_params.get('capture_confirm_px', 20)
+
+        # Outer circle: capture_activate_px (yellow) — dribbler activates here
+        cv2.circle(frame, (bx, by), activate_r, (0, 200, 255), 1, cv2.LINE_AA)
+        cv2.putText(frame, f"activar {activate_r}px", (bx + activate_r + 3, by - 3),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.28, (0, 200, 255), 1, cv2.LINE_AA)
+
+        # Inner circle: capture_confirm_px (green) — capture confirmed here
+        cv2.circle(frame, (bx, by), confirm_r, (0, 255, 100), 1, cv2.LINE_AA)
+        cv2.putText(frame, f"confirm {confirm_r}px", (bx + confirm_r + 3, by + 12),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.28, (0, 255, 100), 1, cv2.LINE_AA)
+
+    # Overshoot target point (cyan dot + position_threshold circle)
+    if overshoot_target:
+        ox, oy = int(overshoot_target[0]), int(overshoot_target[1])
+        cv2.circle(frame, (ox, oy), 4, (255, 255, 0), -1, cv2.LINE_AA)
+        pos_thresh = behavior_params.get('position_threshold', 32)
+        cv2.circle(frame, (ox, oy), pos_thresh, (255, 255, 0), 1, cv2.LINE_AA)
+        cv2.putText(frame, f"overshoot (PID para a {pos_thresh}px)",
+                   (ox + pos_thresh + 3, oy + 4),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.28, (255, 255, 0), 1, cv2.LINE_AA)
+
     # Draw active waypoint as a subtle cross
     if waypoint:
         wx, wy = int(waypoint[0]), int(waypoint[1])
@@ -470,10 +540,6 @@ def _draw_overlays(frame, robot_pos, robot_data, waypoint,
                 color_wp, 1, cv2.LINE_AA)
         cv2.line(frame, (wx, wy - cross_size), (wx, wy + cross_size),
                 color_wp, 1, cv2.LINE_AA)
-
-        # Position threshold circle
-        pos_thresh = behavior_params.get('position_threshold', 16)
-        cv2.circle(frame, (wx, wy), pos_thresh, (100, 255, 100), 1, cv2.LINE_AA)
 
     # Draw robot
     if robot_pos:
@@ -536,7 +602,9 @@ def _draw_overlays_zoom(frame, robot_pos, robot_data, waypoint,
                          movement_mode, behavior_params, movement_active,
                          reached_waypoint,
                          crop_x1, crop_y1, crop_w, crop_h,
-                         out_w, out_h, zoom_level):
+                         out_w, out_h, zoom_level,
+                         ball_waypoint=None, overshoot_target=None,
+                         capture_phase='idle', dribbler_on=False):
     """Draw overlays on the zoom frame with coordinate transformation."""
     sx = out_w / crop_w
     sy = out_h / crop_h
@@ -560,6 +628,35 @@ def _draw_overlays_zoom(frame, robot_pos, robot_data, waypoint,
             cv2.putText(frame, "llegada", (zwx + cross_size + 3, zwy - 3),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.35, color_reached, 1, cv2.LINE_AA)
 
+    # --- Capture circles around ball_waypoint (zoom coords) ---
+    bw = ball_waypoint if ball_waypoint else waypoint
+    if bw:
+        zbx, zby = to_zoom(bw[0], bw[1])
+        if in_bounds(zbx, zby):
+            activate_r = int(behavior_params.get('capture_activate_px', 38) * sx)
+            confirm_r = int(behavior_params.get('capture_confirm_px', 20) * sx)
+
+            # Outer: capture_activate_px (yellow)
+            cv2.circle(frame, (zbx, zby), activate_r, (0, 200, 255), 1, cv2.LINE_AA)
+            cv2.putText(frame, f"activar", (zbx + activate_r + 3, zby - 3),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.32, (0, 200, 255), 1, cv2.LINE_AA)
+
+            # Inner: capture_confirm_px (green)
+            cv2.circle(frame, (zbx, zby), confirm_r, (0, 255, 100), 1, cv2.LINE_AA)
+            cv2.putText(frame, f"confirm", (zbx + confirm_r + 3, zby + 14),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.32, (0, 255, 100), 1, cv2.LINE_AA)
+
+    # Overshoot target (cyan dot + position_threshold circle)
+    if overshoot_target:
+        zox, zoy = to_zoom(overshoot_target[0], overshoot_target[1])
+        if in_bounds(zox, zoy):
+            dot_r = max(3, int(4 * sx))
+            cv2.circle(frame, (zox, zoy), dot_r, (255, 255, 0), -1, cv2.LINE_AA)
+            pos_thresh = int(behavior_params.get('position_threshold', 32) * sx)
+            cv2.circle(frame, (zox, zoy), pos_thresh, (255, 255, 0), 1, cv2.LINE_AA)
+            cv2.putText(frame, "overshoot", (zox + pos_thresh + 3, zoy + 4),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.32, (255, 255, 0), 1, cv2.LINE_AA)
+
     # Waypoint cross
     if waypoint:
         zwx, zwy = to_zoom(waypoint[0], waypoint[1])
@@ -570,10 +667,6 @@ def _draw_overlays_zoom(frame, robot_pos, robot_data, waypoint,
                     color_wp, 1, cv2.LINE_AA)
             cv2.line(frame, (zwx, zwy - cross_size), (zwx, zwy + cross_size),
                     color_wp, 1, cv2.LINE_AA)
-
-            pos_thresh = behavior_params.get('position_threshold', 16)
-            scaled_thresh = int(pos_thresh * sx)
-            cv2.circle(frame, (zwx, zwy), scaled_thresh, (100, 255, 100), 1, cv2.LINE_AA)
 
     # Robot
     if robot_pos:
@@ -632,7 +725,7 @@ def _draw_overlays_zoom(frame, robot_pos, robot_data, waypoint,
 
 def _draw_behavior_panel(behavior_params, robot_pos, waypoint, robot_available,
                           robot_detected, angle_error_deg, movement_mode,
-                          reached_waypoint, panel_height=430, panel_width=960):
+                          reached_waypoint, panel_height=450, panel_width=960):
     """Dibuja el panel de control de comportamiento."""
     panel = np.zeros((panel_height, panel_width, 3), dtype=np.uint8)
 
@@ -719,6 +812,11 @@ def _draw_behavior_panel(behavior_params, robot_pos, waypoint, robot_available,
     cv2.putText(panel, f"Confirmar: {behavior_params.get('capture_confirm_px', 20)}px", (col_left_x, y_left),
                cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1)
     cv2.putText(panel, "(O/L)", (250, y_left), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (150, 150, 150), 1)
+    y_left += lh
+
+    cv2.putText(panel, f"Creep: {behavior_params.get('creep_speed_pwm', 30)} PWM", (col_left_x, y_left),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1)
+    cv2.putText(panel, "(N/M)", (250, y_left), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (150, 150, 150), 1)
 
     # --- Right column: waypoint info + controls ---
     y_right = y + lh
@@ -750,14 +848,13 @@ def _draw_behavior_panel(behavior_params, robot_pos, waypoint, robot_available,
     y_right += lh
 
     controls = [
-        "Flechas/Click: Waypoint",
-        "ESPACIO: START/STOP",
-        "X: Cancelar waypoint",
-        "ENTER: Guardar config",
-        "U/J: Activar +/-  I/K: Overshoot +/-",
-        "O/L: Confirmar +/-",
-        "+/_: Zoom in/out",
-        "V/W/C/R: Zoom control",
+        "Click: Waypoint (= posicion pelota)",
+        "ESPACIO: Fase 1 (approach → parar a activate_px)",
+        "D: Fase 2 (dribbler ON + creep a overshoot)",
+        "X: Cancelar  |  ENTER: Guardar config",
+        "U/J: Activar  I/K: Overshoot  O/L: Confirm",
+        "N/M: Creep PWM  9/0: PosThresh",
+        "+/_: Zoom in/out  V/W/C/R: Zoom ctrl",
         "ESC: Salir",
     ]
 

@@ -122,6 +122,11 @@ class DifferentialDriveController:
         self.angle_near = math.radians(ROBOT_ROTATION_ARRIVAL_ANGLE_DEG)  # Donde empieza rampa (rad)
         self.rotation_near_min = ROBOT_ROTATION_NEAR_MIN  # MIN en la rampa (PWM)
 
+        # Override de velocidad lineal máxima (para creep/captura)
+        # Cuando no es None, v se capea a este valor DESPUÉS del perfil de velocidad
+        # pero ANTES de combinar con omega. Así la corrección angular sigue activa.
+        self.max_linear_pwm_override = None
+
         # Límites de velocidad POR ROBOT (cargados de calibración JSON)
         # Se inicializan en _get_robot_speed_limits() la primera vez que se usa cada robot
         self._robot_speed_limits = {}  # {robot_id: (min_speed, max_speed)}
@@ -466,6 +471,10 @@ class DifferentialDriveController:
                 v_raw, distance,
                 min_speed=robot_min_speed, max_speed=robot_max_speed)
 
+            # Override de velocidad lineal (creep mode para captura de balón)
+            if self.max_linear_pwm_override is not None:
+                v = min(v, self.max_linear_pwm_override)
+
             # Guardar términos PID lineales para logging combinado
             p_v_stored = p_v
             i_v_stored = i_v
@@ -482,8 +491,14 @@ class DifferentialDriveController:
             right_speed = v - omega_pwm
 
             # Clipear al rango calibrado del robot
-            left_speed = max(robot_min_speed, min(robot_max_speed, left_speed))
-            right_speed = max(robot_min_speed, min(robot_max_speed, right_speed))
+            if self.max_linear_pwm_override is not None:
+                # Creep mode: piso en 0 (no en robot_min_speed) para que
+                # la corrección angular funcione a velocidades bajas
+                left_speed = max(0, min(robot_max_speed, left_speed))
+                right_speed = max(0, min(robot_max_speed, right_speed))
+            else:
+                left_speed = max(robot_min_speed, min(robot_max_speed, left_speed))
+                right_speed = max(robot_min_speed, min(robot_max_speed, right_speed))
 
             state['last_linear_speed'] = v
             state['last_rotation_speed'] = 0

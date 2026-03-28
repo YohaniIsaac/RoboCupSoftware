@@ -31,6 +31,7 @@ from robot_soccer.config import (
     CAPTURE_ACTIVATE_DISTANCE_PX,
     CAPTURE_OVERSHOOT_PX,
     CAPTURE_CONFIRM_DISTANCE_PX,
+    CAPTURE_CREEP_SPEED_PWM,
 )
 
 log = logging.getLogger(__name__)
@@ -97,6 +98,7 @@ def control_loop_behavior(robot_positions_pipe, frame_pipe, robot_id, serial_por
         'capture_activate_px': CAPTURE_ACTIVATE_DISTANCE_PX,
         'capture_overshoot_px': CAPTURE_OVERSHOOT_PX,
         'capture_confirm_px': CAPTURE_CONFIRM_DISTANCE_PX,
+        'creep_speed_pwm': CAPTURE_CREEP_SPEED_PWM,
     }
 
     # Controlador
@@ -259,6 +261,23 @@ def _update_behavior_controller(controller, behavior_params):
     # MAX_ANGULAR_CORRECTION ya no se usa (reemplazado por Dual PID v+ω)
 
 
+def _set_controller_creep_speed(controller, creep_pwm):
+    """Limita velocidad lineal para fase 2 (creep/captura de balón).
+
+    Usa max_linear_pwm_override del controlador: capea v DESPUÉS del perfil
+    de velocidad pero ANTES de combinar con omega. Así:
+    - Velocidad lineal <= creep_pwm (el robot va lento)
+    - Corrección angular sigue usando robot_max_speed (el PID angular funciona)
+    - El perfil de rampa sigue activo (desacelera al acercarse)
+    """
+    controller.max_linear_pwm_override = creep_pwm
+
+
+def _restore_controller_speed(controller):
+    """Restaura velocidad normal del controlador tras fase 2."""
+    controller.max_linear_pwm_override = None
+
+
 def _draw_behavior_panel(behavior_params, robot, waypoint, robot_available):
     """Dibuja el panel de control de comportamiento."""
     panel = np.zeros((700, 650, 3), dtype=np.uint8)
@@ -355,6 +374,13 @@ def _draw_behavior_panel(behavior_params, robot, waypoint, robot_available):
                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
     y_offset += line_height
     cv2.putText(panel, "  -> Distancia al balon para confirmar captura", (20, y_offset),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.4, (180, 180, 180), 1)
+    y_offset += int(line_height * 1.2)
+
+    cv2.putText(panel, f"Creep speed: {behavior_params['creep_speed_pwm']} PWM (N/M)", (10, y_offset),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+    y_offset += line_height
+    cv2.putText(panel, "  -> Velocidad de motores durante fase 2 (creep)", (20, y_offset),
                cv2.FONT_HERSHEY_SIMPLEX, 0.4, (180, 180, 180), 1)
     y_offset += line_height * 2
 
@@ -522,6 +548,16 @@ def _handle_keyboard_behavior(key, robot, target_waypoint, behavior_params,
         result['action'] = 'update_behavior'
         log.info(f"capture_confirm_px: {behavior_params['capture_confirm_px']}px")
 
+    # Captura: velocidad de creep (N/M ±1 PWM)
+    elif key == ord('n') or key == ord('N'):
+        behavior_params['creep_speed_pwm'] = max(10, behavior_params['creep_speed_pwm'] - 1)
+        result['action'] = 'update_behavior'
+        log.info(f"creep_speed_pwm: {behavior_params['creep_speed_pwm']} PWM")
+    elif key == ord('m') or key == ord('M'):
+        behavior_params['creep_speed_pwm'] = min(60, behavior_params['creep_speed_pwm'] + 1)
+        result['action'] = 'update_behavior'
+        log.info(f"creep_speed_pwm: {behavior_params['creep_speed_pwm']} PWM")
+
     return result
 
 
@@ -542,6 +578,7 @@ def _save_behavior_to_config(behavior_params):
         'CAPTURE_ACTIVATE_DISTANCE_PX': f"{behavior_params['capture_activate_px']}",
         'CAPTURE_OVERSHOOT_PX': f"{behavior_params['capture_overshoot_px']}",
         'CAPTURE_CONFIRM_DISTANCE_PX': f"{behavior_params['capture_confirm_px']}",
+        'CAPTURE_CREEP_SPEED_PWM': f"{behavior_params['creep_speed_pwm']}",
     }
 
     new_lines = []
@@ -614,6 +651,7 @@ def control_loop_behavior_pure(perception_pipe, control_state_pipe, keyboard_pip
         'capture_activate_px': CAPTURE_ACTIVATE_DISTANCE_PX,
         'capture_overshoot_px': CAPTURE_OVERSHOOT_PX,
         'capture_confirm_px': CAPTURE_CONFIRM_DISTANCE_PX,
+        'creep_speed_pwm': CAPTURE_CREEP_SPEED_PWM,
     }
 
     controller = DifferentialDriveController(rf_controller=rf_controller)
@@ -625,6 +663,18 @@ def control_loop_behavior_pure(perception_pipe, control_state_pipe, keyboard_pip
     movement_active = False
     running = True
     robot_stopped = False
+
+    # --- Estado de captura (2 fases) ---
+    # 'idle': sin movimiento
+    # 'approach': fase 1 — moverse hacia waypoint, parar a capture_activate_px
+    # 'capture': fase 2 — dribbler ON + creep hacia overshoot target
+    capture_phase = 'idle'
+    ball_waypoint = None      # posición original del waypoint (simula la pelota)
+    overshoot_target = None   # punto overshoot calculado
+    dribbler_on = False
+    last_dribbler_keepalive = 0.0
+    DRIBBLER_KEEPALIVE = 0.08  # 80ms < firmware timeout 100ms
+    firmware_id = robot_id + 1
 
     last_state_send_time = 0
     STATE_SEND_INTERVAL = 0.04  # ~25 Hz
@@ -664,18 +714,89 @@ def control_loop_behavior_pure(perception_pipe, control_state_pipe, keyboard_pip
                     if command == 'exit':
                         running = False
                     elif command == 'toggle_movement':
-                        movement_active = not movement_active
-                        robot_stopped = False
-                        log.info(f"{'▶️' if movement_active else '⏸️'} Movimiento {'INICIADO' if movement_active else 'PAUSADO'}")
+                        if not movement_active and target_waypoint:
+                            # Iniciar fase 1: approach — parar a capture_activate_px
+                            movement_active = True
+                            capture_phase = 'approach'
+                            ball_waypoint = list(target_waypoint)
+                            overshoot_target = None
+                            controller.position_threshold = behavior_params['capture_activate_px']
+                            robot_stopped = False
+                            log.info("▶️  FASE 1: Approach → parar a %dpx del waypoint",
+                                     behavior_params['capture_activate_px'])
+                        else:
+                            # Pausar — apagar dribbler si estaba activo
+                            movement_active = False
+                            robot_stopped = False
+                            if dribbler_on and rf_controller:
+                                rf_controller.set_dribbler(firmware_id, 0.0)
+                                dribbler_on = False
+                                log.info("Dribbler OFF (pausado)")
+                            if capture_phase == 'capture':
+                                _restore_controller_speed(controller)
+                            capture_phase = 'idle'
+                            overshoot_target = None
+                            controller.position_threshold = behavior_params['position_threshold']
+                            log.info("⏸️  Movimiento PAUSADO")
+                    elif command == 'start_capture':
+                        # Fase 2: dribbler ON + creep a overshoot
+                        if not movement_active and ball_waypoint and robot and capture_phase in ('idle', 'approach'):
+                            # Calcular overshoot: desde robot a través de ball_waypoint
+                            dx = ball_waypoint[0] - robot.x
+                            dy = ball_waypoint[1] - robot.y
+                            dist = math.sqrt(dx * dx + dy * dy)
+                            if dist > 0:
+                                fwd_x = dx / dist
+                                fwd_y = dy / dist
+                                overshoot_target = [
+                                    int(ball_waypoint[0] + fwd_x * behavior_params['capture_overshoot_px']),
+                                    int(ball_waypoint[1] + fwd_y * behavior_params['capture_overshoot_px'])
+                                ]
+                                target_waypoint = list(overshoot_target)
+                                capture_phase = 'capture'
+                                movement_active = True
+                                robot_stopped = False
+                                controller.position_threshold = behavior_params['position_threshold']
+                                # Forzar velocidad baja para creep
+                                _set_controller_creep_speed(controller, behavior_params['creep_speed_pwm'])
+                                # Activar dribbler
+                                if rf_controller:
+                                    rf_controller.set_dribbler(firmware_id, 1.0)
+                                    dribbler_on = True
+                                    last_dribbler_keepalive = time.time()
+                                log.info("▶️  FASE 2: Capture | dribbler ON | overshoot=(%d,%d) | dist_final≈%dpx",
+                                         overshoot_target[0], overshoot_target[1],
+                                         max(0, behavior_params['capture_overshoot_px'] - behavior_params['position_threshold']))
+                            else:
+                                log.warning("Robot ya está en el waypoint, no se puede calcular dirección")
+                        elif capture_phase == 'capture':
+                            log.info("Ya en fase capture")
+                        else:
+                            log.warning("Necesitas un waypoint y completar fase 1 primero")
                     elif command == 'cancel_waypoint':
                         target_waypoint = None
+                        ball_waypoint = None
+                        overshoot_target = None
                         movement_active = False
                         robot_stopped = False
+                        if capture_phase == 'capture':
+                            _restore_controller_speed(controller)
+                        capture_phase = 'idle'
+                        controller.position_threshold = behavior_params['position_threshold']
+                        if dribbler_on and rf_controller:
+                            rf_controller.set_dribbler(firmware_id, 0.0)
+                            dribbler_on = False
                         log.info("❌ Waypoint cancelado")
                     elif command == 'set_waypoint':
                         waypoint = cmd.get('waypoint')
                         if waypoint:
                             target_waypoint = list(waypoint)
+                            ball_waypoint = list(waypoint)
+                            overshoot_target = None
+                            capture_phase = 'idle'
+                            if dribbler_on and rf_controller:
+                                rf_controller.set_dribbler(firmware_id, 0.0)
+                                dribbler_on = False
                             log.info(f"🎯 Waypoint establecido: ({target_waypoint[0]}, {target_waypoint[1]})")
                     elif command == 'move_waypoint':
                         delta = cmd.get('delta', [0, 0])
@@ -684,6 +805,7 @@ def control_loop_behavior_pure(perception_pipe, control_state_pipe, keyboard_pip
                         if target_waypoint:
                             target_waypoint[0] += delta[0]
                             target_waypoint[1] += delta[1]
+                            ball_waypoint = list(target_waypoint)
                             log.info(f"⬆️⬇️⬅️➡️ Waypoint → ({target_waypoint[0]}, {target_waypoint[1]})")
                     elif command == 'adjust_threshold':
                         param = cmd.get('param')
@@ -697,6 +819,7 @@ def control_loop_behavior_pure(perception_pipe, control_state_pipe, keyboard_pip
                                 'capture_activate_px': (10, 100),
                                 'capture_overshoot_px': (0, 50),
                                 'capture_confirm_px': (5, 50),
+                                'creep_speed_pwm': (10, 60),
                             }
                             lo, hi = _param_bounds.get(param, (0, 9999))
                             behavior_params[param] = max(lo, min(hi, behavior_params[param] + delta))
@@ -712,16 +835,42 @@ def control_loop_behavior_pure(perception_pipe, control_state_pipe, keyboard_pip
                 except Exception as e:
                     log.error(f"Error recibiendo comando: {e}")
 
+            # --- Dribbler keepalive (cada 80ms cuando activo) ---
+            if dribbler_on and rf_controller and current_time - last_dribbler_keepalive >= DRIBBLER_KEEPALIVE:
+                rf_controller.set_dribbler(firmware_id, 1.0)
+                last_dribbler_keepalive = current_time
+
             if movement_active and robot and target_waypoint:
                 reached = controller.move_to_position(robot, tuple(target_waypoint))
                 if reached:
-                    log.info(f"✅ Waypoint alcanzado en ({target_waypoint[0]}, {target_waypoint[1]})")
-                    target_waypoint = None
-                    movement_active = False
-                    robot_stopped = False
+                    if capture_phase == 'approach':
+                        log.info("✅ FASE 1 completada — robot a %dpx del waypoint. Presiona D para fase 2.",
+                                 behavior_params['capture_activate_px'])
+                        movement_active = False
+                        robot_stopped = False
+                    elif capture_phase == 'capture':
+                        # Fase 2 completada — restaurar velocidades normales
+                        _restore_controller_speed(controller)
+                        dist_to_ball = 0
+                        if ball_waypoint:
+                            bx = ball_waypoint[0] - robot.x
+                            by = ball_waypoint[1] - robot.y
+                            dist_to_ball = math.sqrt(bx * bx + by * by)
+                        log.info("✅ FASE 2 completada — dist al waypoint=%.1fpx (confirm=%dpx)",
+                                 dist_to_ball, behavior_params['capture_confirm_px'])
+                        if dist_to_ball < behavior_params['capture_confirm_px']:
+                            log.info("✅ CAPTURA sería CONFIRMADA a esta distancia")
+                        else:
+                            log.info("⚠️  CAPTURA NO confirmada — ajustar overshoot (I/K) o confirm (O/L)")
+                        movement_active = False
+                        robot_stopped = False
+                    else:
+                        log.info(f"✅ Waypoint alcanzado en ({target_waypoint[0]}, {target_waypoint[1]})")
+                        target_waypoint = None
+                        movement_active = False
+                        robot_stopped = False
             else:
                 if robot and robot_available and not robot_stopped:
-                    firmware_id = robot_id + 1
                     rf_controller.set_motors(firmware_id, 0, 0)
                     robot_stopped = True
 
@@ -770,6 +919,10 @@ def control_loop_behavior_pure(perception_pipe, control_state_pipe, keyboard_pip
                         'angle_error_deg': angle_error_deg,
                         'target_heading_deg': target_heading_deg,
                         'movement_mode': movement_mode,
+                        'capture_phase': capture_phase,
+                        'ball_waypoint': ball_waypoint,
+                        'overshoot_target': overshoot_target,
+                        'dribbler_on': dribbler_on,
                         'timestamp': current_time
                     })
                     last_state_send_time = current_time
@@ -779,12 +932,13 @@ def control_loop_behavior_pure(perception_pipe, control_state_pipe, keyboard_pip
             time.sleep(0.01)
 
     finally:
-        if robot and robot_available and rf_controller:
-            firmware_id = robot_id + 1
-            rf_controller.set_motors(firmware_id, 0, 0)
-            log.info("🛑 Robot detenido")
-
         if rf_controller:
+            if dribbler_on:
+                rf_controller.set_dribbler(firmware_id, 0.0)
+                log.info("Dribbler OFF (cleanup)")
+            if robot and robot_available:
+                rf_controller.set_motors(firmware_id, 0, 0)
+                log.info("🛑 Robot detenido")
             rf_controller.shutdown()
             log.info("🔌 Conexión RF cerrada")
 

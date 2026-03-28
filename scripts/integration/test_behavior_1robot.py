@@ -39,7 +39,7 @@ sys.path.insert(0, str(ROOT_DIR / "scripts"))
 from robot_soccer.config import (
     CAMERA_PERSPECTIVE_HEIGHT, CAMERA_PERSPECTIVE_WIDTH,
     CAMERA_PERSPECTIVE_ENABLED, CAMERA_PERSPECTIVE_SRC_POINTS,
-    RANGO_COLOR_NARANJO, FIELD_CAM, BALL_CAPTURE_DISTANCE,
+    RANGO_COLOR_NARANJO, FIELD_CAM, CAPTURE_CONFIRM_DISTANCE_PX,
 )
 from robot_soccer.utils.camera_utils import get_camera_index
 
@@ -318,16 +318,16 @@ def decision_process(perception_pipe, viz_state_pipe, keyboard_pipe,
             # --- Actualizar has_ball por proximidad (con histéresis) ---
             # Sin histéresis el flag se resetea cada frame cuando el robot rota
             # ligeramente al orientarse al arco, rompiendo orient_to_goal.
-            # Umbral captura: BALL_CAPTURE_DISTANCE (25px)
-            # Umbral liberación: 2x (50px) — permite rotación sin perder la pelota
+            # Umbral captura: CAPTURE_CONFIRM_DISTANCE_PX (mismo que BT)
+            # Umbral liberación: 2x — permite rotación sin perder la pelota
             distance = None
             if player_initialized and ball_initialized:
                 distance = float(player.distance_to_ball(ball))
-                if distance < BALL_CAPTURE_DISTANCE:
+                if distance < CAPTURE_CONFIRM_DISTANCE_PX:
                     player._has_ball = True
-                elif distance > BALL_CAPTURE_DISTANCE * 2:
+                elif distance > CAPTURE_CONFIRM_DISTANCE_PX * 2:
                     player._has_ball = False
-                # Entre 25-50px: mantener valor actual (zona de histéresis)
+                # Zona de histéresis: mantener valor actual
 
             # --- Actualizar contexto del juego ---
             if player_initialized and ball_initialized:

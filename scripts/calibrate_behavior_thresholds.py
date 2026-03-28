@@ -41,9 +41,15 @@ Controles:
     CORRECCIÓN ANGULAR (±1 PWM por pulsación):
     ,/.: Disminuir/Aumentar max_angular_correction_pwm
 
+    CALIBRACIÓN DE CAPTURA (±1 px por pulsación):
+    U/J: Aumentar/Disminuir capture_activate_distance_px
+    I/K: Aumentar/Disminuir capture_overshoot_px
+    O/L: Aumentar/Disminuir capture_confirm_distance_px
+
     CONTROL DE MOVIMIENTO:
-    ESPACIO: START/STOP - Iniciar o pausar movimiento del robot
-    X: Cancelar waypoint actual y detener robot
+    ESPACIO: Fase 1 - Robot avanza y para a capture_activate_px del waypoint
+    D: Fase 2 - Activa dribbler + creep hacia overshoot target
+    X: Cancelar waypoint y apagar dribbler
 
     OTROS CONTROLES:
     ENTER: Guardar parámetros a config.py
