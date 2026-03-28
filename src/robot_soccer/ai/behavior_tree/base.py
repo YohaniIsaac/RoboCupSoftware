@@ -511,6 +511,78 @@ class ActionNode(BehaviorNode):
         return status
 
 
+class StatefulActionNode(BehaviorNode):
+    """Nodo acción con ciclo de vida stateful (patrón BehaviorTree.CPP).
+
+    A diferencia de ActionNode (que llama action_func en cada tick),
+    StatefulActionNode distingue entre dos fases:
+
+      on_start_func(blackboard)   -> llamada UNA SOLA VEZ al activarse.
+                                     Aquí se emite el comando RF/PID.
+                                     Debe retornar NodeStatus.RUNNING normalmente.
+
+      on_running_func(blackboard) -> llamada en cada tick subsecuente mientras
+                                     el nodo esté RUNNING. Solo monitorea
+                                     completación; NO reemite el comando.
+                                     Retorna RUNNING, SUCCESS o FAILURE.
+
+    Esto evita que el nodo reemita comandos en cada tick (cada 10-100 ms),
+    dando tiempo al PID de completar rotaciones/movimientos entre decisiones
+    del árbol de comportamiento.
+
+    Referencia: BehaviorTree.CPP StatefulActionNode
+    (https://www.behaviortree.dev/docs/tutorial-advanced/asynchronous_nodes/)
+    """
+
+    def __init__(self, on_start_func, on_running_func=None, name="StatefulAction"):
+        """Inicializa el nodo acción stateful.
+
+        Args:
+            on_start_func (callable): Función llamada una vez al activarse.
+                Signature: (blackboard) -> NodeStatus
+            on_running_func (callable, optional): Función llamada cada tick
+                mientras RUNNING. Si None, siempre retorna RUNNING.
+                Signature: (blackboard) -> NodeStatus
+            name (str): Nombre del nodo.
+        """
+        super().__init__(name)
+        self._on_start_func = on_start_func
+        self._on_running_func = on_running_func or (lambda bb: NodeStatus.RUNNING)
+        self._started = False
+
+    def tick(self, blackboard):
+        """Ejecuta el nodo con ciclo de vida stateful.
+
+        Llama on_start_func solo en la primera activación.
+        Llama on_running_func en cada tick subsecuente mientras RUNNING.
+        """
+        if not self._started or self.status != NodeStatus.RUNNING:
+            # Primera activación o reinicio después de completar
+            log.info("[StatefulAction:%s] on_start → emitiendo comando (primera vez o reinicio)", self.name)
+            self._started = True
+            result = self._on_start_func(blackboard)
+        else:
+            # Ya estaba RUNNING: solo monitorear, no reemitir comando
+            log.debug("[StatefulAction:%s] on_running → monitoreando completación", self.name)
+            result = self._on_running_func(blackboard)
+
+        if result != NodeStatus.RUNNING:
+            # Completado (SUCCESS o FAILURE): resetear para próxima activación
+            self._started = False
+
+        self.status = result
+
+        if result != NodeStatus.FAILURE:
+            global_tracer.set_next_action(self.name)
+        global_tracer.add_node_result(self.name, 'StatefulActionNode', result)
+
+        return result
+
+    def _process(self, blackboard):
+        # No se usa — tick() se sobreescribe directamente
+        return self._on_start_func(blackboard)
+
+
 def get_global_tracer():
     """Obtiene la instancia global del tracer.
 

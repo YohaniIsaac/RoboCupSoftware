@@ -62,75 +62,67 @@ class RobotCommandProtocol:
     def format_kick_command(robot_id, power=255):
         """Formatea un comando para activar el mecanismo de pateo.
 
-        Genera un comando para activar el solenoides o motor de pateo
-        del robot con la potencia especificada. La potencia se limita
-        automáticamente al rango válido.
+        El firmware activa el solenoide durante TIEMPO_PATEO_MS ms (fijo en config.h).
+        El parámetro power se ignora — el hardware no soporta potencia variable.
+
+        Protocolo transmisor: "R[id]P"  →  ejecutarComando('P') en el robot.
 
         Args:
             robot_id (int): Identificador único del robot (1-4).
-            power (int, optional): Potencia del pateo (0-255).
-                Defaults to 255 (potencia máxima).
+            power (int, optional): Ignorado. Solo existe por compatibilidad de interfaz.
 
         Returns:
-            str: Comando formateado en formato "K,id,power".
+            str: Comando formateado "R{id}P".
 
         Example:
-            >>> RobotCommandProtocol.format_kick_command(1, 200)
-            'K,1,200'
+            >>> RobotCommandProtocol.format_kick_command(1)
+            'R1P'
         """
-        # Formato: K,id,power\n
-        # Ejemplo: K,1,255\n
-
-        power_val = max(0, min(255, int(power)))
-
-        return f"K,{robot_id},{power_val}"
+        return f"R{robot_id}P"
 
     @staticmethod
     def format_dribbler_command(robot_id, power):
         """Formatea un comando para controlar el dribbler.
 
-        Genera un comando para activar o desactivar el mecanismo dribbler
-        que mantiene la pelota controlada. Una potencia de 0 desactiva
-        el dribbler, valores mayores lo activan con diferentes intensidades.
+        El dribbler es ON/OFF — el hardware usa digitalWrite, no PWM.
+        power > 0 activa el motor DC, power == 0 lo detiene.
+
+        Protocolo transmisor:
+          "R[id]D" → ejecutarComando('D') → activarMotorDC()   (ON)
+          "R[id]S" → ejecutarComando('S') → detenerMotorDC()   (OFF)
 
         Args:
             robot_id (int): Identificador único del robot (1-4).
-            power (int): Potencia del dribbler (0-255).
-                0 para desactivar, valores mayores para diferentes intensidades.
+            power (int): 0 para desactivar, cualquier valor > 0 para activar.
 
         Returns:
-            str: Comando formateado en formato "D,id,power".
+            str: Comando formateado "R{id}D" (ON) o "R{id}S" (OFF).
 
         Example:
-            >>> RobotCommandProtocol.format_dribbler_command(1, 150)
-            'D,1,150'
+            >>> RobotCommandProtocol.format_dribbler_command(1, 255)
+            'R1D'
+            >>> RobotCommandProtocol.format_dribbler_command(1, 0)
+            'R1S'
         """
-        # Formato: D,id,power\n
-        # Ejemplo: D,1,200\n
-
-        power_val = max(0, min(255, int(power)))
-
-        return f"D,{robot_id},{power_val}"
+        if int(power) > 0:
+            return f"R{robot_id}D"  # Activar motor DC (dribbler ON)
+        return f"R{robot_id}S"      # Detener motor DC (dribbler OFF)
 
     @staticmethod
     def format_stop_command(robot_id):
-        """Formatea un comando de detención de emergencia.
+        """Formatea un comando de detención de motores de tracción.
 
-        Genera un comando para detener inmediatamente todos los motores
-        del robot especificado. Esto incluye motores de tracción, dribbler
-        y cualquier otro actuador activo.
+        Envía velocidad 0,0 vía el comando M para detener ambos motores.
+        Usa el formato motor porque el transmisor solo acepta M y R[id][cmd].
 
         Args:
             robot_id (int): Identificador único del robot (1-4).
 
         Returns:
-            str: Comando formateado en formato "S,id".
+            str: Comando formateado "M,{id},0,0".
 
         Example:
             >>> RobotCommandProtocol.format_stop_command(1)
-            'S,1'
+            'M,1,0,0'
         """
-        # Formato: S,id\n
-        # Ejemplo: S,1\n
-
-        return f"S,{robot_id}"
+        return f"M,{robot_id},0,0"

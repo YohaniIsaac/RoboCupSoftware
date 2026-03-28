@@ -38,6 +38,7 @@ void detenerMovimiento() {
   SoftPWMSet(MOTOR_1B_PIN, 0);
   SoftPWMSet(MOTOR_2A_PIN, 0);
   SoftPWMSet(MOTOR_2B_PIN, 0);
+  detenerMotorDC();  // Dribbler requiere señal constante igual que las ruedas
 }
 
 void activarSolenoide() {

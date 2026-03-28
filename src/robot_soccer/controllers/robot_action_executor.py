@@ -103,8 +103,8 @@ class RobotActionExecutor:
 
             # PASO 2: ACTIVAR MOTOR DE CAPTURA FÍSICAMENTE
             if self.rf_controller:
-                # ACTIVAR DRIBBLER/MOTOR EN ROBOTS REALES
-                self.rf_controller.set_dribbler(player.id, 1.0)  # Potencia máxima
+                # Firmware usa IDs 1-based (player.id es 0-based)
+                self.rf_controller.set_dribbler(player.id + 1, 1.0)
                 log.info("Robot %i: Motor de captura ACTIVADO", player.id)
 
             # PASO 3: Acercarse un poco más con motor activo
@@ -234,10 +234,10 @@ class RobotActionExecutor:
 
         # Enviar comando de pateo si hay controlador RF
         if self.rf_controller:
-            # Desactivar dribbler
-            self.rf_controller.set_dribbler(player.id, 0)
-            # Activar mecanismo de pateo
-            self.rf_controller.kick(player.id, power)
+            # Firmware usa IDs 1-based (player.id es 0-based)
+            firmware_id = player.id + 1
+            self.rf_controller.set_dribbler(firmware_id, 0)   # apagar dribbler
+            self.rf_controller.kick(firmware_id, power)        # disparar
 
         # Aplicar velocidad a la pelota en la simulación
         if hasattr(ball, 'dx') and hasattr(ball, 'dy'):

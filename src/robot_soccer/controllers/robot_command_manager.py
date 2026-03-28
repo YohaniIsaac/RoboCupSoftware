@@ -1,5 +1,6 @@
 import time
 import logging
+import numpy as np
 from robot_soccer.config import FIELD_SIM
 from robot_soccer.controllers.differential_drive import DifferentialDriveController
 from robot_soccer.controllers.robot_action_executor import RobotActionExecutor
@@ -97,11 +98,11 @@ class RobotCommandManager:
             Es seguro llamar este método múltiples veces.
         """
         if self.rf_controller:
-            # Detener todos los robots
             for player in self.team_players:
-                self.rf_controller.stop_robot(player.id)
+                firmware_id = player.id + 1
+                self.rf_controller.set_dribbler(firmware_id, 0.0)  # apagar dribbler
+                self.rf_controller.stop_robot(firmware_id)
 
-            # Cerrar comunicación
             self.rf_controller.shutdown()
 
     def execute_commands(self):
@@ -147,14 +148,14 @@ class RobotCommandManager:
                                          player.id, action['target_angle'])
 
                 elif action['type'] == 'capture_ball':
-                    # Movimiento para capturar la pelota
-                    is_completed = self.action_executors[player.id].execute_capture_ball(
-                        player, self.ball
-                    )
-
-                    if is_completed:
-                        del self.actions_in_progress[player.id]
-                        log.info("Robot %i: Pelota capturada", player.id)
+                    # El dribbler ya fue activado en command_manager.capture_ball().
+                    # La lógica de orientación, acercamiento y confirmación la gestiona
+                    # el nodo capture_ball del árbol de comportamiento.
+                    # execute_capture_ball() tiene un bug de unidades de ángulo cuando
+                    # se usa junto con el BT (player.angle en radianes vs grados).
+                    # Marcar como completado inmediatamente para liberar el slot de acción.
+                    del self.actions_in_progress[player.id]
+                    log.debug("Robot %i: Accion capture_ball liberada (dribbler activo)", player.id)
 
                 elif action['type'] == 'kick_ball':
                     # Patear la pelota
@@ -197,10 +198,25 @@ class RobotCommandManager:
         Note:
             La acción se ejecuta de forma asíncrona. Use execute_commands()
             para procesar el movimiento en cada frame.
+            Si ya hay un movimiento en curso hacia una posición similar (< 20px),
+            el comando se ignora para no interrumpir al PID mid-ejecución.
 
         Example:
             >>> manager.move_robot_to(1, (500, 300), target_angle=90)
         """
+        # Guard: no sobreescribir si ya hay un movimiento en curso hacia el mismo target.
+        # Esto evita que el BT (que tickea cada 100ms) interrumpa al PID
+        # antes de que complete una rotación o movimiento.
+        existing = self.actions_in_progress.get(player_id)
+        if existing and existing['type'] == 'move':
+            delta = np.linalg.norm(
+                np.array(existing['target_pos'][:2]) - np.array(target_pos[:2])
+            )
+            if delta < 20:
+                log.debug("[Guard:move] Robot %i: comando ignorado (mismo target, delta=%.1fpx)", player_id, delta)
+                return  # Mismo destino, dejar que el PID continúe
+        log.debug("[Guard:move] Robot %i: nuevo target aceptado → %s", player_id, target_pos)
+
         self.actions_in_progress[player_id] = {
             'type': 'move',
             'target_pos': target_pos,
@@ -219,10 +235,19 @@ class RobotCommandManager:
         Note:
             El ángulo se normaliza automáticamente al rango -180 a 180.
             La rotación se ejecuta de forma asíncrona.
+            Si ya hay una rotación en curso hacia el mismo ángulo (< 5°),
+            el comando se ignora para no interrumpir al PID.
 
         Example:
             >>> manager.rotate_robot_to(1, 90)  # Girar hacia arriba
         """
+        # Guard: no sobreescribir rotación en curso si el ángulo es similar
+        existing = self.actions_in_progress.get(player_id)
+        if existing and existing['type'] == 'rotate':
+            angle_diff = abs((target_angle - existing['target_angle'] + 180) % 360 - 180)
+            if angle_diff < 5:
+                return  # Misma rotación, dejar que el PID continúe
+
         self.actions_in_progress[player_id] = {
             'type': 'rotate',
             'target_angle': target_angle
@@ -248,8 +273,9 @@ class RobotCommandManager:
         """
         # ACTIVAR MOTOR DE CAPTURA EN ROBOTS REALES
         if self.rf_controller:
-            # Activar dribbler con potencia alta para capturar
-            success = self.rf_controller.set_dribbler(player_id, 1.0)
+            # Firmware usa IDs 1-based (player_id es 0-based)
+            firmware_id = player_id + 1
+            success = self.rf_controller.set_dribbler(firmware_id, 1.0)
             if success:
                 log.info("Robot %i: Motor de captura ACTIVADO vía RF", player_id)
             else:

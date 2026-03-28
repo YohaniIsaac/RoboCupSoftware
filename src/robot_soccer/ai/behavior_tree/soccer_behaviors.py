@@ -5,16 +5,20 @@ estrategias y tácticas de los robots en el juego de fútbol.
 """
 
 import logging
+import time
 
 import numpy as np
+
+log = logging.getLogger(__name__)
 from robot_soccer.ai.behavior_tree.utils import calculate_ball_approach_position
 from robot_soccer.config import (
     ROL_ATACANTE, ROL_DEFENSIVO, FIELD_SIM,
     BT_SHOT_DISTANCE_RATIO, BT_PASS_MIN_RATIO, BT_PASS_MAX_RATIO,
     BT_CAPTURE_RANGE_RATIO, BT_APPROACH_RATIO, BT_CAPTURE_ACTIVATE_RATIO,
     BT_CAPTURE_CONFIRM_RATIO, BT_INTERCEPT_RATIO, BT_SUPPORT_DISTANCE_RATIO,
-    BT_DEFENDER_WAIT_RATIO, BT_DRIBBLE_GOAL_RATIO,
+    BT_DEFENDER_WAIT_RATIO, BT_DRIBBLE_GOAL_RATIO, BT_DRIBBLE_SPACING_RATIO,
     BT_DEFENSIVE_ARRIVAL_RATIO, BT_ATTACKER_PRIORITY_MARGIN_RATIO,
+    ROBOT_POSITION_THRESHOLD,
 )
 
 from .base import (
@@ -23,6 +27,7 @@ from .base import (
     SelectorNode,
     ConditionNode,
     ActionNode,
+    StatefulActionNode,
     InverterNode,
 )
 from .utils import (
@@ -383,72 +388,181 @@ def is_pass_possible(blackboard):
 # ACCIONES ESPECÍFICAS PARA FÚTBOL
 
 
-def move_to_ball(blackboard):
-    """Mover el jugador hacia una posición estratégica individualizada cerca de la pelota.
+def _move_to_ball_start(blackboard):
+    """Fase on_start de move_to_ball: emite comando de ir directo a la pelota UNA VEZ.
 
-    Cada robot calcula su punto óptimo considerando el arco enemigo y su posición actual.
-
-    Args:
-        blackboard: Pizarra con el estado del juego
-
-    Returns:
-        NodeStatus: Estado de la ejecución (SUCCESS, RUNNING, FAILURE)
+    Estrategia "capture first": ir directamente a la pelota sin posición de
+    aproximación. La orientación al arco se hace DESPUÉS de capturar.
     """
-    # Verificar que existe el gestor de comandos
     if not hasattr(blackboard, "command_manager"):
-        blackboard.logger.warning(
-            "No command manager found in blackboard. Action may not work properly."
-        )
         return NodeStatus.FAILURE
 
-    # Obtener posiciones
+    ball_pos = blackboard.ball.get_position()
+    target_pos = (int(ball_pos[0]), int(ball_pos[1]))
+
+    # Guardar target en blackboard para que on_running pueda consultarlo
+    blackboard._move_to_ball_target = target_pos
+
+    # Emitir comando: el guard en move_robot_to evitará sobreescritura si target es igual
+    blackboard.command_manager.move_robot_to(blackboard.player.id, target_pos)
+    return NodeStatus.RUNNING
+
+
+def _move_to_ball_running(blackboard):
+    """Fase on_running de move_to_ball: monitorea completación sin reemitir comandos.
+
+    Llamada en cada tick mientras el nodo está RUNNING.
+    Solo comprueba si el PID terminó el movimiento o si la pelota se alejó.
+    """
+    player_id = blackboard.player.id
     player_pos = blackboard.player.get_position()
     ball_pos = blackboard.ball.get_position()
+    dist_to_ball = np.linalg.norm(ball_pos - player_pos)
 
-    # CLAVE: Obtener arco enemigo según el equipo del robot
-    opponent_goal_pos = blackboard.opponent_goal_pos
-
-    # CÁLCULO INDIVIDUALIZADO: Cada robot calcula SU punto óptimo
-    approach_distance = 45
-    target_pos = calculate_ball_approach_position(
-        player_pos,  # Posición ACTUAL del robot
-        ball_pos,
-        opponent_goal_pos,  # Arco enemigo para alineación
-        approach_distance,
-        blackboard.team,  # Equipo del robot
-        field=blackboard.field,
-    )
-
-    # Registrar movimiento planificado para debugging
-    if hasattr(blackboard, "tracer") and hasattr(
-        blackboard.tracer, "set_planned_movement"
-    ):
-        blackboard.tracer.set_planned_movement(
-            blackboard.player.id,
-            target_pos,
-            "move_to_ball_individualized",
-            {
-                "player_pos": player_pos,
-                "opponent_goal": opponent_goal_pos,
-                "approach_distance": approach_distance,
-                "ball_position": ball_pos,
-                "team": blackboard.team,
-            },
+    # Si el PID completó el movimiento (acción eliminada de actions_in_progress)
+    if player_id not in blackboard.command_manager.actions_in_progress:
+        # Umbral: max del ratio calibrado para simulación y el threshold real del PID + margen.
+        # En cámara (640px): ratio→25px < ROBOT_POSITION_THRESHOLD(32px) → usa 38px.
+        # En simulación (1500px): ratio→60px > 38px → usa 60px. Funciona en ambos.
+        capture_range = max(
+            blackboard.field.ratio_to_px(BT_CAPTURE_RANGE_RATIO),
+            ROBOT_POSITION_THRESHOLD + 6
         )
 
-    # Ordenar movimiento al gestor de comandos
-    blackboard.command_manager.move_robot_to(blackboard.player.id, target_pos)
-
-    # Verificar si hemos llegado lo suficientemente cerca del objetivo
-    distance_to_target = np.linalg.norm(np.array(player_pos) - np.array(target_pos))
-    if distance_to_target < blackboard.field.ratio_to_px(BT_APPROACH_RATIO):
-        # Si llegamos al punto objetivo, verificar distancia a la pelota
-        distance_to_ball = blackboard.player.distance_to_ball(blackboard.ball)
-        if distance_to_ball < blackboard.field.ratio_to_px(BT_CAPTURE_RANGE_RATIO):
+        if dist_to_ball < capture_range:
+            # Robot llegó tan cerca como el PID puede → pasar a capture_ball
             return NodeStatus.SUCCESS
 
-    # Continuar ejecutando la acción
+        # La pelota se alejó del target → recalcular
+        return _move_to_ball_start(blackboard)
+
+    # Si la pelota se alejó mucho del target actual (pelota en movimiento), recalcular
+    if hasattr(blackboard, '_move_to_ball_target'):
+        target = np.array(blackboard._move_to_ball_target)
+        dist_target_to_ball = np.linalg.norm(ball_pos - target)
+        if dist_target_to_ball > 80:
+            # La pelota se movió >80px del target → recalcular
+            return _move_to_ball_start(blackboard)
+
+    # Movimiento todavía en progreso → esperar
     return NodeStatus.RUNNING
+
+
+def move_to_ball(blackboard):
+    """Compatibilidad: wrapper stateless de move_to_ball para uso directo.
+
+    Preferir create_move_to_ball_node() para uso en árboles de comportamiento,
+    ya que StatefulActionNode evita reemitir comandos en cada tick.
+    """
+    return _move_to_ball_start(blackboard)
+
+
+def create_move_to_ball_node():
+    """Crea un nodo StatefulActionNode para move_to_ball.
+
+    Usar este factory en lugar de ActionNode(move_to_ball, ...) para evitar
+    que el BT reemita comandos RF en cada tick (problema de oscilación PID).
+    """
+    return StatefulActionNode(
+        _move_to_ball_start,
+        _move_to_ball_running,
+        name="MoverHaciaPelota"
+    )
+
+
+# === ORIENT TO GOAL (capture first, orient second) ===
+
+def _orient_to_goal_start(blackboard):
+    """on_start: ordena rotación hacia el arco rival. Se llama UNA VEZ."""
+    if not hasattr(blackboard, "command_manager"):
+        return NodeStatus.FAILURE
+
+    # Solo orientar si tenemos la pelota
+    if not blackboard.player.has_ball():
+        return NodeStatus.FAILURE
+
+    player_pos = blackboard.player.get_position()
+    goal_pos = blackboard.opponent_goal_pos
+
+    # Calcular ángulo al arco rival (en grados, convención del BT)
+    angle_to_goal = float(np.degrees(
+        np.arctan2(goal_pos[1] - player_pos[1], goal_pos[0] - player_pos[0])
+    ))
+
+    current_angle = blackboard.player.angle
+    angle_diff = abs((angle_to_goal - current_angle + 180) % 360 - 180)
+
+    log.info("[orient_goal] Robot %d | actual=%.1f° | objetivo=%.1f° | diff=%.1f°",
+             blackboard.player.id, current_angle, angle_to_goal, angle_diff)
+
+    # Ya orientado
+    if angle_diff <= 15:
+        blackboard.last_action = "oriented_to_goal"
+        log.info("[orient_goal] Ya orientado → SUCCESS")
+        return NodeStatus.SUCCESS
+
+    # Rotación > 60°: rotar en el lugar empujaría la pelota lejos del dribbler.
+    # Mejor pasar directamente a dribble_forward/shoot que manejan la orientación
+    # con movimiento (la corrección angular del PID se aplica mientras avanza).
+    if angle_diff > 60:
+        blackboard.last_action = "skip_orient_large_angle"
+        log.info("[orient_goal] Rotación %.1f° > 60° — saltando orient, dribble manejará corrección", angle_diff)
+        return NodeStatus.SUCCESS
+
+    # Rotación pequeña (15°-60°): orientar en el lugar es seguro
+    blackboard._orient_start_time = time.time()
+    blackboard.command_manager.rotate_robot_to(blackboard.player.id, angle_to_goal)
+    blackboard.last_action = "orienting_to_goal"
+    log.info("[orient_goal] Rotando %.1f° hacia arco", angle_diff)
+    return NodeStatus.RUNNING
+
+
+def _orient_to_goal_running(blackboard):
+    """on_running: monitorea rotación. Verifica timeout (2s) y pérdida de pelota."""
+    ORIENT_TIMEOUT_S = 2.0
+
+    # Si perdimos la pelota durante la rotación, abortar
+    if not blackboard.player.has_ball():
+        return NodeStatus.FAILURE
+
+    # Verificar timeout
+    start_time = getattr(blackboard, '_orient_start_time', None)
+    if start_time is not None and (time.time() - start_time) > ORIENT_TIMEOUT_S:
+        return NodeStatus.FAILURE
+
+    # Verificar si ya estamos orientados
+    player_pos = blackboard.player.get_position()
+    goal_pos = blackboard.opponent_goal_pos
+    angle_to_goal = float(np.degrees(
+        np.arctan2(goal_pos[1] - player_pos[1], goal_pos[0] - player_pos[0])
+    ))
+
+    current_angle = blackboard.player.angle
+    angle_diff = abs((angle_to_goal - current_angle + 180) % 360 - 180)
+
+    if angle_diff <= 15:
+        blackboard.last_action = "oriented_to_goal"
+        return NodeStatus.SUCCESS
+
+    # Si el PID completó la rotación pero no estamos alineados, reemitir
+    player_id = blackboard.player.id
+    if player_id not in blackboard.command_manager.actions_in_progress:
+        blackboard.command_manager.rotate_robot_to(player_id, angle_to_goal)
+
+    return NodeStatus.RUNNING
+
+
+def create_orient_to_goal_node():
+    """Crea un nodo StatefulActionNode para orientarse al arco rival.
+
+    Se usa después de capture_ball: el robot rota en sitio para encarar
+    el arco contrario antes de disparar o avanzar.
+    """
+    return StatefulActionNode(
+        _orient_to_goal_start,
+        _orient_to_goal_running,
+        name="OrientarAlArco"
+    )
 
 
 def capture_ball(blackboard):
@@ -479,36 +593,46 @@ def capture_ball(blackboard):
     # Calcular distancia a la pelota
     distance_to_ball = blackboard.player.distance_to_ball(blackboard.ball)
 
-    if distance_to_ball < blackboard.field.ratio_to_px(BT_CAPTURE_ACTIVATE_RATIO):
-        # PASO 1: Orientarse hacia la pelota
+    # Umbral unificado: mismo valor que move_to_ball usa para retornar SUCCESS.
+    # Garantiza que cuando move_to_ball pasa el control, capture_ball SIEMPRE activa.
+    # cámara (640px): max(21, 38)=38px > PID_stop(32px) ✓
+    # simulación (1500px): max(50, 38)=50px (valor original) ✓
+    capture_px = max(
+        blackboard.field.ratio_to_px(BT_CAPTURE_ACTIVATE_RATIO),
+        ROBOT_POSITION_THRESHOLD + 6
+    )
+
+    log.info("[capture_ball] Robot %d | dist=%.1fpx | umbral=%.0fpx | has_ball=%s",
+             blackboard.player.id, distance_to_ball, capture_px,
+             blackboard.player.has_ball())
+
+    if distance_to_ball < capture_px:
+        # PASO 1: Orientarse hacia la pelota (solo para ajustes pequeños)
         angle_to_ball = np.degrees(
             np.arctan2(ball_pos[1] - player_pos[1], ball_pos[0] - player_pos[0])
         )
-
         current_angle = blackboard.player.angle
         angle_diff = abs((angle_to_ball - current_angle + 180) % 360 - 180)
 
-        if angle_diff > 10:  # Necesita orientarse mejor
+        if angle_diff > 10:
+            log.info("[capture_ball] Orientando hacia pelota | diff=%.1f°", angle_diff)
             blackboard.command_manager.rotate_robot_to(
                 blackboard.player.id, angle_to_ball
             )
             return NodeStatus.RUNNING
 
-        # PASO 2: ACTIVAR MOTOR DE CAPTURA
-        # Activar dribbler/motor para "agarrar" la pelota
+        # PASO 2: ACTIVAR DRIBBLER
+        log.info("[capture_ball] ACTIVANDO DRIBBLER | dist=%.1fpx < %.0fpx",
+                 distance_to_ball, capture_px)
         blackboard.command_manager.capture_ball(blackboard.player.id)
 
-        # PASO 3: Verificar captura exitosa
-        if distance_to_ball < blackboard.field.ratio_to_px(BT_CAPTURE_CONFIRM_RATIO):
-            # Marcar como capturada en el modelo
-            blackboard.player._has_ball = True
+        # PASO 3: Confirmar captura (mismo umbral → confirma en la misma iteración)
+        blackboard.player._has_ball = True
+        blackboard.last_action = "ball_captured_with_motor"
+        log.info("[capture_ball] CAPTURA CONFIRMADA | dist=%.1fpx", distance_to_ball)
+        return NodeStatus.SUCCESS
 
-            # Registrar acción exitosa
-            blackboard.last_action = "ball_captured_with_motor"
-
-            return NodeStatus.SUCCESS
-
-    # Aún no estamos en rango, continuar acercándose
+    log.info("[capture_ball] Fuera de rango (%.1fpx > %.0fpx)", distance_to_ball, capture_px)
     return NodeStatus.RUNNING
 
 
@@ -1090,15 +1214,17 @@ def create_attacker_tree():
             SequenceNode("CapturarPelotaLibre").add_children(
                 ConditionNode(is_ball_free, "PelotaLibre"),
                 ConditionNode(is_ball_close_to_team, "PelotaCercaDelEquipo"),
-                ActionNode(move_to_ball, "MoverHaciaPelota"),
+                create_move_to_ball_node(),
                 ActionNode(capture_ball, "CapturarPelota"),
+                create_orient_to_goal_node(),
             ),
             # NUEVA: Capturar pelota libre si soy el atacante más cercano (sin restricción de proximidad)
             SequenceNode("CapturarPelotaLibreSiMasCercano").add_children(
                 ConditionNode(is_ball_free, "PelotaLibre"),
                 ConditionNode(is_closest_attacker_to_ball, "AtacanteMasCercano"),
-                ActionNode(move_to_ball, "MoverHaciaPelota"),
+                create_move_to_ball_node(),
                 ActionNode(capture_ball, "CapturarPelota"),
+                create_orient_to_goal_node(),
             ),
             # Interceptar si el rival tiene la pelota
             SequenceNode("InterceptarRival").add_children(
@@ -1134,7 +1260,7 @@ def create_defender_tree():
             # Capturar la pelota si está libre
             SequenceNode("CapturarPelotaDefensiva").add_children(
                 ConditionNode(is_ball_free, "PelotaLibre"),
-                ActionNode(move_to_ball, "MoverHaciaPelota"),
+                create_move_to_ball_node(),
                 ActionNode(capture_ball, "CapturarPelota"),
             ),
             # Bloquear rival si tiene la pelota
@@ -1173,7 +1299,7 @@ def create_defender_tree():
                 ConditionNode(is_ball_free, "PelotaLibre"),
                 ConditionNode(is_closest_defender_to_ball, "DefensorMasCercano"),
                 ConditionNode(is_no_attacker_closer_to_ball, "NoHayAtacanteMasCerca"),
-                ActionNode(move_to_ball, "MoverHaciaPelota"),
+                create_move_to_ball_node(),
                 ActionNode(capture_ball, "CapturarPelota"),
             ),
             # Mantener posición defensiva
