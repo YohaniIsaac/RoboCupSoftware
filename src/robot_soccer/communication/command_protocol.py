@@ -82,31 +82,26 @@ class RobotCommandProtocol:
 
     @staticmethod
     def format_dribbler_command(robot_id, power):
-        """Formatea un comando para controlar el dribbler.
+        """Formatea un comando para controlar el dribbler con potencia variable.
 
-        El dribbler es ON/OFF — el hardware usa digitalWrite, no PWM.
-        power > 0 activa el motor DC, power == 0 lo detiene.
-
-        Protocolo transmisor:
-          "R[id]D" → ejecutarComando('D') → activarMotorDC()   (ON)
-          "R[id]S" → ejecutarComando('S') → detenerMotorDC()   (OFF)
+        Protocolo transmisor: "D,id,power" → paquete RF 5 bytes ['D', id, pwm, 0, 0]
+        El firmware del robot usa SoftPWM para controlar la velocidad del motor DC.
 
         Args:
             robot_id (int): Identificador único del robot (1-4).
-            power (int): 0 para desactivar, cualquier valor > 0 para activar.
+            power (int): Potencia PWM (0-255). 0 = apagado, 255 = máximo.
 
         Returns:
-            str: Comando formateado "R{id}D" (ON) o "R{id}S" (OFF).
+            str: Comando formateado "D,{id},{power}".
 
         Example:
             >>> RobotCommandProtocol.format_dribbler_command(1, 255)
-            'R1D'
+            'D,1,255'
             >>> RobotCommandProtocol.format_dribbler_command(1, 0)
-            'R1S'
+            'D,1,0'
         """
-        if int(power) > 0:
-            return f"R{robot_id}D"  # Activar motor DC (dribbler ON)
-        return f"R{robot_id}S"      # Detener motor DC (dribbler OFF)
+        pwm = max(0, min(255, int(power)))
+        return f"D,{robot_id},{pwm}"
 
     @staticmethod
     def format_stop_command(robot_id):

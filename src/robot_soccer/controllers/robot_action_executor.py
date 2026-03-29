@@ -1,7 +1,7 @@
 import logging
 import math
 import numpy as np
-from robot_soccer.config import FIELD_SIM
+from robot_soccer.config import FIELD_SIM, DRIBBLER_CAPTURE_POWER
 
 from robot_soccer.ai.behavior_tree.utils import (
     calculate_ball_approach_position,
@@ -104,8 +104,8 @@ class RobotActionExecutor:
             # PASO 2: ACTIVAR MOTOR DE CAPTURA FÍSICAMENTE
             if self.rf_controller:
                 # Firmware usa IDs 1-based (player.id es 0-based)
-                self.rf_controller.set_dribbler(player.id + 1, 1.0)
-                log.info("Robot %i: Motor de captura ACTIVADO", player.id)
+                self.rf_controller.set_dribbler(player.id + 1, DRIBBLER_CAPTURE_POWER)
+                log.info("Robot %i: Motor de captura ACTIVADO (%.0f%%)", player.id, DRIBBLER_CAPTURE_POWER * 100)
 
             # PASO 3: Acercarse un poco más con motor activo
             if dist_to_ball > 25:

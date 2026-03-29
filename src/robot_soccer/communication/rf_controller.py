@@ -238,12 +238,13 @@ class RFController:
     def set_dribbler(self, robot_id, power=1.0):
         """Establece la potencia del dribbler de un robot.
 
-        El dribbler es el mecanismo que permite al robot mantener
-        control sobre la pelota durante el movimiento.
+        El firmware controla el motor DC del dribbler via SoftPWM,
+        permitiendo potencia variable (no solo ON/OFF).
 
         Args:
             robot_id (int): ID del robot (1-4).
             power (float): Potencia del dribbler (0.0-1.0). Defaults to 1.0.
+                0.0 = apagado, 0.4 = mantener pelota, 1.0 = captura máxima.
 
         Returns:
             bool: True si el comando se envió correctamente, False en caso contrario.

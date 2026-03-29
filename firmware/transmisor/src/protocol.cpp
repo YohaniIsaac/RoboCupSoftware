@@ -8,16 +8,34 @@ bool isValidRobotCommand(char cmd) {
           cmd == CMD_ROLLER_OFF || cmd == CMD_POWER_OFF);
 }
 
-MessageType parseMessage(const String& msg, RobotCommand& robotCmd, MotorCommand& motorCmd, TableroCommand& tableroCmd) {
+MessageType parseMessage(const String& msg, RobotCommand& robotCmd, MotorCommand& motorCmd, DribblerCommand& dribblerCmd, TableroCommand& tableroCmd) {
   if (msg.length() < 2) {
     return MSG_UNKNOWN;
   }
 
   char target = msg.charAt(0);
 
+  // Comando de dribbler con potencia variable: D,id,power
+  // Ejemplo: "D,1,150" = Robot 1, Dribbler PWM=150
+  if (target == 'D') {
+    int firstComma = msg.indexOf(',');
+    int secondComma = msg.indexOf(',', firstComma + 1);
+
+    if (firstComma > 0 && secondComma > 0) {
+      int robotId = msg.substring(firstComma + 1, secondComma).toInt();
+      int power = msg.substring(secondComma + 1).toInt();
+
+      if (robotId >= 1 && robotId <= 4 && power >= 0 && power <= 255) {
+        dribblerCmd.robotId = robotId;
+        dribblerCmd.power = power;
+        return MSG_DRIBBLER_CONTROL;
+      }
+    }
+  }
+
   // Comando para Motor con velocidad variable: M,id,left,right
   // Ejemplo: "M,1,150,100" = Robot 1, Left=150, Right=100
-  if (target == 'M') {
+  else if (target == 'M') {
     int firstComma = msg.indexOf(',');
     int secondComma = msg.indexOf(',', firstComma + 1);
     int thirdComma = msg.indexOf(',', secondComma + 1);

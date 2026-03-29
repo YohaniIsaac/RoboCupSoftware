@@ -56,6 +56,8 @@ def visualization_loop_behavior(perception_pipe, control_state_pipe, keyboard_pi
         'capture_confirm_px': 20,
         'creep_speed_pwm': 30,
         'dribble_pwm_factor': 1.0,
+        'dribbler_capture_power': 1.0,
+        'dribbler_hold_power': 0.45,
     }
     last_target_waypoint = None
     last_movement_active = False
@@ -437,6 +439,22 @@ def visualization_loop_behavior(perception_pipe, control_state_pipe, keyboard_pi
                 elif key == ord('y') or key == ord('Y'):
                     command = 'adjust_threshold'
                     param = 'dribble_pwm_factor'
+                    delta = 0.05
+                elif key == ord('1'):
+                    command = 'adjust_threshold'
+                    param = 'dribbler_capture_power'
+                    delta = -0.05
+                elif key == ord('2'):
+                    command = 'adjust_threshold'
+                    param = 'dribbler_capture_power'
+                    delta = 0.05
+                elif key == ord('3'):
+                    command = 'adjust_threshold'
+                    param = 'dribbler_hold_power'
+                    delta = -0.05
+                elif key == ord('4'):
+                    command = 'adjust_threshold'
+                    param = 'dribbler_hold_power'
                     delta = 0.05
                 elif key in [82, 84, 81, 83] and last_robot_pos:
                     command = 'move_waypoint'
@@ -832,6 +850,18 @@ def _draw_behavior_panel(behavior_params, robot_pos, waypoint, robot_available,
     cv2.putText(panel, f"Dribble: {factor:.2f}x", (col_left_x, y_left),
                cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1)
     cv2.putText(panel, "(T/Y)", (250, y_left), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (150, 150, 150), 1)
+    y_left += lh
+
+    cap_pwr = behavior_params.get('dribbler_capture_power', 1.0)
+    cv2.putText(panel, f"Drib Cap: {cap_pwr:.2f} ({int(cap_pwr*255)})", (col_left_x, y_left),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1)
+    cv2.putText(panel, "(1/2)", (250, y_left), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (150, 150, 150), 1)
+    y_left += lh
+
+    hold_pwr = behavior_params.get('dribbler_hold_power', 0.45)
+    cv2.putText(panel, f"Drib Hold: {hold_pwr:.2f} ({int(hold_pwr*255)})", (col_left_x, y_left),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1)
+    cv2.putText(panel, "(3/4)", (250, y_left), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (150, 150, 150), 1)
 
     # --- Right column: waypoint info + controls ---
     y_right = y + lh
@@ -869,6 +899,7 @@ def _draw_behavior_panel(behavior_params, robot_pos, waypoint, robot_available,
         "X: Cancelar  |  ENTER: Guardar config",
         "U/J: Activar  I/K: Overshoot  O/L: Confirm",
         "N/M: Creep PWM  9/0: PosThresh  T/Y: Dribble",
+        "1/2: Drib Capture  3/4: Drib Hold",
         "+/_: Zoom in/out  V/W/C/R: Zoom ctrl",
         "ESC: Salir",
     ]

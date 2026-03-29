@@ -48,11 +48,15 @@ void activarSolenoide() {
 }
 
 void activarMotorDC() {
-  digitalWrite(MOTOR_DC_PIN, HIGH);
+  SoftPWMSet(MOTOR_DC_PIN, 255);
 }
 
 void detenerMotorDC() {
-  digitalWrite(MOTOR_DC_PIN, LOW);
+  SoftPWMSet(MOTOR_DC_PIN, 0);
+}
+
+void setDribblerSpeed(uint8_t pwm) {
+  SoftPWMSet(MOTOR_DC_PIN, pwm);
 }
 
 void powerOff() {

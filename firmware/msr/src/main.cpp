@@ -28,7 +28,7 @@ void setup() {
 
   // Configurar pines de actuadores
   pinMode(SOLENOIDE_PIN, OUTPUT);
-  pinMode(MOTOR_DC_PIN, OUTPUT);
+  // MOTOR_DC_PIN se controla via SoftPWM (inicializado en SoftPWMBegin)
   pinMode(BOTON_ENCENDIDO_PIN, INPUT_PULLUP);
 
   // Configurar pines de motores
@@ -76,8 +76,16 @@ void loop() {
 
       setMotorSpeeds(leftSpeed, rightSpeed);
       tiempoInicio = millis();
+    } else if (data[0] == 'D') {
+      // Comando de dribbler con potencia variable (PWM 0-255)
+      // data[0] = 'D'
+      // data[1] = robot_id
+      // data[2] = potencia PWM (0 = apagado, 255 = máximo)
+      uint8_t pwm = data[2];
+      setDribblerSpeed(pwm);
+      tiempoInicio = millis();
     } else {
-      // Comando discreto tradicional (F, B, L, R, P, D, S, Q)
+      // Comando discreto tradicional (F, B, L, R, P, S, Q)
       char comando = data[0];
       ejecutarComando(comando);
     }

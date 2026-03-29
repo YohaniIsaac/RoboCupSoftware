@@ -22,6 +22,7 @@ from robot_soccer.config import (
     CAPTURE_ACTIVATE_DISTANCE_PX,
     CAPTURE_OVERSHOOT_PX,
     CAPTURE_CONFIRM_DISTANCE_PX,
+    DRIBBLER_HOLD_POWER,
 )
 
 from .base import (
@@ -744,11 +745,22 @@ def shoot_to_goal(blackboard):
     angle_diff = abs((angle_to_goal - current_angle + 180) % 360 - 180)
 
     if angle_diff > 10:
+        # Reducir potencia dribbler durante rotación → protege regulador de tensión
+        rf = blackboard.command_manager.rf_controller
+        if rf:
+            fw_id = blackboard.player.id + 1
+            rf.set_dribbler(fw_id, DRIBBLER_HOLD_POWER)
         # Orientarse antes de disparar (rotación en sitio, sin movimiento lineal)
         blackboard.command_manager.rotate_robot_to(blackboard.player.id, angle_to_goal)
         log.info("[shoot] Robot %d | orientando | actual=%.1f° objetivo=%.1f° diff=%.1f°",
                  blackboard.player.id, current_angle, angle_to_goal, angle_diff)
         return NodeStatus.RUNNING
+
+    # Apagar dribbler antes de disparar
+    rf = blackboard.command_manager.rf_controller
+    if rf:
+        fw_id = blackboard.player.id + 1
+        rf.set_dribbler(fw_id, 0.0)
 
     # Disparar
     blackboard.command_manager.kick_ball(

@@ -433,6 +433,19 @@ CAPTURE_CREEP_SPEED_PWM = 20  # PWM — velocidad de acercamiento lento
 # Calibrar con scripts/calibrate_behavior_thresholds.py (teclas T/Y)
 DRIBBLE_PWM_FACTOR = 1.0  # factor — compensación de fricción del dribbler
 
+# Potencia del motor dribbler (0.0-1.0) durante la fase de CAPTURA.
+# El firmware usa SoftPWM: 1.0 = 255 PWM = máxima fuerza de agarre.
+# Se activa cuando el BT inicia capture_ball (fase 2: creep forward).
+# Calibrar con scripts/calibrate_behavior_thresholds.py (teclas 1/2)
+DRIBBLER_CAPTURE_POWER = 1.0  # potencia máxima para atrapar pelota
+
+# Potencia del motor dribbler (0.0-1.0) mientras MANTIENE la pelota.
+# Potencia reducida para disminuir consumo de corriente y proteger
+# el regulador de tensión durante rotación con pelota.
+# Se usa en keepalive y durante orient_to_goal / shoot_to_goal.
+# Calibrar con scripts/calibrate_behavior_thresholds.py (teclas 3/4)
+DRIBBLER_HOLD_POWER = 0.45  # potencia reducida para sostener pelota
+
 # =============================================================================
 # Parámetros de Control PID
 # =============================================================================

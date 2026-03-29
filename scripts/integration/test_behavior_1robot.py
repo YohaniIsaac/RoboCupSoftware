@@ -40,6 +40,7 @@ from robot_soccer.config import (
     CAMERA_PERSPECTIVE_HEIGHT, CAMERA_PERSPECTIVE_WIDTH,
     CAMERA_PERSPECTIVE_ENABLED, CAMERA_PERSPECTIVE_SRC_POINTS,
     RANGO_COLOR_NARANJO, FIELD_CAM, CAPTURE_CONFIRM_DISTANCE_PX,
+    DRIBBLER_HOLD_POWER,
 )
 from robot_soccer.utils.camera_utils import get_camera_index
 
@@ -350,7 +351,7 @@ def decision_process(perception_pipe, viz_state_pipe, keyboard_pipe,
             if (behavior_active and player._has_ball and robot_available
                     and now - last_dribbler_keepalive >= DRIBBLER_KEEPALIVE):
                 firmware_id = robot_id + 1
-                behavior_manager.command_manager.rf_controller.set_dribbler(firmware_id, 1.0)
+                behavior_manager.command_manager.rf_controller.set_dribbler(firmware_id, DRIBBLER_HOLD_POWER)
                 last_dribbler_keepalive = now
 
             # --- Ejecutar comportamiento ---

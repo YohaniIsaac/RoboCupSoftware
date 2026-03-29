@@ -15,6 +15,7 @@ void setMotorSpeeds(int16_t leftSpeed, int16_t rightSpeed);
 void activarSolenoide();
 void activarMotorDC();
 void detenerMotorDC();
+void setDribblerSpeed(uint8_t pwm);
 
 // Funciones de sistema
 void powerOff();

@@ -1,7 +1,7 @@
 import time
 import logging
 import numpy as np
-from robot_soccer.config import FIELD_SIM, DRIBBLE_PWM_FACTOR
+from robot_soccer.config import FIELD_SIM, DRIBBLE_PWM_FACTOR, DRIBBLER_CAPTURE_POWER, DRIBBLER_HOLD_POWER
 from robot_soccer.controllers.differential_drive import DifferentialDriveController
 from robot_soccer.controllers.robot_action_executor import RobotActionExecutor
 from robot_soccer.communication.rf_controller import RFController
@@ -280,7 +280,7 @@ class RobotCommandManager:
         if self.rf_controller:
             # Firmware usa IDs 1-based (player_id es 0-based)
             firmware_id = player_id + 1
-            success = self.rf_controller.set_dribbler(firmware_id, 1.0)
+            success = self.rf_controller.set_dribbler(firmware_id, DRIBBLER_CAPTURE_POWER)
             if success:
                 log.info("Robot %i: Motor de captura ACTIVADO vía RF", player_id)
             else:

@@ -33,6 +33,8 @@ from robot_soccer.config import (
     CAPTURE_CONFIRM_DISTANCE_PX,
     CAPTURE_CREEP_SPEED_PWM,
     DRIBBLE_PWM_FACTOR,
+    DRIBBLER_CAPTURE_POWER,
+    DRIBBLER_HOLD_POWER,
 )
 
 log = logging.getLogger(__name__)
@@ -101,6 +103,8 @@ def control_loop_behavior(robot_positions_pipe, frame_pipe, robot_id, serial_por
         'capture_confirm_px': CAPTURE_CONFIRM_DISTANCE_PX,
         'creep_speed_pwm': CAPTURE_CREEP_SPEED_PWM,
         'dribble_pwm_factor': DRIBBLE_PWM_FACTOR,
+        'dribbler_capture_power': DRIBBLER_CAPTURE_POWER,
+        'dribbler_hold_power': DRIBBLER_HOLD_POWER,
     }
 
     # Controlador
@@ -391,8 +395,14 @@ def _draw_behavior_panel(behavior_params, robot, waypoint, robot_available):
     cv2.putText(panel, f"Dribble PWM factor: {factor:.2f}x (T/Y)", (10, y_offset),
                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
     y_offset += line_height
-    cv2.putText(panel, "  -> Multiplicador PWM con posesion (>1 = mas potencia)", (20, y_offset),
-               cv2.FONT_HERSHEY_SIMPLEX, 0.4, (180, 180, 180), 1)
+
+    cap_pwr = behavior_params.get('dribbler_capture_power', 1.0)
+    hold_pwr = behavior_params.get('dribbler_hold_power', 0.45)
+    cv2.putText(panel, f"Dribbler capture: {cap_pwr:.2f} ({int(cap_pwr*255)} PWM) (1/2)", (10, y_offset),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+    y_offset += line_height
+    cv2.putText(panel, f"Dribbler hold:    {hold_pwr:.2f} ({int(hold_pwr*255)} PWM) (3/4)", (10, y_offset),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
     y_offset += line_height * 2
 
     # Información del waypoint
@@ -579,6 +589,26 @@ def _handle_keyboard_behavior(key, robot, target_waypoint, behavior_params,
         result['action'] = 'update_behavior'
         log.info(f"dribble_pwm_factor: {behavior_params['dribble_pwm_factor']}")
 
+    # Dribbler capture power (1/2 ±0.05)
+    elif key == ord('1'):
+        behavior_params['dribbler_capture_power'] = round(max(0.1, behavior_params['dribbler_capture_power'] - 0.05), 2)
+        result['action'] = 'update_behavior'
+        log.info(f"dribbler_capture_power: {behavior_params['dribbler_capture_power']}")
+    elif key == ord('2'):
+        behavior_params['dribbler_capture_power'] = round(min(1.0, behavior_params['dribbler_capture_power'] + 0.05), 2)
+        result['action'] = 'update_behavior'
+        log.info(f"dribbler_capture_power: {behavior_params['dribbler_capture_power']}")
+
+    # Dribbler hold power (3/4 ±0.05)
+    elif key == ord('3'):
+        behavior_params['dribbler_hold_power'] = round(max(0.1, behavior_params['dribbler_hold_power'] - 0.05), 2)
+        result['action'] = 'update_behavior'
+        log.info(f"dribbler_hold_power: {behavior_params['dribbler_hold_power']}")
+    elif key == ord('4'):
+        behavior_params['dribbler_hold_power'] = round(min(1.0, behavior_params['dribbler_hold_power'] + 0.05), 2)
+        result['action'] = 'update_behavior'
+        log.info(f"dribbler_hold_power: {behavior_params['dribbler_hold_power']}")
+
     return result
 
 
@@ -601,6 +631,8 @@ def _save_behavior_to_config(behavior_params):
         'CAPTURE_CONFIRM_DISTANCE_PX': f"{behavior_params['capture_confirm_px']}",
         'CAPTURE_CREEP_SPEED_PWM': f"{behavior_params['creep_speed_pwm']}",
         'DRIBBLE_PWM_FACTOR': f"{behavior_params.get('dribble_pwm_factor', 1.0)}",
+        'DRIBBLER_CAPTURE_POWER': f"{behavior_params.get('dribbler_capture_power', 1.0)}",
+        'DRIBBLER_HOLD_POWER': f"{behavior_params.get('dribbler_hold_power', 0.45)}",
     }
 
     new_lines = []
@@ -675,6 +707,8 @@ def control_loop_behavior_pure(perception_pipe, control_state_pipe, keyboard_pip
         'capture_confirm_px': CAPTURE_CONFIRM_DISTANCE_PX,
         'creep_speed_pwm': CAPTURE_CREEP_SPEED_PWM,
         'dribble_pwm_factor': DRIBBLE_PWM_FACTOR,
+        'dribbler_capture_power': DRIBBLER_CAPTURE_POWER,
+        'dribbler_hold_power': DRIBBLER_HOLD_POWER,
     }
 
     controller = DifferentialDriveController(rf_controller=rf_controller)
@@ -783,9 +817,9 @@ def control_loop_behavior_pure(perception_pipe, control_state_pipe, keyboard_pip
                                 controller.position_threshold = behavior_params['position_threshold']
                                 # Forzar velocidad baja para creep
                                 _set_controller_creep_speed(controller, behavior_params['creep_speed_pwm'])
-                                # Activar dribbler
+                                # Activar dribbler a potencia de captura
                                 if rf_controller:
-                                    rf_controller.set_dribbler(firmware_id, 1.0)
+                                    rf_controller.set_dribbler(firmware_id, behavior_params['dribbler_capture_power'])
                                     dribbler_on = True
                                     last_dribbler_keepalive = time.time()
                                 log.info("▶️  FASE 2: Capture | dribbler ON | overshoot=(%d,%d) | dist_final≈%dpx",
@@ -845,6 +879,8 @@ def control_loop_behavior_pure(perception_pipe, control_state_pipe, keyboard_pip
                                 'capture_confirm_px': (5, 50),
                                 'creep_speed_pwm': (10, 60),
                                 'dribble_pwm_factor': (0.5, 2.0),
+                                'dribbler_capture_power': (0.1, 1.0),
+                                'dribbler_hold_power': (0.1, 1.0),
                             }
                             lo, hi = _param_bounds.get(param, (0, 9999))
                             behavior_params[param] = max(lo, min(hi, round(behavior_params[param] + delta, 2)))
@@ -863,7 +899,7 @@ def control_loop_behavior_pure(perception_pipe, control_state_pipe, keyboard_pip
 
             # --- Dribbler keepalive (cada 80ms cuando activo) ---
             if dribbler_on and rf_controller and current_time - last_dribbler_keepalive >= DRIBBLER_KEEPALIVE:
-                rf_controller.set_dribbler(firmware_id, 1.0)
+                rf_controller.set_dribbler(firmware_id, behavior_params['dribbler_hold_power'])
                 last_dribbler_keepalive = current_time
 
             if movement_active and robot and target_waypoint:
