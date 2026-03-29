@@ -430,6 +430,14 @@ def visualization_loop_behavior(perception_pipe, control_state_pipe, keyboard_pi
                     command = 'adjust_threshold'
                     param = 'creep_speed_pwm'
                     delta = 1
+                elif key == ord('t') or key == ord('T'):
+                    command = 'adjust_threshold'
+                    param = 'dribble_pwm_factor'
+                    delta = -0.05
+                elif key == ord('y') or key == ord('Y'):
+                    command = 'adjust_threshold'
+                    param = 'dribble_pwm_factor'
+                    delta = 0.05
                 elif key in [82, 84, 81, 83] and last_robot_pos:
                     command = 'move_waypoint'
                     reached_waypoint = None  # New waypoint movement clears reached
@@ -818,6 +826,12 @@ def _draw_behavior_panel(behavior_params, robot_pos, waypoint, robot_available,
     cv2.putText(panel, f"Creep: {behavior_params.get('creep_speed_pwm', 30)} PWM", (col_left_x, y_left),
                cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1)
     cv2.putText(panel, "(N/M)", (250, y_left), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (150, 150, 150), 1)
+    y_left += lh
+
+    factor = behavior_params.get('dribble_pwm_factor', 1.0)
+    cv2.putText(panel, f"Dribble: {factor:.2f}x", (col_left_x, y_left),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1)
+    cv2.putText(panel, "(T/Y)", (250, y_left), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (150, 150, 150), 1)
 
     # --- Right column: waypoint info + controls ---
     y_right = y + lh
@@ -854,7 +868,7 @@ def _draw_behavior_panel(behavior_params, robot_pos, waypoint, robot_available,
         "D: Fase 2 (dribbler ON + creep a overshoot)",
         "X: Cancelar  |  ENTER: Guardar config",
         "U/J: Activar  I/K: Overshoot  O/L: Confirm",
-        "N/M: Creep PWM  9/0: PosThresh",
+        "N/M: Creep PWM  9/0: PosThresh  T/Y: Dribble",
         "+/_: Zoom in/out  V/W/C/R: Zoom ctrl",
         "ESC: Salir",
     ]

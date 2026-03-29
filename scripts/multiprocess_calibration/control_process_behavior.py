@@ -674,11 +674,13 @@ def control_loop_behavior_pure(perception_pipe, control_state_pipe, keyboard_pip
         'capture_overshoot_px': CAPTURE_OVERSHOOT_PX,
         'capture_confirm_px': CAPTURE_CONFIRM_DISTANCE_PX,
         'creep_speed_pwm': CAPTURE_CREEP_SPEED_PWM,
+        'dribble_pwm_factor': DRIBBLE_PWM_FACTOR,
     }
 
     controller = DifferentialDriveController(rf_controller=rf_controller)
     controller.position_threshold = behavior_params['position_threshold']
     controller.angle_threshold = math.radians(behavior_params['angle_threshold'])
+    controller.dribble_pwm_factor = behavior_params['dribble_pwm_factor']
 
     robot = None
     target_waypoint = None
@@ -842,11 +844,13 @@ def control_loop_behavior_pure(perception_pipe, control_state_pipe, keyboard_pip
                                 'capture_overshoot_px': (0, 50),
                                 'capture_confirm_px': (5, 50),
                                 'creep_speed_pwm': (10, 60),
+                                'dribble_pwm_factor': (0.5, 2.0),
                             }
                             lo, hi = _param_bounds.get(param, (0, 9999))
-                            behavior_params[param] = max(lo, min(hi, behavior_params[param] + delta))
+                            behavior_params[param] = max(lo, min(hi, round(behavior_params[param] + delta, 2)))
                             controller.position_threshold = behavior_params['position_threshold']
                             controller.angle_threshold = math.radians(behavior_params['angle_threshold'])
+                            controller.dribble_pwm_factor = behavior_params.get('dribble_pwm_factor', 1.0)
                             log.info(f"  {param}: {behavior_params[param]}")
                     elif command == 'save_params':
                         _save_behavior_to_config(behavior_params)
