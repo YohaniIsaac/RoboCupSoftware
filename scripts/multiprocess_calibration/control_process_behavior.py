@@ -32,6 +32,7 @@ from robot_soccer.config import (
     CAPTURE_OVERSHOOT_PX,
     CAPTURE_CONFIRM_DISTANCE_PX,
     CAPTURE_CREEP_SPEED_PWM,
+    DRIBBLE_PWM_FACTOR,
 )
 
 log = logging.getLogger(__name__)
@@ -99,6 +100,7 @@ def control_loop_behavior(robot_positions_pipe, frame_pipe, robot_id, serial_por
         'capture_overshoot_px': CAPTURE_OVERSHOOT_PX,
         'capture_confirm_px': CAPTURE_CONFIRM_DISTANCE_PX,
         'creep_speed_pwm': CAPTURE_CREEP_SPEED_PWM,
+        'dribble_pwm_factor': DRIBBLE_PWM_FACTOR,
     }
 
     # Controlador
@@ -258,6 +260,7 @@ def _update_behavior_controller(controller, behavior_params):
     """Actualiza los parámetros de comportamiento del controlador en tiempo real."""
     controller.position_threshold = behavior_params['position_threshold']
     controller.angle_threshold = math.radians(behavior_params['angle_threshold'])
+    controller.dribble_pwm_factor = behavior_params.get('dribble_pwm_factor', 1.0)
     # MAX_ANGULAR_CORRECTION ya no se usa (reemplazado por Dual PID v+ω)
 
 
@@ -381,6 +384,14 @@ def _draw_behavior_panel(behavior_params, robot, waypoint, robot_available):
                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
     y_offset += line_height
     cv2.putText(panel, "  -> Velocidad de motores durante fase 2 (creep)", (20, y_offset),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.4, (180, 180, 180), 1)
+    y_offset += int(line_height * 1.2)
+
+    factor = behavior_params.get('dribble_pwm_factor', 1.0)
+    cv2.putText(panel, f"Dribble PWM factor: {factor:.2f}x (T/Y)", (10, y_offset),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+    y_offset += line_height
+    cv2.putText(panel, "  -> Multiplicador PWM con posesion (>1 = mas potencia)", (20, y_offset),
                cv2.FONT_HERSHEY_SIMPLEX, 0.4, (180, 180, 180), 1)
     y_offset += line_height * 2
 
@@ -558,6 +569,16 @@ def _handle_keyboard_behavior(key, robot, target_waypoint, behavior_params,
         result['action'] = 'update_behavior'
         log.info(f"creep_speed_pwm: {behavior_params['creep_speed_pwm']} PWM")
 
+    # Dribble PWM factor (T/Y ±0.05)
+    elif key == ord('t') or key == ord('T'):
+        behavior_params['dribble_pwm_factor'] = round(max(0.5, behavior_params['dribble_pwm_factor'] - 0.05), 2)
+        result['action'] = 'update_behavior'
+        log.info(f"dribble_pwm_factor: {behavior_params['dribble_pwm_factor']}")
+    elif key == ord('y') or key == ord('Y'):
+        behavior_params['dribble_pwm_factor'] = round(min(2.0, behavior_params['dribble_pwm_factor'] + 0.05), 2)
+        result['action'] = 'update_behavior'
+        log.info(f"dribble_pwm_factor: {behavior_params['dribble_pwm_factor']}")
+
     return result
 
 
@@ -579,6 +600,7 @@ def _save_behavior_to_config(behavior_params):
         'CAPTURE_OVERSHOOT_PX': f"{behavior_params['capture_overshoot_px']}",
         'CAPTURE_CONFIRM_DISTANCE_PX': f"{behavior_params['capture_confirm_px']}",
         'CAPTURE_CREEP_SPEED_PWM': f"{behavior_params['creep_speed_pwm']}",
+        'DRIBBLE_PWM_FACTOR': f"{behavior_params.get('dribble_pwm_factor', 1.0)}",
     }
 
     new_lines = []

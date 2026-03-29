@@ -55,6 +55,7 @@ def visualization_loop_behavior(perception_pipe, control_state_pipe, keyboard_pi
         'capture_overshoot_px': 15,
         'capture_confirm_px': 20,
         'creep_speed_pwm': 30,
+        'dribble_pwm_factor': 1.0,
     }
     last_target_waypoint = None
     last_movement_active = False
