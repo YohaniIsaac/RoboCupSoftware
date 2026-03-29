@@ -318,10 +318,10 @@ def is_shot_possible(blackboard):
                 break
 
     # Condiciones para un tiro posible
+    # No hay restricción de distancia: shoot_to_goal maneja orientación internamente.
+    # Esto evita caer en dribble_forward (movimiento lineal con pelota).
     return (
-        distance_to_goal < blackboard.field.ratio_to_px(BT_SHOT_DISTANCE_RATIO)
-        and angle_diff < np.pi / 4  # Bien orientado hacia la portería
-        and not shot_blocked  # Sin oponentes bloqueando
+        not shot_blocked  # Sin oponentes bloqueando
     )
 
 
@@ -712,7 +712,10 @@ def dribble_forward(blackboard):
 
 
 def shoot_to_goal(blackboard):
-    """Disparar a portería desde una posición estratégica óptima.
+    """Disparar a portería desde la posición actual.
+
+    Estrategia sin dribble: el robot captura, orienta y dispara sin movimiento
+    lineal con la pelota. Solo ajusta orientación (rotación en sitio) y patea.
 
     Args:
         blackboard: Pizarra con el estado del juego
@@ -723,40 +726,14 @@ def shoot_to_goal(blackboard):
     if not blackboard.player.has_ball():
         return NodeStatus.FAILURE
 
-    # Verificar que existe el gestor de comandos
     if not hasattr(blackboard, "command_manager"):
-        blackboard.logger.warning(
-            "No command manager found in blackboard. Action may not work properly."
-        )
         return NodeStatus.FAILURE
 
     player_pos = blackboard.player.get_position()
-    ball_pos = blackboard.ball.get_position()
     goal_pos = blackboard.opponent_goal_pos
 
-    # Calcular posición óptima para disparar
-    shooting_pos = calculate_shooting_position(
-        player_pos, ball_pos, goal_pos, approach_distance=50,
-        field=blackboard.field,
-    )
-
-    # Verificar si estamos en buena posición para disparar
-    distance_to_shooting_pos = np.linalg.norm(
-        np.array(player_pos) - np.array(shooting_pos)
-    )
-
-    if distance_to_shooting_pos > blackboard.field.ratio_to_px(BT_APPROACH_RATIO):
-        # Moverse a mejor posición de disparo
-        blackboard.command_manager.move_with_ball(
-            blackboard.player.id, shooting_pos, blackboard.ball, speed_factor=0.8
-        )
-        return NodeStatus.RUNNING
-
-    # Calcular mejor punto de la portería para disparar
-    goal_width = blackboard.field.goal_right_size
-    # Añadir variación para no disparar siempre al centro
-    offset = goal_width * 0.3 * (1 if np.random.random() > 0.5 else -1)
-    target = [goal_pos[0], goal_pos[1] + offset]
+    # Apuntar al centro del arco (sin offset aleatorio para evitar oscilación)
+    target = [goal_pos[0], goal_pos[1]]
 
     # Verificar orientación hacia la portería
     angle_to_goal = np.degrees(
@@ -767,8 +744,10 @@ def shoot_to_goal(blackboard):
     angle_diff = abs((angle_to_goal - current_angle + 180) % 360 - 180)
 
     if angle_diff > 10:
-        # Orientarse mejor antes de disparar
+        # Orientarse antes de disparar (rotación en sitio, sin movimiento lineal)
         blackboard.command_manager.rotate_robot_to(blackboard.player.id, angle_to_goal)
+        log.info("[shoot] Robot %d | orientando | actual=%.1f° objetivo=%.1f° diff=%.1f°",
+                 blackboard.player.id, current_angle, angle_to_goal, angle_diff)
         return NodeStatus.RUNNING
 
     # Disparar
@@ -776,8 +755,9 @@ def shoot_to_goal(blackboard):
         blackboard.player.id, target, blackboard.ball, power=0.9
     )
 
-    # Registrar la acción
     blackboard.last_action = "shoot_to_goal"
+    log.info("[shoot] Robot %d | DISPARO al arco (%.0f, %.0f)",
+             blackboard.player.id, target[0], target[1])
 
     return NodeStatus.SUCCESS
 
