@@ -405,22 +405,33 @@ ROBOT_ANGLE_THRESHOLD_DEG = 1  # Error angular aceptable (grados)
 CAPTURE_ACTIVATE_DISTANCE_PX = 58  # px — activar dribbler + iniciar creep
 
 # Píxeles MÁS ALLÁ del centro de la pelota donde apunta el creep.
-# El PID se detiene a ROBOT_POSITION_THRESHOLD antes de este punto,
-# lo que coloca el dribbler físicamente sobre la pelota.
-# Fórmula: robot para a (CAPTURE_OVERSHOOT_PX - ROBOT_POSITION_THRESHOLD) px del centro pelota
+# Tras move_to_ball, el robot queda a ~dist_real px de la pelota (por inercia).
+# Para que el robot se mueva durante capture se requiere:
+#   dist_real + OVERSHOOT > ROBOT_POSITION_THRESHOLD
+#   → OVERSHOOT > THRESHOLD - dist_real  (ej: 32 - 23 = 9px mínimo)
+# El robot es detenido físicamente por la pelota; CAPTURE_CONFIRM_DISTANCE_PX
+# confirma que el dribbler la tocó.
 # Calibrar con scripts/calibrate_behavior_thresholds.py (teclas I/K)
-CAPTURE_OVERSHOOT_PX = 9  # px — cuánto pasar la pelota
+CAPTURE_OVERSHOOT_PX = 23  # px — empuje suave para asegurar contacto dribbler-pelota
 
 # Distancia a la que se confirma la captura (_has_ball = True).
-# Con CAPTURE_OVERSHOOT_PX=15 y ROBOT_POSITION_THRESHOLD=32,
-# el robot para a ~17px del centro → usa 20px como margen.
+# El robot físicamente captura cuando el dribbler toca la pelota, lo que ocurre
+# cuando dist(ArUco_center, ball_center) ≈ robot_radius - ball_radius ≈ 23-27px.
+# Este valor debe ser mayor que la distancia real de parada (~23px observado).
 # Calibrar con scripts/calibrate_behavior_thresholds.py (teclas O/L)
-CAPTURE_CONFIRM_DISTANCE_PX = 11  # px — confirmar pelota en dribbler
+CAPTURE_CONFIRM_DISTANCE_PX = 28  # px — confirmar pelota en dribbler
 
 # Velocidad PWM para el creep forward (fase 2 de captura).
 # Se envía directamente a los motores sin PID.
 # Calibrar con scripts/calibrate_behavior_thresholds.py (teclas N/M)
 CAPTURE_CREEP_SPEED_PWM = 20  # PWM — velocidad de acercamiento lento
+
+# Factor multiplicador de PWM cuando el robot tiene posesión de la pelota.
+# El dribbler genera fricción que frena la rotación/movimiento. Este factor
+# compensa esa resistencia amplificando los PWM enviados a los motores.
+# Valor 1.0 = sin cambio. Valor 1.3 = 30% más potencia. Solo aplica post-captura.
+# Calibrar con scripts/calibrate_behavior_thresholds.py (teclas T/Y)
+DRIBBLE_PWM_FACTOR = 1.0  # factor — compensación de fricción del dribbler
 
 # =============================================================================
 # Parámetros de Control PID

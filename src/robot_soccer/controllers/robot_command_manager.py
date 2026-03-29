@@ -1,7 +1,7 @@
 import time
 import logging
 import numpy as np
-from robot_soccer.config import FIELD_SIM
+from robot_soccer.config import FIELD_SIM, DRIBBLE_PWM_FACTOR
 from robot_soccer.controllers.differential_drive import DifferentialDriveController
 from robot_soccer.controllers.robot_action_executor import RobotActionExecutor
 from robot_soccer.communication.rf_controller import RFController
@@ -117,6 +117,11 @@ class RobotCommandManager:
             la cola de acciones en progreso.
         """
         for player in self.team_players:
+            # Activar factor de dribble cuando el robot tiene posesión (post-captura)
+            if player.id in self.controllers:
+                controller = self.controllers[player.id]
+                controller.dribble_pwm_factor = DRIBBLE_PWM_FACTOR if player.has_ball() else 1.0
+
             if player.id in self.actions_in_progress:
                 action = self.actions_in_progress[player.id]
 

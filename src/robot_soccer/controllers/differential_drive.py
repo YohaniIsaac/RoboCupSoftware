@@ -127,6 +127,10 @@ class DifferentialDriveController:
         # pero ANTES de combinar con omega. Así la corrección angular sigue activa.
         self.max_linear_pwm_override = None
 
+        # Factor multiplicador de PWM con posesión de pelota (dribbler activo).
+        # Se setea externamente por RobotCommandManager según has_ball().
+        self.dribble_pwm_factor = 1.0
+
         # Límites de velocidad POR ROBOT (cargados de calibración JSON)
         # Se inicializan en _get_robot_speed_limits() la primera vez que se usa cada robot
         self._robot_speed_limits = {}  # {robot_id: (min_speed, max_speed)}
@@ -927,6 +931,11 @@ class DifferentialDriveController:
             Para robots reales usa rf_controller, para simulación actualiza
             las velocidades dx, dy, dw del objeto robot directamente.
         """
+        # Aplicar factor de dribble si el robot tiene posesión
+        if self.dribble_pwm_factor != 1.0:
+            left_speed_pwm = left_speed_pwm * self.dribble_pwm_factor
+            right_speed_pwm = right_speed_pwm * self.dribble_pwm_factor
+
         # Limitar velocidades a rango válido PWM
         left_speed_pwm = int(max(-255, min(255, left_speed_pwm)))
         right_speed_pwm = int(max(-255, min(255, right_speed_pwm)))
