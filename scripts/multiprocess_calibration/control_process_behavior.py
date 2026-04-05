@@ -35,6 +35,12 @@ from robot_soccer.config import (
     DRIBBLE_PWM_FACTOR,
     DRIBBLER_CAPTURE_POWER,
     DRIBBLER_HOLD_POWER,
+    DRIBBLER_PULSE_ON_MS,
+    DRIBBLER_PULSE_OFF_MS,
+    BEHIND_BALL_APPROACH_PX,
+    CONTACT_SETTLE_TIME_S,
+    CAMERA_PERSPECTIVE_WIDTH,
+    CAMERA_PERSPECTIVE_HEIGHT,
 )
 
 log = logging.getLogger(__name__)
@@ -105,6 +111,8 @@ def control_loop_behavior(robot_positions_pipe, frame_pipe, robot_id, serial_por
         'dribble_pwm_factor': DRIBBLE_PWM_FACTOR,
         'dribbler_capture_power': DRIBBLER_CAPTURE_POWER,
         'dribbler_hold_power': DRIBBLER_HOLD_POWER,
+        'dribbler_pulse_on_ms': DRIBBLER_PULSE_ON_MS,
+        'dribbler_pulse_off_ms': DRIBBLER_PULSE_OFF_MS,
     }
 
     # Controlador
@@ -396,13 +404,19 @@ def _draw_behavior_panel(behavior_params, robot, waypoint, robot_available):
                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
     y_offset += line_height
 
-    cap_pwr = behavior_params.get('dribbler_capture_power', 1.0)
-    hold_pwr = behavior_params.get('dribbler_hold_power', 0.45)
-    cv2.putText(panel, f"Dribbler capture: {cap_pwr:.2f} ({int(cap_pwr*255)} PWM) (1/2)", (10, y_offset),
+    cap_pwr = behavior_params.get('dribbler_capture_power', 25)
+    hold_pwr = behavior_params.get('dribbler_hold_power', 115)
+    pulse_on = behavior_params.get('dribbler_pulse_on_ms', 50)
+    pulse_off = behavior_params.get('dribbler_pulse_off_ms', 150)
+    pulse_mode = "CONTINUO" if pulse_off == 0 else f"ON {pulse_on}ms / OFF {pulse_off}ms"
+    cv2.putText(panel, f"Dribbler capture: {cap_pwr} PWM (1/2)", (10, y_offset),
                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
     y_offset += line_height
-    cv2.putText(panel, f"Dribbler hold:    {hold_pwr:.2f} ({int(hold_pwr*255)} PWM) (3/4)", (10, y_offset),
+    cv2.putText(panel, f"Dribbler hold:    {hold_pwr} PWM (3/4)", (10, y_offset),
                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+    y_offset += line_height
+    cv2.putText(panel, f"Pulso: {pulse_mode}  (5/6: ON  7/8: OFF)", (10, y_offset),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 100), 1)
     y_offset += line_height * 2
 
     # Información del waypoint
@@ -589,25 +603,45 @@ def _handle_keyboard_behavior(key, robot, target_waypoint, behavior_params,
         result['action'] = 'update_behavior'
         log.info(f"dribble_pwm_factor: {behavior_params['dribble_pwm_factor']}")
 
-    # Dribbler capture power (1/2 ±0.05)
+    # Dribbler capture power (1/2 ±1 PWM)
     elif key == ord('1'):
-        behavior_params['dribbler_capture_power'] = round(max(0.1, behavior_params['dribbler_capture_power'] - 0.05), 2)
+        behavior_params['dribbler_capture_power'] = max(0, behavior_params['dribbler_capture_power'] - 1)
         result['action'] = 'update_behavior'
-        log.info(f"dribbler_capture_power: {behavior_params['dribbler_capture_power']}")
+        log.info(f"dribbler_capture_power: {behavior_params['dribbler_capture_power']} PWM")
     elif key == ord('2'):
-        behavior_params['dribbler_capture_power'] = round(min(1.0, behavior_params['dribbler_capture_power'] + 0.05), 2)
+        behavior_params['dribbler_capture_power'] = min(255, behavior_params['dribbler_capture_power'] + 1)
         result['action'] = 'update_behavior'
-        log.info(f"dribbler_capture_power: {behavior_params['dribbler_capture_power']}")
+        log.info(f"dribbler_capture_power: {behavior_params['dribbler_capture_power']} PWM")
 
-    # Dribbler hold power (3/4 ±0.05)
+    # Dribbler hold power (3/4 ±1 PWM)
     elif key == ord('3'):
-        behavior_params['dribbler_hold_power'] = round(max(0.1, behavior_params['dribbler_hold_power'] - 0.05), 2)
+        behavior_params['dribbler_hold_power'] = max(0, behavior_params['dribbler_hold_power'] - 1)
         result['action'] = 'update_behavior'
-        log.info(f"dribbler_hold_power: {behavior_params['dribbler_hold_power']}")
+        log.info(f"dribbler_hold_power: {behavior_params['dribbler_hold_power']} PWM")
     elif key == ord('4'):
-        behavior_params['dribbler_hold_power'] = round(min(1.0, behavior_params['dribbler_hold_power'] + 0.05), 2)
+        behavior_params['dribbler_hold_power'] = min(255, behavior_params['dribbler_hold_power'] + 1)
         result['action'] = 'update_behavior'
-        log.info(f"dribbler_hold_power: {behavior_params['dribbler_hold_power']}")
+        log.info(f"dribbler_hold_power: {behavior_params['dribbler_hold_power']} PWM")
+
+    # Dribbler pulse ON duration (5/6 ±10ms)
+    elif key == ord('5'):
+        behavior_params['dribbler_pulse_on_ms'] = max(10, behavior_params['dribbler_pulse_on_ms'] - 10)
+        result['action'] = 'update_behavior'
+        log.info(f"dribbler_pulse_on_ms: {behavior_params['dribbler_pulse_on_ms']}ms")
+    elif key == ord('6'):
+        behavior_params['dribbler_pulse_on_ms'] = min(500, behavior_params['dribbler_pulse_on_ms'] + 10)
+        result['action'] = 'update_behavior'
+        log.info(f"dribbler_pulse_on_ms: {behavior_params['dribbler_pulse_on_ms']}ms")
+
+    # Dribbler pulse OFF duration (7/8 ±10ms, 0=continuo)
+    elif key == ord('7'):
+        behavior_params['dribbler_pulse_off_ms'] = max(0, behavior_params['dribbler_pulse_off_ms'] - 10)
+        result['action'] = 'update_behavior'
+        log.info(f"dribbler_pulse_off_ms: {behavior_params['dribbler_pulse_off_ms']}ms (0=continuo)")
+    elif key == ord('8'):
+        behavior_params['dribbler_pulse_off_ms'] = min(500, behavior_params['dribbler_pulse_off_ms'] + 10)
+        result['action'] = 'update_behavior'
+        log.info(f"dribbler_pulse_off_ms: {behavior_params['dribbler_pulse_off_ms']}ms (0=continuo)")
 
     return result
 
@@ -631,8 +665,12 @@ def _save_behavior_to_config(behavior_params):
         'CAPTURE_CONFIRM_DISTANCE_PX': f"{behavior_params['capture_confirm_px']}",
         'CAPTURE_CREEP_SPEED_PWM': f"{behavior_params['creep_speed_pwm']}",
         'DRIBBLE_PWM_FACTOR': f"{behavior_params.get('dribble_pwm_factor', 1.0)}",
-        'DRIBBLER_CAPTURE_POWER': f"{behavior_params.get('dribbler_capture_power', 1.0)}",
-        'DRIBBLER_HOLD_POWER': f"{behavior_params.get('dribbler_hold_power', 0.45)}",
+        'DRIBBLER_CAPTURE_POWER': f"{behavior_params.get('dribbler_capture_power', 25)}",
+        'DRIBBLER_HOLD_POWER': f"{behavior_params.get('dribbler_hold_power', 115)}",
+        'DRIBBLER_PULSE_ON_MS': f"{behavior_params.get('dribbler_pulse_on_ms', 50)}",
+        'DRIBBLER_PULSE_OFF_MS': f"{behavior_params.get('dribbler_pulse_off_ms', 150)}",
+        'BEHIND_BALL_APPROACH_PX': f"{behavior_params.get('behind_ball_approach_px', BEHIND_BALL_APPROACH_PX)}",
+        'CONTACT_SETTLE_TIME_S': f"{behavior_params.get('contact_settle_time_s', CONTACT_SETTLE_TIME_S)}",
     }
 
     new_lines = []
@@ -709,6 +747,10 @@ def control_loop_behavior_pure(perception_pipe, control_state_pipe, keyboard_pip
         'dribble_pwm_factor': DRIBBLE_PWM_FACTOR,
         'dribbler_capture_power': DRIBBLER_CAPTURE_POWER,
         'dribbler_hold_power': DRIBBLER_HOLD_POWER,
+        'dribbler_pulse_on_ms': DRIBBLER_PULSE_ON_MS,
+        'dribbler_pulse_off_ms': DRIBBLER_PULSE_OFF_MS,
+        'behind_ball_approach_px': BEHIND_BALL_APPROACH_PX,
+        'contact_settle_time_s': CONTACT_SETTLE_TIME_S,
     }
 
     controller = DifferentialDriveController(rf_controller=rf_controller)
@@ -722,16 +764,20 @@ def control_loop_behavior_pure(perception_pipe, control_state_pipe, keyboard_pip
     running = True
     robot_stopped = False
 
-    # --- Estado de captura (2 fases) ---
-    # 'idle': sin movimiento
-    # 'approach': fase 1 — moverse hacia waypoint, parar a capture_activate_px
-    # 'capture': fase 2 — dribbler ON + creep hacia overshoot target
+    # --- Estado de captura (3 fases sin dribbler) ---
+    # 'idle':              sin movimiento
+    # 'approach':          fase 1 — PID hacia posición DETRÁS de la pelota
+    # 'capture_creeping':  fase 2a — creep lento directo hacia la pelota
+    # 'capture_settling':  fase 2b — contacto confirmado, esperando asentamiento
+    # 'confirmed':         contacto y asentamiento OK
     capture_phase = 'idle'
-    ball_waypoint = None      # posición original del waypoint (simula la pelota)
-    overshoot_target = None   # punto overshoot calculado
-    dribbler_on = False
-    last_dribbler_keepalive = 0.0
-    DRIBBLER_KEEPALIVE = 0.08  # 80ms < firmware timeout 100ms
+    ball_waypoint = None       # posición del waypoint (simula la pelota)
+    behind_ball_target = None  # posición calculada detrás de la pelota (fase 1)
+    overshoot_target = None    # compatibilidad con visualización existente
+    contact_start_time = None  # timestamp cuando se confirmó el contacto
+    settle_elapsed = 0.0       # segundos transcurridos en fase settling
+    dist_to_ball_now = 0.0     # distancia robot-pelota actual
+    dribbler_on = False        # siempre False (sin dribbler), para compatibilidad
     firmware_id = robot_id + 1
 
     last_state_send_time = 0
@@ -773,89 +819,93 @@ def control_loop_behavior_pure(perception_pipe, control_state_pipe, keyboard_pip
                         running = False
                     elif command == 'toggle_movement':
                         if not movement_active and target_waypoint:
-                            # Iniciar fase 1: approach — parar a capture_activate_px
+                            # FASE 1: navegar a posición DETRÁS de la pelota (sin PID al waypoint directo)
+                            # El waypoint representa la pelota; calculamos behind_pos desde el lado opuesto al arco
+                            bx, by = float(target_waypoint[0]), float(target_waypoint[1])
+                            # El arco rival para equipo rojo está a la derecha
+                            goal_x = float(CAMERA_PERSPECTIVE_WIDTH)
+                            goal_y = float(CAMERA_PERSPECTIVE_HEIGHT) / 2.0
+                            gtb_x, gtb_y = bx - goal_x, by - goal_y
+                            dist_gtb = math.sqrt(gtb_x**2 + gtb_y**2)
+                            if dist_gtb > 1.0:
+                                unit_x, unit_y = gtb_x / dist_gtb, gtb_y / dist_gtb
+                                approach = behavior_params['behind_ball_approach_px']
+                                bhx = int(bx + unit_x * approach)
+                                bhy = int(by + unit_y * approach)
+                                bhx = max(15, min(CAMERA_PERSPECTIVE_WIDTH - 15, bhx))
+                                bhy = max(15, min(CAMERA_PERSPECTIVE_HEIGHT - 15, bhy))
+                                behind_ball_target = [bhx, bhy]
+                                target_waypoint = [bhx, bhy]
+                            else:
+                                behind_ball_target = list(target_waypoint)
+                            ball_waypoint = [int(bx), int(by)]
+                            overshoot_target = None
                             movement_active = True
                             capture_phase = 'approach'
-                            ball_waypoint = list(target_waypoint)
-                            overshoot_target = None
-                            controller.position_threshold = behavior_params['capture_activate_px']
+                            controller.position_threshold = behavior_params['position_threshold']
                             robot_stopped = False
-                            log.info("▶️  FASE 1: Approach → parar a %dpx del waypoint",
-                                     behavior_params['capture_activate_px'])
+                            log.info("▶️  FASE 1: Yendo DETRÁS de la pelota → (%d,%d) | approach=%dpx",
+                                     target_waypoint[0], target_waypoint[1],
+                                     behavior_params['behind_ball_approach_px'])
                         else:
-                            # Pausar — apagar dribbler si estaba activo
+                            # Pausar
                             movement_active = False
                             robot_stopped = False
-                            if dribbler_on and rf_controller:
-                                rf_controller.set_dribbler(firmware_id, 0.0)
-                                dribbler_on = False
-                                log.info("Dribbler OFF (pausado)")
-                            if capture_phase == 'capture':
-                                _restore_controller_speed(controller)
+                            if capture_phase in ('capture_creeping',):
+                                if rf_controller and robot_available:
+                                    rf_controller.set_motors(firmware_id, 0, 0)
                             capture_phase = 'idle'
                             overshoot_target = None
                             controller.position_threshold = behavior_params['position_threshold']
                             log.info("⏸️  Movimiento PAUSADO")
                     elif command == 'start_capture':
-                        # Fase 2: dribbler ON + creep a overshoot
+                        # FASE 2: creep lento directo hacia la pelota (sin PID)
                         if not movement_active and ball_waypoint and robot and capture_phase in ('idle', 'approach'):
-                            # Calcular overshoot: desde robot a través de ball_waypoint
-                            dx = ball_waypoint[0] - robot.x
-                            dy = ball_waypoint[1] - robot.y
-                            dist = math.sqrt(dx * dx + dy * dy)
-                            if dist > 0:
-                                fwd_x = dx / dist
-                                fwd_y = dy / dist
-                                overshoot_target = [
-                                    int(ball_waypoint[0] + fwd_x * behavior_params['capture_overshoot_px']),
-                                    int(ball_waypoint[1] + fwd_y * behavior_params['capture_overshoot_px'])
-                                ]
-                                target_waypoint = list(overshoot_target)
-                                capture_phase = 'capture'
-                                movement_active = True
-                                robot_stopped = False
-                                controller.position_threshold = behavior_params['position_threshold']
-                                # Forzar velocidad baja para creep
-                                _set_controller_creep_speed(controller, behavior_params['creep_speed_pwm'])
-                                # Activar dribbler a potencia de captura
-                                if rf_controller:
-                                    rf_controller.set_dribbler(firmware_id, behavior_params['dribbler_capture_power'])
-                                    dribbler_on = True
-                                    last_dribbler_keepalive = time.time()
-                                log.info("▶️  FASE 2: Capture | dribbler ON | overshoot=(%d,%d) | dist_final≈%dpx",
-                                         overshoot_target[0], overshoot_target[1],
-                                         max(0, behavior_params['capture_overshoot_px'] - behavior_params['position_threshold']))
-                            else:
-                                log.warning("Robot ya está en el waypoint, no se puede calcular dirección")
-                        elif capture_phase == 'capture':
-                            log.info("Ya en fase capture")
+                            capture_phase = 'capture_creeping'
+                            contact_start_time = None
+                            movement_active = False
+                            robot_stopped = False
+                            dist_to_ball_now = math.sqrt(
+                                (ball_waypoint[0] - robot.x)**2 + (ball_waypoint[1] - robot.y)**2
+                            )
+                            log.info("▶️  FASE 2: Creep lento | speed=%d PWM | dist=%.0fpx",
+                                     behavior_params['creep_speed_pwm'], dist_to_ball_now)
+                        elif capture_phase == 'capture_creeping':
+                            log.info("Ya en fase 2 (creeping)")
+                        elif capture_phase in ('capture_settling', 'confirmed'):
+                            log.info("Ya hay contacto — presiona X para reiniciar")
                         else:
                             log.warning("Necesitas un waypoint y completar fase 1 primero")
+                    elif command == 'start_rotate':
+                        # Sin dribbler: G ya no gira. Muestra instrucción útil.
+                        log.info("ℹ️  Fase 3 (girar) no aplica sin dribbler. "
+                                 "Usa D para fase 2 (creep), luego X para reiniciar.")
                     elif command == 'cancel_waypoint':
                         target_waypoint = None
                         ball_waypoint = None
                         overshoot_target = None
+                        behind_ball_target = None
                         movement_active = False
                         robot_stopped = False
-                        if capture_phase == 'capture':
-                            _restore_controller_speed(controller)
+                        if capture_phase in ('capture_creeping',):
+                            if rf_controller and robot_available:
+                                rf_controller.set_motors(firmware_id, 0, 0)
                         capture_phase = 'idle'
+                        contact_start_time = None
                         controller.position_threshold = behavior_params['position_threshold']
-                        if dribbler_on and rf_controller:
-                            rf_controller.set_dribbler(firmware_id, 0.0)
-                            dribbler_on = False
-                        log.info("❌ Waypoint cancelado")
+                        log.info("❌ Waypoint cancelado — reiniciando")
                     elif command == 'set_waypoint':
                         waypoint = cmd.get('waypoint')
                         if waypoint:
                             target_waypoint = list(waypoint)
                             ball_waypoint = list(waypoint)
                             overshoot_target = None
+                            behind_ball_target = None
+                            if capture_phase in ('capture_creeping',) and rf_controller and robot_available:
+                                rf_controller.set_motors(firmware_id, 0, 0)
                             capture_phase = 'idle'
-                            if dribbler_on and rf_controller:
-                                rf_controller.set_dribbler(firmware_id, 0.0)
-                                dribbler_on = False
-                            log.info(f"🎯 Waypoint establecido: ({target_waypoint[0]}, {target_waypoint[1]})")
+                            contact_start_time = None
+                            log.info(f"🎯 Waypoint (pelota) establecido: ({target_waypoint[0]}, {target_waypoint[1]})")
                     elif command == 'move_waypoint':
                         delta = cmd.get('delta', [0, 0])
                         if target_waypoint is None and robot:
@@ -877,10 +927,14 @@ def control_loop_behavior_pure(perception_pipe, control_state_pipe, keyboard_pip
                                 'capture_activate_px': (10, 100),
                                 'capture_overshoot_px': (0, 50),
                                 'capture_confirm_px': (5, 50),
-                                'creep_speed_pwm': (10, 60),
+                                'creep_speed_pwm': (10, 80),
                                 'dribble_pwm_factor': (0.5, 2.0),
-                                'dribbler_capture_power': (0.1, 1.0),
-                                'dribbler_hold_power': (0.1, 1.0),
+                                'dribbler_capture_power': (0, 255),
+                                'dribbler_hold_power': (0, 255),
+                                'dribbler_pulse_on_ms': (10, 500),
+                                'dribbler_pulse_off_ms': (0, 500),
+                                'behind_ball_approach_px': (30, 120),
+                                'contact_settle_time_s': (0.05, 2.0),
                             }
                             lo, hi = _param_bounds.get(param, (0, 9999))
                             behavior_params[param] = max(lo, min(hi, round(behavior_params[param] + delta, 2)))
@@ -897,41 +951,63 @@ def control_loop_behavior_pure(perception_pipe, control_state_pipe, keyboard_pip
                 except Exception as e:
                     log.error(f"Error recibiendo comando: {e}")
 
-            # --- Dribbler keepalive (cada 80ms cuando activo) ---
-            if dribbler_on and rf_controller and current_time - last_dribbler_keepalive >= DRIBBLER_KEEPALIVE:
-                rf_controller.set_dribbler(firmware_id, behavior_params['dribbler_hold_power'])
-                last_dribbler_keepalive = current_time
+            # --- Fase 2a: Creep lento hacia la pelota (sin PID) ---
+            if capture_phase == 'capture_creeping' and robot and rf_controller and robot_available:
+                bx = ball_waypoint[0] - robot.x
+                by = ball_waypoint[1] - robot.y
+                dist_to_ball_now = math.sqrt(bx * bx + by * by)
+                confirm_px = behavior_params['capture_confirm_px']
+                if dist_to_ball_now < confirm_px:
+                    # Contacto confirmado: detener robot, empezar asentamiento
+                    rf_controller.set_motors(firmware_id, 0, 0)
+                    capture_phase = 'capture_settling'
+                    contact_start_time = current_time
+                    settle_elapsed = 0.0
+                    log.info("🤝 CONTACTO confirmado | dist=%.1fpx | Asentando %.2fs...",
+                             dist_to_ball_now, behavior_params['contact_settle_time_s'])
+                else:
+                    # Enviar creep directo cada ciclo (100 Hz mantiene motor activo)
+                    speed = behavior_params['creep_speed_pwm']
+                    rf_controller.set_motors(firmware_id, speed, speed)
 
+            # --- Fase 2b: Asentamiento (robot quieto, esperando estabilización) ---
+            elif capture_phase == 'capture_settling' and robot:
+                bx = ball_waypoint[0] - robot.x
+                by = ball_waypoint[1] - robot.y
+                dist_to_ball_now = math.sqrt(bx * bx + by * by)
+                settle_elapsed = current_time - contact_start_time
+                confirm_px = behavior_params['capture_confirm_px']
+
+                if dist_to_ball_now > confirm_px * 2:
+                    # Pelota escapó durante asentamiento
+                    capture_phase = 'idle'
+                    contact_start_time = None
+                    log.info("⚠️  Pelota escapó en asentamiento (dist=%.0fpx) → idle. Reinicia con X.",
+                             dist_to_ball_now)
+                elif settle_elapsed >= behavior_params['contact_settle_time_s']:
+                    capture_phase = 'confirmed'
+                    log.info("✅ ASENTAMIENTO OK (%.2fs) → CONFIRMADO | dist_final=%.1fpx",
+                             settle_elapsed, dist_to_ball_now)
+
+            # --- Fase 1: PID hacia posición detrás de la pelota ---
             if movement_active and robot and target_waypoint:
                 reached = controller.move_to_position(robot, tuple(target_waypoint))
                 if reached:
                     if capture_phase == 'approach':
-                        log.info("✅ FASE 1 completada — robot a %dpx del waypoint. Presiona D para fase 2.",
-                                 behavior_params['capture_activate_px'])
-                        movement_active = False
-                        robot_stopped = False
-                    elif capture_phase == 'capture':
-                        # Fase 2 completada — restaurar velocidades normales
-                        _restore_controller_speed(controller)
-                        dist_to_ball = 0
-                        if ball_waypoint:
-                            bx = ball_waypoint[0] - robot.x
-                            by = ball_waypoint[1] - robot.y
-                            dist_to_ball = math.sqrt(bx * bx + by * by)
-                        log.info("✅ FASE 2 completada — dist al waypoint=%.1fpx (confirm=%dpx)",
-                                 dist_to_ball, behavior_params['capture_confirm_px'])
-                        if dist_to_ball < behavior_params['capture_confirm_px']:
-                            log.info("✅ CAPTURA sería CONFIRMADA a esta distancia")
-                        else:
-                            log.info("⚠️  CAPTURA NO confirmada — ajustar overshoot (I/K) o confirm (O/L)")
+                        dist_bh = math.sqrt(
+                            (ball_waypoint[0] - robot.x)**2 + (ball_waypoint[1] - robot.y)**2
+                        )
+                        log.info("✅ FASE 1 completada | robot detrás de pelota (dist_pelota=%.0fpx) "
+                                 "| Presiona D para fase 2 (creep).", dist_bh)
                         movement_active = False
                         robot_stopped = False
                     else:
-                        log.info(f"✅ Waypoint alcanzado en ({target_waypoint[0]}, {target_waypoint[1]})")
+                        log.info("✅ Waypoint alcanzado en (%d, %d)",
+                                 target_waypoint[0], target_waypoint[1])
                         target_waypoint = None
                         movement_active = False
                         robot_stopped = False
-            else:
+            elif capture_phase not in ('capture_creeping', 'capture_settling', 'confirmed'):
                 if robot and robot_available and not robot_stopped:
                     rf_controller.set_motors(firmware_id, 0, 0)
                     robot_stopped = True
@@ -985,6 +1061,10 @@ def control_loop_behavior_pure(perception_pipe, control_state_pipe, keyboard_pip
                         'ball_waypoint': ball_waypoint,
                         'overshoot_target': overshoot_target,
                         'dribbler_on': dribbler_on,
+                        # Nuevos campos sin dribbler
+                        'behind_ball_target': behind_ball_target,
+                        'dist_to_ball': round(dist_to_ball_now, 1) if ball_waypoint and robot else None,
+                        'settle_elapsed': round(settle_elapsed, 2) if capture_phase == 'capture_settling' else None,
                         'timestamp': current_time
                     })
                     last_state_send_time = current_time
@@ -996,7 +1076,7 @@ def control_loop_behavior_pure(perception_pipe, control_state_pipe, keyboard_pip
     finally:
         if rf_controller:
             if dribbler_on:
-                rf_controller.set_dribbler(firmware_id, 0.0)
+                rf_controller.set_dribbler(firmware_id, 0)
                 log.info("Dribbler OFF (cleanup)")
             if robot and robot_available:
                 rf_controller.set_motors(firmware_id, 0, 0)
