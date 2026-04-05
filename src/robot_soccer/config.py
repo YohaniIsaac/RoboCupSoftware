@@ -426,7 +426,7 @@ CAPTURE_CONFIRM_DISTANCE_PX = 28  # px — confirmar pelota en dribbler
 # Debe superar MOTOR_DEAD_ZONE_PWM (30) para garantizar movimiento.
 # A mayor valor: más rápido pero más riesgo de empujar la pelota.
 # Calibrar con scripts/calibrate_behavior_thresholds.py (teclas N/M)
-CAPTURE_CREEP_SPEED_PWM = 40  # PWM — velocidad de acercamiento lento (sin dribbler)
+CAPTURE_CREEP_SPEED_PWM = 17  # PWM — velocidad de acercamiento lento (sin dribbler)
 
 # Tiempo de espera (segundos) tras confirmar contacto con la pelota.
 # Permite que la pelota se acomode contra el robot antes de disparar.
@@ -466,7 +466,7 @@ DRIBBLER_PULSE_OFF_MS = 0  # ms — duración del pulso apagado (0=continuo)
 # eliminando la necesidad de rotar con la pelota o activar el dribbler.
 # BEHIND_BALL_APPROACH_PX debe ser > CAPTURE_ACTIVATE_DISTANCE_PX para no
 # rozar la pelota durante el posicionamiento.
-BEHIND_BALL_APPROACH_PX = 65       # px — distancia robot-pelota al posicionarse detrás
+BEHIND_BALL_APPROACH_PX = 65  # px — distancia robot-pelota al posicionarse detrás
 BEHIND_BALL_LATERAL_OFFSET_PX = 75 # px — desvío lateral para rodear la pelota
 BEHIND_BALL_ALIGN_TOLERANCE_DEG = 15.0  # ° — tolerancia angular aceptable al posicionar
 PUSH_BURST_PWM = 70                # PWM — pulso anti-stiction al iniciar avance al contacto

@@ -311,19 +311,21 @@ class DifferentialDriveController:
         if predicted_dist < self.position_threshold and state['last_linear_speed'] > 0:
             log.info("🎯 Robot %d STOP PREDICTIVO | Dist=%.1f Pred=%.1f",
                      robot.id, distance, predicted_dist)
-            self._send_motor_commands(robot, 0, 0)
             state['last_linear_speed'] = 0
             if target_angle is not None:
+                # No enviar STOP: rotate_to_angle gestiona los motores directamente
                 return self.rotate_to_angle(robot, target_angle)
+            self._send_motor_commands(robot, 0, 0)
             return True
 
         if distance < self.position_threshold:
             log.info("🎯 Waypoint alcanzado: dist=%.1f < %d",
                      distance, self.position_threshold)
-            self._send_motor_commands(robot, 0, 0)
             state['last_linear_speed'] = 0
             if target_angle is not None:
+                # No enviar STOP: rotate_to_angle gestiona los motores directamente
                 return self.rotate_to_angle(robot, target_angle)
+            self._send_motor_commands(robot, 0, 0)
             return True
 
         # === 3. ERROR ANGULAR (heading hacia el objetivo) ===
