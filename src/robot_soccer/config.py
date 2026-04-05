@@ -421,10 +421,17 @@ CAPTURE_OVERSHOOT_PX = 23  # px — empuje suave para asegurar contacto dribbler
 # Calibrar con scripts/calibrate_behavior_thresholds.py (teclas O/L)
 CAPTURE_CONFIRM_DISTANCE_PX = 28  # px — confirmar pelota en dribbler
 
-# Velocidad PWM para el creep forward (fase 2 de captura).
+# Velocidad PWM para el acercamiento lento hacia la pelota (sin dribbler).
 # Se envía directamente a los motores sin PID.
+# Debe superar MOTOR_DEAD_ZONE_PWM (30) para garantizar movimiento.
+# A mayor valor: más rápido pero más riesgo de empujar la pelota.
 # Calibrar con scripts/calibrate_behavior_thresholds.py (teclas N/M)
-CAPTURE_CREEP_SPEED_PWM = 20  # PWM — velocidad de acercamiento lento
+CAPTURE_CREEP_SPEED_PWM = 40  # PWM — velocidad de acercamiento lento (sin dribbler)
+
+# Tiempo de espera (segundos) tras confirmar contacto con la pelota.
+# Permite que la pelota se acomode contra el robot antes de disparar.
+# Si la pelota escapa durante este tiempo, el ciclo se reinicia.
+CONTACT_SETTLE_TIME_S = 0.35  # s — espera de asentamiento antes del disparo
 
 # Factor multiplicador de PWM cuando el robot tiene posesión de la pelota.
 # El dribbler genera fricción que frena la rotación/movimiento. Este factor
@@ -433,18 +440,36 @@ CAPTURE_CREEP_SPEED_PWM = 20  # PWM — velocidad de acercamiento lento
 # Calibrar con scripts/calibrate_behavior_thresholds.py (teclas T/Y)
 DRIBBLE_PWM_FACTOR = 1.0  # factor — compensación de fricción del dribbler
 
-# Potencia del motor dribbler (0.0-1.0) durante la fase de CAPTURA.
-# El firmware usa SoftPWM: 1.0 = 255 PWM = máxima fuerza de agarre.
+# Potencia del motor dribbler en PWM (0-255) durante la fase de CAPTURA.
+# El firmware usa SoftPWM: 255 = máxima fuerza de agarre.
 # Se activa cuando el BT inicia capture_ball (fase 2: creep forward).
 # Calibrar con scripts/calibrate_behavior_thresholds.py (teclas 1/2)
-DRIBBLER_CAPTURE_POWER = 1.0  # potencia máxima para atrapar pelota
+DRIBBLER_CAPTURE_POWER = 0  # PWM para atrapar pelota
 
-# Potencia del motor dribbler (0.0-1.0) mientras MANTIENE la pelota.
+# Potencia del motor dribbler en PWM (0-255) mientras MANTIENE la pelota.
 # Potencia reducida para disminuir consumo de corriente y proteger
 # el regulador de tensión durante rotación con pelota.
 # Se usa en keepalive y durante orient_to_goal / shoot_to_goal.
 # Calibrar con scripts/calibrate_behavior_thresholds.py (teclas 3/4)
-DRIBBLER_HOLD_POWER = 0.45  # potencia reducida para sostener pelota
+DRIBBLER_HOLD_POWER = 0  # PWM reducido para sostener pelota
+
+# Dribbler intermitente: duración del pulso ON (ms) mientras mantiene pelota.
+# El motor se activa durante ON ms, luego se apaga durante OFF ms, y repite.
+# Reduce calor en el motor al trabarse, protegiendo el regulador de tensión.
+# Si DRIBBLER_PULSE_OFF_MS = 0, funciona de forma continua (sin intermitencia).
+# Calibrar con scripts/calibrate_behavior_thresholds.py (teclas 5/6 y 7/8)
+DRIBBLER_PULSE_ON_MS = 90  # ms — duración del pulso encendido
+DRIBBLER_PULSE_OFF_MS = 0  # ms — duración del pulso apagado (0=continuo)
+
+# --- Posicionamiento detrás de la pelota (ataque sin dribbler) ---
+# El atacante se posiciona en la línea pelota-arco ANTES de hacer contacto,
+# eliminando la necesidad de rotar con la pelota o activar el dribbler.
+# BEHIND_BALL_APPROACH_PX debe ser > CAPTURE_ACTIVATE_DISTANCE_PX para no
+# rozar la pelota durante el posicionamiento.
+BEHIND_BALL_APPROACH_PX = 65       # px — distancia robot-pelota al posicionarse detrás
+BEHIND_BALL_LATERAL_OFFSET_PX = 75 # px — desvío lateral para rodear la pelota
+BEHIND_BALL_ALIGN_TOLERANCE_DEG = 15.0  # ° — tolerancia angular aceptable al posicionar
+PUSH_BURST_PWM = 70                # PWM — pulso anti-stiction al iniciar avance al contacto
 
 # =============================================================================
 # Parámetros de Control PID

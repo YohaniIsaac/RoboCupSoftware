@@ -23,6 +23,11 @@ from robot_soccer.config import (
     CAPTURE_OVERSHOOT_PX,
     CAPTURE_CONFIRM_DISTANCE_PX,
     DRIBBLER_HOLD_POWER,
+    BEHIND_BALL_APPROACH_PX,
+    BEHIND_BALL_LATERAL_OFFSET_PX,
+    BEHIND_BALL_ALIGN_TOLERANCE_DEG,
+    PUSH_BURST_PWM,
+    CONTACT_SETTLE_TIME_S,
 )
 
 from .base import (
@@ -760,7 +765,7 @@ def shoot_to_goal(blackboard):
     rf = blackboard.command_manager.rf_controller
     if rf:
         fw_id = blackboard.player.id + 1
-        rf.set_dribbler(fw_id, 0.0)
+        rf.set_dribbler(fw_id, 0)
 
     # Disparar
     blackboard.command_manager.kick_ball(
@@ -1183,72 +1188,331 @@ def is_no_attacker_closer_to_ball(blackboard):
 
     return True
 
+
+# =============================================================================
+# ATAQUE SIN DRIBBLER: posicionar detrás → contactar → disparar solenoide
+# =============================================================================
+
+def _path_near_ball(p1, p2, ball, threshold=35):
+    """Retorna True si el segmento p1→p2 pasa a menos de threshold px de ball."""
+    p1 = np.array(p1, dtype=float)
+    p2 = np.array(p2, dtype=float)
+    b  = np.array(ball, dtype=float)
+    d  = p2 - p1
+    len_sq = float(np.dot(d, d))
+    if len_sq < 1.0:
+        return False
+    t = float(np.dot(b - p1, d) / len_sq)
+    t = max(0.0, min(1.0, t))
+    closest = p1 + t * d
+    return bool(np.linalg.norm(closest - b) < threshold)
+
+
+def _move_behind_ball_start(blackboard):
+    """on_start: calcula la posición detrás de la pelota y emite el movimiento.
+
+    Posición objetivo: BEHIND_BALL_APPROACH_PX detrás del centro de la pelota,
+    en la línea arco-rival → pelota (lado opuesto al arco).
+    Si el camino directo pasa por la pelota, calcula un desvío lateral primero.
+    """
+    if not hasattr(blackboard, "command_manager"):
+        return NodeStatus.FAILURE
+
+    ball_pos   = np.array(blackboard.ball.get_position(), dtype=float)
+    goal_pos   = np.array(blackboard.opponent_goal_pos, dtype=float)
+    player_pos = np.array(blackboard.player.get_position(), dtype=float)
+
+    # Vector del arco hacia la pelota (dirección "detrás de la pelota")
+    goal_to_ball = ball_pos - goal_pos
+    dist_gtb = np.linalg.norm(goal_to_ball)
+    if dist_gtb < 1.0:
+        return NodeStatus.FAILURE
+
+    unit_behind = goal_to_ball / dist_gtb  # apunta desde arco → pelota (y más allá)
+
+    # Posición ideal: BEHIND_BALL_APPROACH_PX más allá de la pelota, lejos del arco
+    behind_pos = ball_pos + unit_behind * BEHIND_BALL_APPROACH_PX
+    behind_pos = np.array(blackboard.field.clamp(behind_pos.astype(int)), dtype=float)
+
+    # Guardar estado para on_running
+    blackboard._behind_ball_pos = behind_pos.copy()
+    blackboard._behind_ball_ref = ball_pos.copy()
+
+    # ¿El camino directo choca con la pelota?
+    if _path_near_ball(player_pos, behind_pos, ball_pos):
+        # Calcular desvío lateral: perpendicular al eje arco-pelota
+        ball_to_goal_unit = -unit_behind  # apunta de pelota → arco
+        perp = np.array([-ball_to_goal_unit[1], ball_to_goal_unit[0]])
+
+        # Elegir el lado donde ya está el robot (minimiza movimiento)
+        side = float(np.sign(np.dot(player_pos - ball_pos, perp)))
+        if side == 0.0:
+            side = 1.0
+
+        lateral = ball_pos + perp * side * BEHIND_BALL_LATERAL_OFFSET_PX
+        lateral = np.array(blackboard.field.clamp(lateral.astype(int)), dtype=float)
+
+        blackboard._behind_ball_detour = lateral.copy()
+        blackboard._behind_ball_phase  = 'detour'
+        target = (int(lateral[0]), int(lateral[1]))
+        log.info("[behind_ball] Robot %d | desvío lateral → (%d,%d)",
+                 blackboard.player.id, *target)
+    else:
+        blackboard._behind_ball_detour = None
+        blackboard._behind_ball_phase  = 'direct'
+        target = (int(behind_pos[0]), int(behind_pos[1]))
+        log.info("[behind_ball] Robot %d | camino directo → (%d,%d)",
+                 blackboard.player.id, *target)
+
+    blackboard.command_manager.move_robot_to(blackboard.player.id, target)
+    blackboard.last_action = "move_behind_ball"
+    return NodeStatus.RUNNING
+
+
+def _move_behind_ball_running(blackboard):
+    """on_running: monitorea el avance hacia la posición detrás de la pelota.
+
+    Fases:
+      'detour'  → espera llegar al punto lateral, luego cambia a 'direct'.
+      'direct'  → espera que el PID complete, luego verifica alineación angular.
+    Recalcula si la pelota se movió > 60 px del punto de referencia.
+    """
+    player_id  = blackboard.player.id
+    player_pos = np.array(blackboard.player.get_position(), dtype=float)
+    ball_pos   = np.array(blackboard.ball.get_position(), dtype=float)
+    phase      = getattr(blackboard, '_behind_ball_phase', 'direct')
+
+    # Recalcular si la pelota se movió demasiado
+    if np.linalg.norm(ball_pos - blackboard._behind_ball_ref) > 60:
+        log.info("[behind_ball] Robot %d | pelota movida, recalculando", player_id)
+        return _move_behind_ball_start(blackboard)
+
+    in_progress = player_id in blackboard.command_manager.actions_in_progress
+
+    if phase == 'detour':
+        detour = blackboard._behind_ball_detour
+        dist_detour = np.linalg.norm(player_pos - detour)
+        if not in_progress or dist_detour < ROBOT_POSITION_THRESHOLD:
+            # Llegamos al punto lateral → continuar hacia behind_pos
+            blackboard._behind_ball_phase = 'direct'
+            bp = blackboard._behind_ball_pos
+            target = (int(bp[0]), int(bp[1]))
+            blackboard.command_manager.move_robot_to(player_id, target)
+            log.info("[behind_ball] Robot %d | desvío OK, yendo a behind_pos (%d,%d)",
+                     player_id, *target)
+        return NodeStatus.RUNNING
+
+    # phase == 'direct'
+    if in_progress:
+        return NodeStatus.RUNNING
+
+    # PID completado → verificar alineación con la pelota
+    angle_to_ball = float(np.degrees(
+        np.arctan2(ball_pos[1] - player_pos[1], ball_pos[0] - player_pos[0])
+    ))
+    current_angle = blackboard.player.angle
+    angle_diff = abs((angle_to_ball - current_angle + 180) % 360 - 180)
+
+    if angle_diff <= BEHIND_BALL_ALIGN_TOLERANCE_DEG:
+        blackboard.last_action = "behind_ball_ready"
+        log.info("[behind_ball] Robot %d | listo | dist_ball=%.0fpx | align=%.1f°",
+                 player_id,
+                 np.linalg.norm(ball_pos - player_pos),
+                 angle_diff)
+        return NodeStatus.SUCCESS
+
+    # Rotar para alinearse con la pelota
+    log.info("[behind_ball] Robot %d | ajustando ángulo | diff=%.1f°", player_id, angle_diff)
+    blackboard.command_manager.rotate_robot_to(player_id, angle_to_ball)
+    return NodeStatus.RUNNING
+
+
+def create_move_behind_ball_node():
+    """Crea el nodo stateful que posiciona al robot detrás de la pelota."""
+    return StatefulActionNode(
+        _move_behind_ball_start,
+        _move_behind_ball_running,
+        name="PosicionarDetrásPelota"
+    )
+
+
+def _advance_to_contact_start(blackboard):
+    """on_start: inicia acercamiento LENTO a la pelota sin PID.
+
+    El robot ya está alineado con el arco (llegó desde detrás).
+    Usa creep_forward (PWM fijo bajo) en vez del PID para no empujar la pelota.
+    Inicializa los flags de contacto y asentamiento.
+    """
+    if not hasattr(blackboard, "command_manager"):
+        return NodeStatus.FAILURE
+
+    player_pos = np.array(blackboard.player.get_position(), dtype=float)
+    ball_pos   = np.array(blackboard.ball.get_position(), dtype=float)
+    dist       = float(np.linalg.norm(ball_pos - player_pos))
+
+    # Reiniciar estado de contacto
+    blackboard._contact_made        = False
+    blackboard._contact_settle_start = None
+
+    # ¿Ya en contacto desde el inicio?
+    if dist < CAPTURE_CONFIRM_DISTANCE_PX:
+        blackboard._contact_made         = True
+        blackboard._contact_settle_start = time.time()
+        blackboard.player._has_ball      = True
+        blackboard.last_action           = "settling_contact"
+        log.info("[advance_contact] Robot %d | contacto inmediato | dist=%.1fpx",
+                 blackboard.player.id, dist)
+        return NodeStatus.RUNNING
+
+    # Iniciar creep lento directo (execute_commands lo mantiene activo)
+    blackboard.command_manager.creep_forward(blackboard.player.id)
+    blackboard.last_action = "advancing_to_contact"
+    log.info("[advance_contact] Robot %d | creep lento iniciado | dist=%.1fpx",
+             blackboard.player.id, dist)
+    return NodeStatus.RUNNING
+
+
+def _advance_to_contact_running(blackboard):
+    """on_running: monitorea contacto, asentamiento y posible escape de la pelota.
+
+    Fases:
+      Acercamiento: creep activo hasta que dist < CAPTURE_CONFIRM_DISTANCE_PX.
+        - Si la pelota escapa (dist > BEHIND_BALL_APPROACH_PX * 1.5) → FAILURE.
+      Asentamiento: robot detenido, espera CONTACT_SETTLE_TIME_S.
+        - Si la pelota escapa (dist > CAPTURE_CONFIRM_DISTANCE_PX * 2) → FAILURE.
+        - Tras el tiempo de espera → SUCCESS y se dispara el solenoide.
+    """
+    player_id  = blackboard.player.id
+    player_pos = np.array(blackboard.player.get_position(), dtype=float)
+    ball_pos   = np.array(blackboard.ball.get_position(), dtype=float)
+    dist       = float(np.linalg.norm(ball_pos - player_pos))
+
+    contact_made = getattr(blackboard, '_contact_made', False)
+
+    # ──────────────────────────────
+    # FASE 1: Acercamiento (creep activo)
+    # ──────────────────────────────
+    if not contact_made:
+        # Pelota empujada demasiado lejos → robot fue rápido o pelota libre
+        if dist > BEHIND_BALL_APPROACH_PX * 1.5:
+            blackboard.command_manager.actions_in_progress.pop(player_id, None)
+            rf = blackboard.command_manager.rf_controller
+            if rf:
+                rf.set_motors(player_id + 1, 0, 0)
+            log.info("[advance_contact] Robot %d | pelota escapó (%.0fpx) → FAILURE",
+                     player_id, dist)
+            return NodeStatus.FAILURE
+
+        # Contacto alcanzado: detener robot y empezar asentamiento
+        if dist < CAPTURE_CONFIRM_DISTANCE_PX:
+            blackboard.command_manager.actions_in_progress.pop(player_id, None)
+            rf = blackboard.command_manager.rf_controller
+            if rf:
+                rf.set_motors(player_id + 1, 0, 0)
+            blackboard._contact_made         = True
+            blackboard._contact_settle_start = time.time()
+            blackboard.player._has_ball      = True
+            blackboard.last_action           = "settling_contact"
+            log.info("[advance_contact] Robot %d | contacto! Asentando %.2fs...",
+                     player_id, CONTACT_SETTLE_TIME_S)
+
+        return NodeStatus.RUNNING
+
+    # ──────────────────────────────
+    # FASE 2: Asentamiento (robot quieto)
+    # ──────────────────────────────
+    # Pelota escapó durante el asentamiento
+    if dist > CAPTURE_CONFIRM_DISTANCE_PX * 2:
+        blackboard.player._has_ball = False
+        log.info("[advance_contact] Robot %d | pelota escapó en asentamiento (%.0fpx) → FAILURE",
+                 player_id, dist)
+        return NodeStatus.FAILURE
+
+    # ¿Terminó el tiempo de asentamiento?
+    elapsed = time.time() - blackboard._contact_settle_start
+    if elapsed >= CONTACT_SETTLE_TIME_S:
+        blackboard.player._has_ball = True
+        blackboard.last_action      = "contact_confirmed"
+        log.info("[advance_contact] Robot %d | asentamiento OK (%.2fs) → SUCCESS",
+                 player_id, elapsed)
+        return NodeStatus.SUCCESS
+
+    return NodeStatus.RUNNING
+
+
+def create_advance_to_contact_node():
+    """Crea el nodo stateful que avanza al contacto con la pelota."""
+    return StatefulActionNode(
+        _advance_to_contact_start,
+        _advance_to_contact_running,
+        name="AvanzarAlContacto"
+    )
+
+
+def kick_immediately(blackboard):
+    """Dispara el solenoide inmediatamente desde la posición actual.
+
+    El robot ya está alineado con el arco (posicionado por move_behind_ball).
+    No necesita rotar ni moverse: dispara directo.
+
+    Returns:
+        NodeStatus.SUCCESS siempre (el disparo es instantáneo).
+    """
+    if not hasattr(blackboard, "command_manager"):
+        return NodeStatus.FAILURE
+
+    player_pos = blackboard.player.get_position()
+    goal_pos   = blackboard.opponent_goal_pos
+
+    # Disparar solenoide en robots reales
+    rf = blackboard.command_manager.rf_controller
+    if rf:
+        fw_id = blackboard.player.id + 1
+        rf.kick(fw_id, 1.0)
+
+    # En simulación: aplicar velocidad a la pelota hacia el arco
+    ball = blackboard.ball
+    if hasattr(ball, 'dx') and hasattr(ball, 'dy'):
+        direction = np.array(goal_pos, dtype=float) - np.array(player_pos, dtype=float)
+        dist = np.linalg.norm(direction)
+        if dist > 0:
+            direction /= dist
+        ball.dx = 15.0 * direction[0]
+        ball.dy = 15.0 * direction[1]
+
+    blackboard.player._has_ball = False
+    blackboard.last_action = "kick_immediately"
+    log.info("[kick] Robot %d | solenoide disparado → arco (%.0f, %.0f)",
+             blackboard.player.id, goal_pos[0], goal_pos[1])
+    return NodeStatus.SUCCESS
+
+
 # CREACIÓN DE ÁRBOLES DE COMPORTAMIENTO COMPLETOS
 
 
 def create_attacker_tree():
-    """Crea el árbol de comportamiento para un jugador atacante.
+    """Árbol de comportamiento para atacante sin dribbler activo.
+
+    Estrategia: posicionarse detrás de la pelota (alineado con el arco rival)
+    → avanzar hasta hacer contacto → disparar el solenoide inmediatamente.
+    El robot nunca necesita rotar con la pelota ni activar el dribbler.
+
+    Ciclo continuo:
+        PosicionarDetrásPelota → AvanzarAlContacto → DisparoInmediato → (reinicio)
 
     Returns:
-        SelectorNode: Árbol de comportamiento completo para atacante
+        SelectorNode: Árbol de comportamiento del atacante.
     """
-    # COMPORTAMIENTO OFENSIVO (con pelota)
-    offensive_with_ball = SequenceNode("OfensivaConPelota")
-    offensive_with_ball.add_children(
-        ConditionNode(is_player_with_ball, "TienePelota"),
-        SelectorNode("AccionOfensiva").add_children(
-            # Intentar tirar si es posible
-            SequenceNode("IntentarTiro").add_children(
-                ConditionNode(is_shot_possible, "TiroPosible"),
-                ActionNode(shoot_to_goal, "TirarAPorteria"),
-            ),
-            # Intentar pasar si es posible
-            SequenceNode("IntentarPase").add_children(
-                ConditionNode(is_pass_possible, "PasePosible"),
-                ActionNode(pass_to_teammate, "PasarACompanero"),
-            ),
-            # Avanzar con la pelota
-            ActionNode(dribble_forward, "AvanzarConPelota"),
-        ),
+    # Ciclo de ataque directo: posicionar → contactar → disparar
+    attack_cycle = SequenceNode("CicloAtaqueDirecto")
+    attack_cycle.add_children(
+        create_move_behind_ball_node(),
+        create_advance_to_contact_node(),
+        ActionNode(kick_immediately, "DisparoInmediato"),
     )
 
-    # COMPORTAMIENTO OFENSIVO (sin pelota)
-    offensive_without_ball = SequenceNode("OfensivaSinPelota")
-    offensive_without_ball.add_children(
-        InverterNode(ConditionNode(is_player_with_ball, "NoTienePelota")),
-        SelectorNode("AccionSinPelota").add_children(
-            # Capturar la pelota si está libre y cerca del equipo
-            SequenceNode("CapturarPelotaLibre").add_children(
-                ConditionNode(is_ball_free, "PelotaLibre"),
-                ConditionNode(is_ball_close_to_team, "PelotaCercaDelEquipo"),
-                create_move_to_ball_node(),
-                ActionNode(capture_ball, "CapturarPelota"),
-                create_orient_to_goal_node(),
-            ),
-            # NUEVA: Capturar pelota libre si soy el atacante más cercano (sin restricción de proximidad)
-            SequenceNode("CapturarPelotaLibreSiMasCercano").add_children(
-                ConditionNode(is_ball_free, "PelotaLibre"),
-                ConditionNode(is_closest_attacker_to_ball, "AtacanteMasCercano"),
-                create_move_to_ball_node(),
-                ActionNode(capture_ball, "CapturarPelota"),
-                create_orient_to_goal_node(),
-            ),
-            # Interceptar si el rival tiene la pelota
-            SequenceNode("InterceptarRival").add_children(
-                ConditionNode(is_ball_in_opponent_possession, "PelotaEnPosesionRival"),
-                ActionNode(intercept_ball, "InterceptarPelota"),
-            ),
-            # Buscar posición de apoyo si un compañero tiene la pelota
-            SequenceNode("ApoyoOfensivo").add_children(
-                ConditionNode(is_ball_in_team_possession, "PelotaEnPosesionEquipo"),
-                ActionNode(move_to_support_position, "MoverAPosicionDeApoyo"),
-            ),
-        ),
-    )
-
-    # ÁRBOL PRINCIPAL DEL ATACANTE
     attacker_tree = SelectorNode("ComportamientoAtacante")
-    attacker_tree.add_children(offensive_with_ball, offensive_without_ball)
+    attacker_tree.add_children(attack_cycle)
 
     return attacker_tree
 
