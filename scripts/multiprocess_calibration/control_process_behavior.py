@@ -764,15 +764,18 @@ def control_loop_behavior_pure(perception_pipe, control_state_pipe, keyboard_pip
     running = True
     robot_stopped = False
 
-    # --- Estado de captura (3 fases sin dribbler) ---
+    # --- Estado de captura ---
     # 'idle':              sin movimiento
-    # 'approach':          fase 1 — PID hacia posición DETRÁS de la pelota
+    # 'approach':          fase 1a — PID de posición hacia DETRÁS de la pelota
+    # 'approach_align':    fase 1b — rotación en sitio para apuntar a la pelota
+    #                       (ángulo calculado desde posición real del robot al terminar 1a)
     # 'capture_creeping':  fase 2a — creep lento directo hacia la pelota
     # 'capture_settling':  fase 2b — contacto confirmado, esperando asentamiento
     # 'confirmed':         contacto y asentamiento OK
     capture_phase = 'idle'
     ball_waypoint = None       # posición del waypoint (simula la pelota)
-    behind_ball_target = None  # posición calculada detrás de la pelota (fase 1)
+    behind_ball_target = None  # posición calculada detrás de la pelota (fase 1a)
+    behind_ball_target_angle_deg = None  # ángulo calculado al terminar 1a (robot → pelota real)
     overshoot_target = None    # compatibilidad con visualización existente
     contact_start_time = None  # timestamp cuando se confirmó el contacto
     settle_elapsed = 0.0       # segundos transcurridos en fase settling
@@ -782,6 +785,8 @@ def control_loop_behavior_pure(perception_pipe, control_state_pipe, keyboard_pip
 
     last_state_send_time = 0
     STATE_SEND_INTERVAL = 0.04  # ~25 Hz
+    last_cmd_type = 'idle'       # Último tipo de comando enviado a motores
+    last_creep_log_time = 0.0    # Para logs periódicos durante Fase 2
 
     log.info("✅ Control iniciado - Esperando datos de percepción...")
 
@@ -837,30 +842,36 @@ def control_loop_behavior_pure(perception_pipe, control_state_pipe, keyboard_pip
                                 behind_ball_target = [bhx, bhy]
                                 target_waypoint = [bhx, bhy]
                             else:
+                                bhx, bhy = int(bx), int(by)
                                 behind_ball_target = list(target_waypoint)
+                            # El ángulo se calculará FRESCO cuando se alcance la posición
+                            behind_ball_target_angle_deg = None
                             ball_waypoint = [int(bx), int(by)]
                             overshoot_target = None
                             movement_active = True
                             capture_phase = 'approach'
                             controller.position_threshold = behavior_params['position_threshold']
                             robot_stopped = False
-                            log.info("▶️  FASE 1: Yendo DETRÁS de la pelota → (%d,%d) | approach=%dpx",
+                            log.info("▶️  FASE 1a: Yendo DETRÁS de la pelota → (%d,%d) | approach=%dpx",
                                      target_waypoint[0], target_waypoint[1],
                                      behavior_params['behind_ball_approach_px'])
                         else:
                             # Pausar
                             movement_active = False
                             robot_stopped = False
-                            if capture_phase in ('capture_creeping',):
-                                if rf_controller and robot_available:
+                            if capture_phase == 'capture_creeping':
+                                if rf_controller:
                                     rf_controller.set_motors(firmware_id, 0, 0)
                             capture_phase = 'idle'
                             overshoot_target = None
+                            behind_ball_target_angle_deg = None
                             controller.position_threshold = behavior_params['position_threshold']
                             log.info("⏸️  Movimiento PAUSADO")
                     elif command == 'start_capture':
                         # FASE 2: creep lento directo hacia la pelota (sin PID)
-                        if not movement_active and ball_waypoint and robot and capture_phase in ('idle', 'approach'):
+                        # Solo permite si Fase 1b (alineación) completó
+                        if (not movement_active and ball_waypoint and robot
+                                and capture_phase == 'approach_align'):
                             capture_phase = 'capture_creeping'
                             contact_start_time = None
                             movement_active = False
@@ -870,12 +881,18 @@ def control_loop_behavior_pure(perception_pipe, control_state_pipe, keyboard_pip
                             )
                             log.info("▶️  FASE 2: Creep lento | speed=%d PWM | dist=%.0fpx",
                                      behavior_params['creep_speed_pwm'], dist_to_ball_now)
+                        elif capture_phase in ('approach', 'idle') and not movement_active:
+                            log.warning("⚠️  Completa fase 1 primero (ESPACIO): posición + alineación")
+                        elif capture_phase == 'approach' and movement_active:
+                            log.info("Fase 1a en curso (acercamiento) — espera a que complete")
+                        elif capture_phase == 'approach_align' and movement_active:
+                            log.info("Fase 1b en curso (alineando) — espera a que complete")
                         elif capture_phase == 'capture_creeping':
                             log.info("Ya en fase 2 (creeping)")
                         elif capture_phase in ('capture_settling', 'confirmed'):
                             log.info("Ya hay contacto — presiona X para reiniciar")
                         else:
-                            log.warning("Necesitas un waypoint y completar fase 1 primero")
+                            log.warning("Estado inesperado: %s | movement=%s", capture_phase, movement_active)
                     elif command == 'start_rotate':
                         # Sin dribbler: G ya no gira. Muestra instrucción útil.
                         log.info("ℹ️  Fase 3 (girar) no aplica sin dribbler. "
@@ -885,10 +902,11 @@ def control_loop_behavior_pure(perception_pipe, control_state_pipe, keyboard_pip
                         ball_waypoint = None
                         overshoot_target = None
                         behind_ball_target = None
+                        behind_ball_target_angle_deg = None
                         movement_active = False
                         robot_stopped = False
                         if capture_phase in ('capture_creeping',):
-                            if rf_controller and robot_available:
+                            if rf_controller:
                                 rf_controller.set_motors(firmware_id, 0, 0)
                         capture_phase = 'idle'
                         contact_start_time = None
@@ -901,7 +919,8 @@ def control_loop_behavior_pure(perception_pipe, control_state_pipe, keyboard_pip
                             ball_waypoint = list(waypoint)
                             overshoot_target = None
                             behind_ball_target = None
-                            if capture_phase in ('capture_creeping',) and rf_controller and robot_available:
+                            behind_ball_target_angle_deg = None
+                            if capture_phase in ('capture_creeping',) and rf_controller:
                                 rf_controller.set_motors(firmware_id, 0, 0)
                             capture_phase = 'idle'
                             contact_start_time = None
@@ -952,7 +971,7 @@ def control_loop_behavior_pure(perception_pipe, control_state_pipe, keyboard_pip
                     log.error(f"Error recibiendo comando: {e}")
 
             # --- Fase 2a: Creep lento hacia la pelota (sin PID) ---
-            if capture_phase == 'capture_creeping' and robot and rf_controller and robot_available:
+            if capture_phase == 'capture_creeping' and robot and rf_controller:
                 bx = ball_waypoint[0] - robot.x
                 by = ball_waypoint[1] - robot.y
                 dist_to_ball_now = math.sqrt(bx * bx + by * by)
@@ -960,6 +979,7 @@ def control_loop_behavior_pure(perception_pipe, control_state_pipe, keyboard_pip
                 if dist_to_ball_now < confirm_px:
                     # Contacto confirmado: detener robot, empezar asentamiento
                     rf_controller.set_motors(firmware_id, 0, 0)
+                    last_cmd_type = 'stop'
                     capture_phase = 'capture_settling'
                     contact_start_time = current_time
                     settle_elapsed = 0.0
@@ -969,6 +989,15 @@ def control_loop_behavior_pure(perception_pipe, control_state_pipe, keyboard_pip
                     # Enviar creep directo cada ciclo (100 Hz mantiene motor activo)
                     speed = behavior_params['creep_speed_pwm']
                     rf_controller.set_motors(firmware_id, speed, speed)
+                    last_cmd_type = f'creep_{speed}'
+                    # Log periódico cada 500ms para monitorear alineación durante creep
+                    if current_time - last_creep_log_time >= 0.5:
+                        robot_deg = math.degrees(robot.angle)
+                        ang_to_ball = math.degrees(math.atan2(by, bx))
+                        err_creep = ((ang_to_ball - robot_deg + 180) % 360) - 180
+                        log.info("🏃 FASE 2 | dist=%.0fpx | Robot=%.1f° | →Pelota=%.1f° | err=%+.1f°",
+                                 dist_to_ball_now, robot_deg, ang_to_ball, err_creep)
+                        last_creep_log_time = current_time
 
             # --- Fase 2b: Asentamiento (robot quieto, esperando estabilización) ---
             elif capture_phase == 'capture_settling' and robot:
@@ -989,27 +1018,56 @@ def control_loop_behavior_pure(perception_pipe, control_state_pipe, keyboard_pip
                     log.info("✅ ASENTAMIENTO OK (%.2fs) → CONFIRMADO | dist_final=%.1fpx",
                              settle_elapsed, dist_to_ball_now)
 
-            # --- Fase 1: PID hacia posición detrás de la pelota ---
-            if movement_active and robot and target_waypoint:
+            # --- Fase 1a: PID de posición hacia detrás de la pelota ---
+            if movement_active and robot and target_waypoint and capture_phase == 'approach':
+                last_cmd_type = 'pid_mover'
                 reached = controller.move_to_position(robot, tuple(target_waypoint))
                 if reached:
-                    if capture_phase == 'approach':
-                        dist_bh = math.sqrt(
-                            (ball_waypoint[0] - robot.x)**2 + (ball_waypoint[1] - robot.y)**2
-                        )
-                        log.info("✅ FASE 1 completada | robot detrás de pelota (dist_pelota=%.0fpx) "
-                                 "| Presiona D para fase 2 (creep).", dist_bh)
-                        movement_active = False
-                        robot_stopped = False
-                    else:
-                        log.info("✅ Waypoint alcanzado en (%d, %d)",
-                                 target_waypoint[0], target_waypoint[1])
-                        target_waypoint = None
-                        movement_active = False
-                        robot_stopped = False
+                    # Calcular ángulo FRESCO desde posición real del robot a pelota actual
+                    dx_a = ball_waypoint[0] - robot.x
+                    dy_a = ball_waypoint[1] - robot.y
+                    behind_ball_target_angle_deg = math.degrees(math.atan2(dy_a, dx_a))
+                    capture_phase = 'approach_align'
+                    robot_stopped = False
+                    log.info("📍 FASE 1b: Posición OK | Alineando hacia pelota → %.1f° "
+                             "(robot en %.1f°)",
+                             behind_ball_target_angle_deg, math.degrees(robot.angle))
+
+            # --- Fase 1b: Rotación en sitio para apuntar hacia la pelota ---
+            elif movement_active and robot and capture_phase == 'approach_align':
+                last_cmd_type = 'pid_girar'
+                aligned = controller.rotate_to_angle(robot, behind_ball_target_angle_deg)
+                if aligned:
+                    dist_bh = math.sqrt(
+                        (ball_waypoint[0] - robot.x)**2 + (ball_waypoint[1] - robot.y)**2
+                    )
+                    robot_deg = math.degrees(robot.angle)
+                    bx_r = ball_waypoint[0] - robot.x
+                    by_r = ball_waypoint[1] - robot.y
+                    angle_to_ball = math.degrees(math.atan2(by_r, bx_r))
+                    goal_x_f = float(CAMERA_PERSPECTIVE_WIDTH)
+                    goal_y_f = float(CAMERA_PERSPECTIVE_HEIGHT) / 2.0
+                    angle_to_goal = math.degrees(math.atan2(goal_y_f - robot.y,
+                                                             goal_x_f - robot.x))
+                    err_robot_ball = ((angle_to_ball - robot_deg + 180) % 360) - 180
+                    err_robot_goal = ((angle_to_goal - robot_deg + 180) % 360) - 180
+                    err_ball_goal  = ((angle_to_ball - angle_to_goal + 180) % 360) - 180
+                    log.info("✅ FASE 1 completada | dist_pelota=%.0fpx", dist_bh)
+                    log.info("   Robot=%.1f° | →Pelota=%.1f° (err=%+.1f°) | →Arco=%.1f° (err=%+.1f°)",
+                             robot_deg, angle_to_ball, err_robot_ball,
+                             angle_to_goal, err_robot_goal)
+                    log.info("   Desalineación pelota↔arco: %+.1f° "
+                             "(0°=perfectos | <5°=aceptable | >10°=problema)",
+                             err_ball_goal)
+                    log.info("   Presiona D para fase 2 (creep).")
+                    movement_active = False
+                    robot_stopped = False
+
+            # --- Sin movimiento activo: detener robot (excepto fases de creep/settling) ---
             elif capture_phase not in ('capture_creeping', 'capture_settling', 'confirmed'):
-                if robot and robot_available and not robot_stopped:
+                if robot and rf_controller and not robot_stopped:
                     rf_controller.set_motors(firmware_id, 0, 0)
+                    last_cmd_type = 'stop'
                     robot_stopped = True
 
             if current_time - last_state_send_time >= STATE_SEND_INTERVAL:
@@ -1065,6 +1123,7 @@ def control_loop_behavior_pure(perception_pipe, control_state_pipe, keyboard_pip
                         'behind_ball_target': behind_ball_target,
                         'dist_to_ball': round(dist_to_ball_now, 1) if ball_waypoint and robot else None,
                         'settle_elapsed': round(settle_elapsed, 2) if capture_phase == 'capture_settling' else None,
+                        'last_cmd_type': last_cmd_type,
                         'timestamp': current_time
                     })
                     last_state_send_time = current_time

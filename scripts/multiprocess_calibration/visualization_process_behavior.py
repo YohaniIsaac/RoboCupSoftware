@@ -79,6 +79,7 @@ def visualization_loop_behavior(perception_pipe, control_state_pipe, keyboard_pi
     last_behind_ball_target = None
     last_dist_to_ball = None
     last_settle_elapsed = None
+    last_cmd_type = 'idle'
 
     # Waypoint persistence: keeps showing where the target was after arrival
     reached_waypoint = None       # waypoint that was reached (persists until new one is set)
@@ -189,6 +190,7 @@ def visualization_loop_behavior(perception_pipe, control_state_pipe, keyboard_pi
                     last_behind_ball_target = control_data.get('behind_ball_target')
                     last_dist_to_ball = control_data.get('dist_to_ball')
                     last_settle_elapsed = control_data.get('settle_elapsed')
+                    last_cmd_type = control_data.get('last_cmd_type', last_cmd_type)
 
                     # Detect waypoint reached: target went from something to None
                     if prev_target_waypoint is not None and new_target is None:
@@ -275,18 +277,46 @@ def visualization_loop_behavior(perception_pipe, control_state_pipe, keyboard_pi
                 cv2.putText(right_col, "FULL VIEW", (5, mini_h + 15),
                            cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1)
 
+                # --- Indicador de último comando enviado al robot ---
+                cmd_info = {
+                    'idle':      ('SIN COMANDO',   (80, 80, 80)),
+                    'stop':      ('■ STOP',         (50, 50, 220)),
+                    'pid_mover': ('→ PID MOVER',    (0, 200, 255)),
+                    'pid_girar': ('↻ PID GIRAR',    (0, 160, 255)),
+                }
+                # creep_NNN tiene prefijo 'creep_'
+                if last_cmd_type.startswith('creep_'):
+                    pwm_val = last_cmd_type.split('_')[1]
+                    cmd_label, cmd_color = f'▶ CREEP {pwm_val}PWM', (0, 230, 120)
+                else:
+                    cmd_label, cmd_color = cmd_info.get(
+                        last_cmd_type, (last_cmd_type.upper(), (200, 200, 200)))
+                # Fondo del badge
+                badge_x1, badge_y1 = 5, info_y
+                badge_x2, badge_y2 = right_col_w - 5, info_y + 22
+                cv2.rectangle(right_col, (badge_x1, badge_y1), (badge_x2, badge_y2),
+                              cmd_color, -1)
+                cv2.putText(right_col, cmd_label,
+                           (badge_x1 + 6, badge_y1 + 15),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 2)
+                info_y += 28
+
                 # Status + capture phase
                 phase_info = {
-                    'idle':              ('DETENIDO',            (100, 100, 100)),
-                    'approach':          ('FASE 1: Detrás pelota',(255, 200, 0)),
-                    'capture_creeping':  ('FASE 2: Creep lento', (0, 200, 255)),
-                    'capture_settling':  ('FASE 2: Asentando...', (0, 165, 255)),
-                    'confirmed':         ('CONTACTO CONFIRMADO', (0, 255, 80)),
+                    'idle':             ('DETENIDO',                (100, 100, 100)),
+                    'approach':         ('FASE 1a: Hacia posición', (255, 200, 0)),
+                    'approach_align':   ('FASE 1b: Alineando...',   (255, 140, 0)),
+                    'capture_creeping': ('FASE 2: Creep lento',     (0, 200, 255)),
+                    'capture_settling': ('FASE 2: Asentando...',    (0, 165, 255)),
+                    'confirmed':        ('CONTACTO CONFIRMADO',     (0, 255, 80)),
                 }
                 ph_text, ph_color = phase_info.get(
-                    last_capture_phase, ('MOVING', (255, 255, 255)))
+                    last_capture_phase, (last_capture_phase.upper(), (255, 255, 255)))
                 if last_movement_active and last_capture_phase == 'approach':
-                    ph_text = 'FASE 1: Navegando...'
+                    ph_text = 'FASE 1a: Navegando...'
+                elif not last_movement_active and last_capture_phase == 'approach_align':
+                    ph_text = 'FASE 1b: Alineado ✓'
+                    ph_color = (0, 255, 80)
                 cv2.putText(right_col, ph_text, (5, info_y + 15),
                            cv2.FONT_HERSHEY_SIMPLEX, 0.45, ph_color, 2)
 
