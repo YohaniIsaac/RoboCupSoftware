@@ -1,7 +1,7 @@
 import time
 import logging
 import numpy as np
-from robot_soccer.config import FIELD_SIM, DRIBBLE_PWM_FACTOR, DRIBBLER_CAPTURE_POWER, DRIBBLER_HOLD_POWER
+from robot_soccer.config import FIELD_SIM, DRIBBLE_PWM_FACTOR, DRIBBLER_CAPTURE_POWER, DRIBBLER_HOLD_POWER, CAPTURE_CREEP_SPEED_PWM
 from robot_soccer.controllers.differential_drive import DifferentialDriveController
 from robot_soccer.controllers.robot_action_executor import RobotActionExecutor
 from robot_soccer.communication.rf_controller import RFController
@@ -100,7 +100,7 @@ class RobotCommandManager:
         if self.rf_controller:
             for player in self.team_players:
                 firmware_id = player.id + 1
-                self.rf_controller.set_dribbler(firmware_id, 0.0)  # apagar dribbler
+                self.rf_controller.set_dribbler(firmware_id, 0)  # apagar dribbler
                 self.rf_controller.stop_robot(firmware_id)
 
             self.rf_controller.shutdown()
@@ -188,6 +188,14 @@ class RobotCommandManager:
                         del self.actions_in_progress[player.id]
                         log.info("Robot %i: Movimiento con pelota completado a %s",
                                  player.id, action['target_pos'])
+
+                elif action['type'] == 'creep_forward':
+                    # Avance lento directo (sin PID) para acercamiento a la pelota.
+                    # Permanece activo hasta que el BT lo cancele explícitamente.
+                    if self.rf_controller:
+                        fw_id = player.id + 1
+                        speed = action.get('speed', CAPTURE_CREEP_SPEED_PWM)
+                        self.rf_controller.set_motors(fw_id, speed, speed)
 
     def move_robot_to(self, player_id, target_pos, target_angle=None, speed_factor=1.0):
         """Ordena a un robot moverse a una posición específica.
@@ -320,6 +328,25 @@ class RobotCommandManager:
         }
         log.info("Robot %i: Ordenado patear pelota hacia %s con potencia %.2f",
                  player_id, target_pos, power)
+
+    def creep_forward(self, player_id, speed=None):
+        """Avance lento directo hacia adelante, sin PID.
+
+        Envía PWM constante a ambos motores a través de execute_commands(),
+        permaneciendo activo hasta que el BT cancele la acción explícitamente.
+        Usado para acercarse a la pelota suavemente sin empujarla.
+
+        Args:
+            player_id (int): ID del jugador.
+            speed (int, optional): PWM de avance. Defaults a CAPTURE_CREEP_SPEED_PWM.
+        """
+        if speed is None:
+            speed = CAPTURE_CREEP_SPEED_PWM
+        self.actions_in_progress[player_id] = {
+            'type': 'creep_forward',
+            'speed': int(speed),
+        }
+        log.info("Robot %i: Creep forward activado | PWM=%d", player_id, speed)
 
     def move_with_ball(self, player_id, target_pos, ball, speed_factor=0.7):
         """Ordena a un robot moverse con la pelota hacia una posición.

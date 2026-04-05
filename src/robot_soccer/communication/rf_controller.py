@@ -235,7 +235,7 @@ class RFController:
 
         return success
 
-    def set_dribbler(self, robot_id, power=1.0):
+    def set_dribbler(self, robot_id, power=255):
         """Establece la potencia del dribbler de un robot.
 
         El firmware controla el motor DC del dribbler via SoftPWM,
@@ -243,14 +243,14 @@ class RFController:
 
         Args:
             robot_id (int): ID del robot (1-4).
-            power (float): Potencia del dribbler (0.0-1.0). Defaults to 1.0.
-                0.0 = apagado, 0.4 = mantener pelota, 1.0 = captura máxima.
+            power (int): Potencia del dribbler en PWM (0-255). Defaults to 255.
+                0 = apagado, ~115 = mantener pelota, 255 = captura máxima.
 
         Returns:
             bool: True si el comando se envió correctamente, False en caso contrario.
         """
-        # Convertir potencia normalizada (0-1) a valor para Arduino (0-255)
-        power_val = int(power * 255)
+        # Clampar a rango válido 0-255
+        power_val = max(0, min(255, int(power)))
 
         # Generar comando
         command = self.protocol.format_dribbler_command(robot_id, power_val)

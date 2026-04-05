@@ -41,6 +41,8 @@ from robot_soccer.config import (
     CAMERA_PERSPECTIVE_ENABLED, CAMERA_PERSPECTIVE_SRC_POINTS,
     RANGO_COLOR_NARANJO, FIELD_CAM, CAPTURE_CONFIRM_DISTANCE_PX,
     DRIBBLER_HOLD_POWER,
+    DRIBBLER_PULSE_ON_MS,
+    DRIBBLER_PULSE_OFF_MS,
 )
 from robot_soccer.utils.camera_utils import get_camera_index
 
@@ -259,6 +261,9 @@ def decision_process(perception_pipe, viz_state_pipe, keyboard_pipe,
     DRIBBLER_KEEPALIVE = 0.08  # 80ms < timeout firmware 100ms
                              # Esto da tiempo al PID de completar rotacion/movimiento
                              # entre cada decision del arbol de comportamiento
+    dribbler_pulse_phase = 'on'   # fase actual del pulso: 'on' u 'off'
+    dribbler_pulse_timer = 0.0    # tiempo de inicio de la fase actual
+    prev_has_ball = False         # para detectar flanco de subida de _has_ball
 
     log.info("BehaviorManager listo. Presiona ESPACIO para activar comportamiento.")
 
@@ -311,7 +316,7 @@ def decision_process(perception_pipe, viz_state_pipe, keyboard_pipe,
                             firmware_id = robot_id + 1
                             rf = behavior_manager.command_manager.rf_controller
                             rf.set_motors(firmware_id, 0, 0)
-                            rf.set_dribbler(firmware_id, 0.0)  # apagar dribbler al pausar
+                            rf.set_dribbler(firmware_id, 0)  # apagar dribbler al pausar
                             player._has_ball = False  # resetear estado al pausar
                 except Exception:
                     pass
@@ -344,15 +349,43 @@ def decision_process(perception_pipe, viz_state_pipe, keyboard_pipe,
 
                 behavior_manager.update_game_context((posesion, proximidad, zona))
 
-            # --- Dribbler keepalive ---
-            # Reenviar 'D' cada 80ms mientras el robot tenga la pelota.
-            # Después del cambio en firmware, detenerMovimiento() también apaga el dribbler,
-            # por lo que sin este keepalive el dribbler se apagaría en 100ms.
-            if (behavior_active and player._has_ball and robot_available
-                    and now - last_dribbler_keepalive >= DRIBBLER_KEEPALIVE):
+            # --- Dribbler keepalive con pulso intermitente ---
+            if behavior_active and player._has_ball and robot_available:
                 firmware_id = robot_id + 1
-                behavior_manager.command_manager.rf_controller.set_dribbler(firmware_id, DRIBBLER_HOLD_POWER)
-                last_dribbler_keepalive = now
+                rf = behavior_manager.command_manager.rf_controller
+
+                # Resetear ciclo de pulso al capturar la pelota (flanco subida)
+                if player._has_ball and not prev_has_ball:
+                    dribbler_pulse_phase = 'on'
+                    dribbler_pulse_timer = now
+
+                pulse_on_s = DRIBBLER_PULSE_ON_MS / 1000.0
+                pulse_off_s = DRIBBLER_PULSE_OFF_MS / 1000.0
+
+                if pulse_off_s <= 0:
+                    # Modo continuo
+                    if now - last_dribbler_keepalive >= DRIBBLER_KEEPALIVE:
+                        rf.set_dribbler(firmware_id, DRIBBLER_HOLD_POWER)
+                        last_dribbler_keepalive = now
+                else:
+                    phase_elapsed = now - dribbler_pulse_timer
+
+                    if dribbler_pulse_phase == 'on':
+                        if now - last_dribbler_keepalive >= DRIBBLER_KEEPALIVE:
+                            rf.set_dribbler(firmware_id, DRIBBLER_HOLD_POWER)
+                            last_dribbler_keepalive = now
+                        if phase_elapsed >= pulse_on_s:
+                            rf.set_dribbler(firmware_id, 0)
+                            dribbler_pulse_phase = 'off'
+                            dribbler_pulse_timer = now
+                    else:  # 'off'
+                        if phase_elapsed >= pulse_off_s:
+                            rf.set_dribbler(firmware_id, DRIBBLER_HOLD_POWER)
+                            last_dribbler_keepalive = now
+                            dribbler_pulse_phase = 'on'
+                            dribbler_pulse_timer = now
+
+            prev_has_ball = player._has_ball
 
             # --- Ejecutar comportamiento ---
             if behavior_active and player_initialized and ball_initialized:

@@ -60,7 +60,7 @@ def draw_panel(dribbler_on, dribbler_power, kick_power, last_event, robot_id):
                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0) if dribbler_on else (150, 150, 150), 2)
     cv2.putText(img, d_label, (90, 128),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0) if dribbler_on else (150, 150, 150), 2)
-    cv2.putText(img, f"{int(dribbler_power * 100)}%", (148, 128),
+    cv2.putText(img, f"PWM {dribbler_power}", (130, 128),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0) if dribbler_on else (120, 120, 120), 1)
 
     # Estado kicker
@@ -93,8 +93,8 @@ def draw_panel(dribbler_on, dribbler_power, kick_power, last_event, robot_id):
     cv2.line(img, (0, 270), (w, 270), (60, 60, 60), 1)
     controls = [
         "D = Dribbler ON/OFF   K / ESPACIO = Disparar",
-        "1-9 = Potencia kicker  +/- = +/-10%",
-        "ESC = Salir",
+        "1-9 = Potencia kicker  +/- = kicker +-10%",
+        "Q/E = Dribbler PWM -1/+1   ESC = Salir",
     ]
     for i, line in enumerate(controls):
         cv2.putText(img, line, (15, 292 + i * 18),
@@ -130,7 +130,7 @@ def main():
 
     # Estado
     dribbler_on = False
-    dribbler_power = 1.0   # 100%
+    dribbler_power = 255   # PWM máximo
     kick_power = 0.5       # 50%
     last_event = "Esperando comando..."
 
@@ -166,10 +166,10 @@ def main():
                 dribbler_on = not dribbler_on
                 if dribbler_on:
                     ok = rf.set_dribbler(firmware_id, dribbler_power)
-                    last_event = f"Dribbler ACTIVADO ({int(dribbler_power*100)}%)" + (" OK" if ok else " FALLO")
-                    log.info("Dribbler ON  potencia=%.0f%%  %s", dribbler_power * 100, "OK" if ok else "FALLO")
+                    last_event = f"Dribbler ACTIVADO (PWM {dribbler_power})" + (" OK" if ok else " FALLO")
+                    log.info("Dribbler ON  PWM=%d  %s", dribbler_power, "OK" if ok else "FALLO")
                 else:
-                    ok = rf.set_dribbler(firmware_id, 0.0)
+                    ok = rf.set_dribbler(firmware_id, 0)
                     last_event = "Dribbler DESACTIVADO" + (" OK" if ok else " FALLO")
                     log.info("Dribbler OFF  %s", "OK" if ok else "FALLO")
 
@@ -193,10 +193,26 @@ def main():
                 last_event = f"Potencia kicker → {int(kick_power*100)}%"
                 log.info("Potencia kicker: %.0f%%", kick_power * 100)
 
+            elif key == ord('q') or key == ord('Q'):
+                dribbler_power = max(0, dribbler_power - 1)
+                last_event = f"Dribbler PWM → {dribbler_power}"
+                log.info("Dribbler PWM: %d", dribbler_power)
+                if dribbler_on:
+                    rf.set_dribbler(firmware_id, dribbler_power)
+                    last_dribbler_keepalive = now
+
+            elif key == ord('e') or key == ord('E'):
+                dribbler_power = min(255, dribbler_power + 1)
+                last_event = f"Dribbler PWM → {dribbler_power}"
+                log.info("Dribbler PWM: %d", dribbler_power)
+                if dribbler_on:
+                    rf.set_dribbler(firmware_id, dribbler_power)
+                    last_dribbler_keepalive = now
+
     finally:
         # Apagar dribbler al salir
         if dribbler_on:
-            rf.set_dribbler(firmware_id, 0.0)
+            rf.set_dribbler(firmware_id, 0)
             log.info("Dribbler apagado al salir")
         rf.stop_robot(firmware_id)
         rf.shutdown()

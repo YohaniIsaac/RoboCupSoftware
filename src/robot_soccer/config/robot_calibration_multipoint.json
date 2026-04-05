@@ -19,22 +19,22 @@
     "bias": 0.022
   },
   "1": {
-    "pwm_min": 20,
-    "pwm_max": 80,
+    "pwm_min": 17,
+    "pwm_max": 27,
     "deadzone_left_fwd": 0,
     "deadzone_left_rev": 0,
     "deadzone_right_fwd": 0,
     "deadzone_right_rev": 0,
-    "bias": 0.0
+    "bias": 0.006
   },
   "2": {
-    "pwm_min": 20,
-    "pwm_max": 80,
+    "pwm_min": 17,
+    "pwm_max": 32,
     "deadzone_left_fwd": 0,
     "deadzone_left_rev": 0,
     "deadzone_right_fwd": 0,
     "deadzone_right_rev": 0,
-    "bias": 0.0
+    "bias": 0.008
   },
   "3": {
     "pwm_min": 20,

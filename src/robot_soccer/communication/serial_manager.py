@@ -117,7 +117,8 @@ class SerialManager:
         """Extrae el robot_id de un comando.
 
         Args:
-            command (str): Comando en formato "M,{id},{left},{right}" o "R{id}{cmd}"
+            command (str): Comando en formato "M,{id},{left},{right}",
+                           "D,{id},{power}" o "R{id}{cmd}"
 
         Returns:
             int or None: ID del robot o None si no se puede extraer
@@ -126,10 +127,12 @@ class SerialManager:
             if command.startswith('M,'):
                 # Formato motor: M,1,50,-50
                 return int(command.split(',')[1])
-            if command.startswith('R'):
+            if command.startswith('D,'):
+                # Formato dribbler: D,1,255
+                return int(command.split(',')[1])
+            if command.startswith('R') and len(command) >= 3:
                 # Formato robot discreto: R1F
-                robot_id_str = command[1:].split(',')[0]
-                return int(robot_id_str)
+                return int(command[1])
         except (ValueError, IndexError):
             pass
         return None

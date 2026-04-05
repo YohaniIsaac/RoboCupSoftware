@@ -46,9 +46,18 @@ Controles:
     I/K: Aumentar/Disminuir capture_overshoot_px
     O/L: Aumentar/Disminuir capture_confirm_distance_px
 
+    DRIBBLER (PWM directo 0-255, ±1 por pulsación):
+    1/2: Disminuir/Aumentar dribbler_capture_power (PWM durante captura)
+    3/4: Disminuir/Aumentar dribbler_hold_power (PWM al mantener pelota)
+
+    PULSO INTERMITENTE (±10ms por pulsación, 0=continuo):
+    5/6: Disminuir/Aumentar dribbler_pulse_on_ms (tiempo encendido)
+    7/8: Disminuir/Aumentar dribbler_pulse_off_ms (tiempo apagado)
+
     CONTROL DE MOVIMIENTO:
     ESPACIO: Fase 1 - Robot avanza y para a capture_activate_px del waypoint
     D: Fase 2 - Activa dribbler + creep hacia overshoot target
+    G: Fase 3 - Gira en lugar con dribbler activo (test de pulsos)
     X: Cancelar waypoint y apagar dribbler
 
     OTROS CONTROLES:

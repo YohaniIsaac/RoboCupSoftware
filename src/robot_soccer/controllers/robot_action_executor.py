@@ -1,7 +1,10 @@
 import logging
 import math
 import numpy as np
-from robot_soccer.config import FIELD_SIM, DRIBBLER_CAPTURE_POWER
+from robot_soccer.config import (
+    FIELD_SIM, DRIBBLER_CAPTURE_POWER,
+    CAPTURE_ACTIVATE_DISTANCE_PX, CAPTURE_CONFIRM_DISTANCE_PX,
+)
 
 from robot_soccer.ai.behavior_tree.utils import (
     calculate_ball_approach_position,
@@ -86,7 +89,7 @@ class RobotActionExecutor:
         # Calcular distancia a la pelota
         dist_to_ball = player.distance_to_ball(ball)
 
-        if dist_to_ball < 45:
+        if dist_to_ball < CAPTURE_ACTIVATE_DISTANCE_PX:
             # PASO 1: Verificar orientación hacia la pelota
             angle_to_ball = np.degrees(np.arctan2(
                 ball_pos[1] - player_pos[1],
@@ -108,7 +111,7 @@ class RobotActionExecutor:
                 log.info("Robot %i: Motor de captura ACTIVADO (%.0f%%)", player.id, DRIBBLER_CAPTURE_POWER * 100)
 
             # PASO 3: Acercarse un poco más con motor activo
-            if dist_to_ball > 25:
+            if dist_to_ball > CAPTURE_CONFIRM_DISTANCE_PX:
                 # Moverse lentamente hacia la pelota con motor activo
                 self.controller.move_to_position(player, ball_pos)
                 return False
