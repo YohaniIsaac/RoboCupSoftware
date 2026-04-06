@@ -426,12 +426,20 @@ CAPTURE_CONFIRM_DISTANCE_PX = 28  # px — confirmar pelota en dribbler
 # Debe superar MOTOR_DEAD_ZONE_PWM (30) para garantizar movimiento.
 # A mayor valor: más rápido pero más riesgo de empujar la pelota.
 # Calibrar con scripts/calibrate_behavior_thresholds.py (teclas N/M)
-CAPTURE_CREEP_SPEED_PWM = 17  # PWM — velocidad de acercamiento lento (sin dribbler)
+CAPTURE_CREEP_SPEED_PWM = 17  # PWM — velocidad máxima lineal durante PID de avance al contacto
+                              # Se aplica como max_linear_pwm_override: capea v pero permite
+                              # corrección angular completa. Calibrar con teclas N/M.
 
 # Tiempo de espera (segundos) tras confirmar contacto con la pelota.
 # Permite que la pelota se acomode contra el robot antes de disparar.
 # Si la pelota escapa durante este tiempo, el ciclo se reinicia.
 CONTACT_SETTLE_TIME_S = 0.35  # s — espera de asentamiento antes del disparo
+
+# Factores de escape para detectar que la pelota se alejó demasiado.
+# Durante avance: dist > BEHIND_BALL_APPROACH_PX * ADVANCE_ESCAPE_FACTOR → abortar
+# Durante asentamiento: dist > CAPTURE_CONFIRM_DISTANCE_PX * SETTLE_ESCAPE_FACTOR → abortar
+ADVANCE_ESCAPE_FACTOR = 1.5  # factor — margen de escape durante avance al contacto
+SETTLE_ESCAPE_FACTOR = 2.0   # factor — margen de escape durante asentamiento
 
 # Factor multiplicador de PWM cuando el robot tiene posesión de la pelota.
 # El dribbler genera fricción que frena la rotación/movimiento. Este factor
