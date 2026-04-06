@@ -265,6 +265,17 @@ def decision_process(perception_pipe, viz_state_pipe, keyboard_pipe,
     dribbler_pulse_timer = 0.0    # tiempo de inicio de la fase actual
     prev_has_ball = False         # para detectar flanco de subida de _has_ball
 
+    prev_bt_action = None         # para detectar transiciones de fase en el BT
+    last_angle_log = 0.0          # throttle de logs angulares (0.5 Hz)
+    phase_start_time = {}         # timestamp de inicio de cada fase
+    OPPONENT_GOAL_POS = FIELD_CAM.goal_right_center  # arco rival para equipo 'red'
+
+    # Variables de ángulo — se recomputan cada loop
+    angle_to_ball_deg = None
+    angle_to_goal_deg = None
+    err_to_ball_deg   = None
+    err_to_goal_deg   = None
+
     log.info("BehaviorManager listo. Presiona ESPACIO para activar comportamiento.")
 
     try:
@@ -318,22 +329,49 @@ def decision_process(perception_pipe, viz_state_pipe, keyboard_pipe,
                             rf.set_motors(firmware_id, 0, 0)
                             rf.set_dribbler(firmware_id, 0)  # apagar dribbler al pausar
                             player._has_ball = False  # resetear estado al pausar
+                            # Limpiar override de velocidad de Phase 2
+                            ctrl = behavior_manager.command_manager.controllers.get(robot_id)
+                            if ctrl:
+                                ctrl.max_linear_pwm_override = None
+                            behavior_manager.command_manager.actions_in_progress.pop(robot_id, None)
                 except Exception:
                     pass
 
-            # --- Actualizar has_ball por proximidad (con histéresis) ---
-            # Sin histéresis el flag se resetea cada frame cuando el robot rota
-            # ligeramente al orientarse al arco, rompiendo orient_to_goal.
-            # Umbral captura: CAPTURE_CONFIRM_DISTANCE_PX (mismo que BT)
-            # Umbral liberación: 2x — permite rotación sin perder la pelota
+            # --- Actualizar has_ball por proximidad + alineación ---
+            # Requiere que el robot esté cerca Y mirando la pelota.
+            # Sin alineación, el robot "tiene" la pelota por estar cerca pero
+            # apuntando al lado opuesto, causando kicks espurios.
+            # Umbral captura: CAPTURE_CONFIRM_DISTANCE_PX + heading < 30°
+            # Umbral liberación: 2x distancia — permite rotación sin perder
             distance = None
             if player_initialized and ball_initialized:
                 distance = float(player.distance_to_ball(ball))
                 if distance < CAPTURE_CONFIRM_DISTANCE_PX:
-                    player._has_ball = True
+                    # Verificar alineación antes de declarar posesión
+                    _ang = math.degrees(math.atan2(
+                        ball.y - player.y, ball.x - player.x))
+                    _err = abs((_ang - player.angle + 180) % 360 - 180)
+                    if _err < 30:
+                        player._has_ball = True
+                    # Si está cerca pero no alineado, no cambiar has_ball
                 elif distance > CAPTURE_CONFIRM_DISTANCE_PX * 2:
                     player._has_ball = False
                 # Zona de histéresis: mantener valor actual
+
+            # --- Calcular errores angulares robot↔pelota y robot↔arco ---
+            angle_to_ball_deg = None
+            angle_to_goal_deg = None
+            err_to_ball_deg   = None
+            err_to_goal_deg   = None
+            if player_initialized and ball_initialized:
+                angle_to_ball_deg = math.degrees(math.atan2(
+                    ball.y - player.y, ball.x - player.x))
+                angle_to_goal_deg = math.degrees(math.atan2(
+                    OPPONENT_GOAL_POS[1] - player.y,
+                    OPPONENT_GOAL_POS[0] - player.x))
+                # Error normalizado a (-180, 180]: positivo = girar CCW, negativo = CW
+                err_to_ball_deg = (angle_to_ball_deg - player.angle + 180) % 360 - 180
+                err_to_goal_deg = (angle_to_goal_deg - player.angle + 180) % 360 - 180
 
             # --- Actualizar contexto del juego ---
             if player_initialized and ball_initialized:
@@ -407,6 +445,43 @@ def decision_process(perception_pipe, viz_state_pipe, keyboard_pipe,
                 except Exception as e:
                     log.error("Error en BehaviorManager: %s", e)
 
+            # --- Detectar transiciones de fase del BT ---
+            try:
+                blackboard = behavior_manager.blackboards.get(robot_id)
+                bt_action = blackboard.last_action if blackboard else None
+                if bt_action != prev_bt_action:
+                    d_str  = f"dist={distance:.0f}px "       if distance is not None else ""
+                    eb_str = f"err_pelota={err_to_ball_deg:+.1f}° " if err_to_ball_deg is not None else ""
+                    eg_str = f"err_arco={err_to_goal_deg:+.1f}°"    if err_to_goal_deg is not None else ""
+                    if behavior_active:
+                        # Fin de la fase anterior
+                        if prev_bt_action is not None and prev_bt_action in phase_start_time:
+                            elapsed = now - phase_start_time[prev_bt_action]
+                            log.info("[FASE FIN ] %-25s duración=%.2fs",
+                                     prev_bt_action, elapsed)
+                        # Inicio de la nueva fase
+                        log.info("[FASE INIT] %-25s | %s%s%s",
+                                 bt_action or "?", d_str, eb_str, eg_str)
+                        if bt_action:
+                            phase_start_time[bt_action] = now
+                    prev_bt_action = bt_action
+            except Exception:
+                pass
+
+            # --- Log periódico de ángulos (2 Hz cuando BT activo) ---
+            if behavior_active and player_initialized and ball_initialized:
+                if now - last_angle_log >= 0.5:
+                    log.info(
+                        "[ANG] fase=%-22s | robot=%6.1f° "
+                        "| →pelota=%6.1f° (err %+5.1f°) "
+                        "| →arco=%6.1f° (err %+5.1f°)",
+                        prev_bt_action or "?",
+                        player.angle,
+                        angle_to_ball_deg, err_to_ball_deg,
+                        angle_to_goal_deg, err_to_goal_deg,
+                    )
+                    last_angle_log = now
+
             # --- Enviar estado a visualizacion ---
             if now - last_viz_time >= VIZ_INTERVAL:
                 try:
@@ -415,12 +490,18 @@ def decision_process(perception_pipe, viz_state_pipe, keyboard_pipe,
 
                     # Obtener target actual del command_manager
                     current_target = None
+                    action_type = None
                     action_info = behavior_manager.command_manager.actions_in_progress.get(robot_id)
-                    if action_info and 'target_pos' in action_info:
-                        tp = action_info['target_pos']
-                        try:
-                            current_target = (int(tp[0]), int(tp[1]))
-                        except Exception:
+                    if action_info:
+                        action_type = action_info.get('type')
+                        if 'target_pos' in action_info:
+                            tp = action_info['target_pos']
+                            try:
+                                current_target = (int(tp[0]), int(tp[1]))
+                            except Exception:
+                                pass
+                        elif action_type == 'rotate':
+                            # rotación: mostrar ángulo objetivo como texto, no como punto
                             pass
 
                     viz_state_pipe.send({
@@ -431,8 +512,13 @@ def decision_process(perception_pipe, viz_state_pipe, keyboard_pipe,
                         'has_ball': player.has_ball(),
                         'last_action': str(last_action) if last_action else None,
                         'current_target': current_target,
+                        'action_type': action_type,
                         'distance': distance,
                         'robot_available': robot_available,
+                        'angle_to_ball': angle_to_ball_deg,
+                        'angle_to_goal': angle_to_goal_deg,
+                        'err_to_ball': err_to_ball_deg,
+                        'err_to_goal': err_to_goal_deg,
                         'timestamp': now
                     })
                     last_viz_time = now
@@ -478,8 +564,13 @@ def visualization_process(perception_pipe, decision_pipe, keyboard_pipe,
     has_ball = False
     last_action = None
     current_target = None
+    action_type = None
     distance = None
     robot_available = False
+    angle_to_ball = None
+    angle_to_goal = None
+    err_to_ball = None
+    err_to_goal = None
 
     window_name = 'Test Behavior 1 Robot'
     cv2.namedWindow(window_name)
@@ -512,8 +603,13 @@ def visualization_process(perception_pipe, decision_pipe, keyboard_pipe,
                     has_ball = data.get('has_ball', False)
                     last_action = data.get('last_action')
                     current_target = data.get('current_target')
+                    action_type = data.get('action_type')
                     distance = data.get('distance')
                     robot_available = data.get('robot_available', False)
+                    angle_to_ball = data.get('angle_to_ball')
+                    angle_to_goal = data.get('angle_to_goal')
+                    err_to_ball = data.get('err_to_ball')
+                    err_to_goal = data.get('err_to_goal')
                 except Exception:
                     pass
 
@@ -604,17 +700,49 @@ def visualization_process(perception_pipe, decision_pipe, keyboard_pipe,
 
                 if last_action:
                     y += 18
-                    # Truncar si es muy largo
-                    action_text = f"Accion: {str(last_action)[:30]}"
+                    action_text = f"Fase: {str(last_action)[:28]}"
                     cv2.putText(frame, action_text, (10, y),
                                cv2.FONT_HERSHEY_SIMPLEX, 0.40, (200, 200, 255), 1)
 
+                if action_type:
+                    y += 16
+                    ctrl_color = {
+                        'move': (100, 255, 100),
+                        'rotate': (100, 200, 255),
+                        'creep_forward': (255, 200, 100),  # legacy, por si algo lo usa
+                    }.get(action_type, (180, 180, 180))
+                    cv2.putText(frame, f"Ctrl: {action_type}", (10, y),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.38, ctrl_color, 1)
+
                 if current_target:
-                    y += 18
+                    y += 16
                     cv2.putText(frame,
-                               f"Target BT: ({current_target[0]},{current_target[1]})",
-                               (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.40,
+                               f"Target: ({current_target[0]},{current_target[1]})",
+                               (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.38,
                                (255, 0, 255), 1)
+
+                # --- Errores angulares ---
+                y += 20
+                cv2.line(frame, (5, y - 4), (200, y - 4), (60, 60, 60), 1)
+
+                if robot_angle_deg is not None:
+                    y += 14
+                    cv2.putText(frame, f"Robot: {robot_angle_deg:6.1f}deg", (10, y),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.38, (200, 200, 200), 1)
+
+                if err_to_ball is not None:
+                    y += 14
+                    eb_color = (0, 255, 0) if abs(err_to_ball) < 15 else (0, 140, 255) if abs(err_to_ball) < 45 else (0, 0, 255)
+                    cv2.putText(frame,
+                               f"Err pelota: {err_to_ball:+6.1f}deg",
+                               (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.38, eb_color, 1)
+
+                if err_to_goal is not None:
+                    y += 14
+                    eg_color = (0, 255, 0) if abs(err_to_goal) < 15 else (0, 140, 255) if abs(err_to_goal) < 45 else (0, 0, 255)
+                    cv2.putText(frame,
+                               f"Err arco:   {err_to_goal:+6.1f}deg",
+                               (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.38, eg_color, 1)
 
                 cv2.putText(frame, "ESPACIO=Activar/Pausar  ESC=Salir",
                            (10, CAMERA_PERSPECTIVE_HEIGHT - 10),
