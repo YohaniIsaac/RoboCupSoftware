@@ -41,6 +41,7 @@ from robot_soccer.config import (
     CONTACT_SETTLE_TIME_S,
     CAMERA_PERSPECTIVE_WIDTH,
     CAMERA_PERSPECTIVE_HEIGHT,
+    FIELD_CAM,
 )
 
 log = logging.getLogger(__name__)
@@ -860,6 +861,7 @@ def control_loop_behavior_pure(perception_pipe, control_state_pipe, keyboard_pip
                             movement_active = False
                             robot_stopped = False
                             if capture_phase == 'capture_creeping':
+                                _restore_controller_speed(controller)
                                 if rf_controller:
                                     rf_controller.set_motors(firmware_id, 0, 0)
                             capture_phase = 'idle'
@@ -868,19 +870,33 @@ def control_loop_behavior_pure(perception_pipe, control_state_pipe, keyboard_pip
                             controller.position_threshold = behavior_params['position_threshold']
                             log.info("⏸️  Movimiento PAUSADO")
                     elif command == 'start_capture':
-                        # FASE 2: creep lento directo hacia la pelota (sin PID)
+                        # FASE 2: PID con velocidad limitada hacia overshoot target
                         # Solo permite si Fase 1b (alineación) completó
                         if (not movement_active and ball_waypoint and robot
                                 and capture_phase == 'approach_align'):
+                            # Calcular overshoot target (más allá de la pelota hacia el arco)
+                            goal_center = FIELD_CAM.goal_right_center
+                            dx_bg = goal_center[0] - ball_waypoint[0]
+                            dy_bg = goal_center[1] - ball_waypoint[1]
+                            dist_bg = math.sqrt(dx_bg**2 + dy_bg**2)
+                            if dist_bg > 0:
+                                ov_x = ball_waypoint[0] + (dx_bg / dist_bg) * behavior_params['capture_overshoot_px']
+                                ov_y = ball_waypoint[1] + (dy_bg / dist_bg) * behavior_params['capture_overshoot_px']
+                            else:
+                                ov_x, ov_y = float(ball_waypoint[0]), float(ball_waypoint[1])
+                            overshoot_target = [int(ov_x), int(ov_y)]
+
+                            # Activar PID con velocidad limitada
+                            _set_controller_creep_speed(controller, behavior_params['creep_speed_pwm'])
                             capture_phase = 'capture_creeping'
                             contact_start_time = None
-                            movement_active = False
                             robot_stopped = False
                             dist_to_ball_now = math.sqrt(
                                 (ball_waypoint[0] - robot.x)**2 + (ball_waypoint[1] - robot.y)**2
                             )
-                            log.info("▶️  FASE 2: Creep lento | speed=%d PWM | dist=%.0fpx",
-                                     behavior_params['creep_speed_pwm'], dist_to_ball_now)
+                            log.info("▶️  FASE 2: PID creep | speed=%d PWM | dist=%.0fpx | overshoot=(%d,%d)",
+                                     behavior_params['creep_speed_pwm'], dist_to_ball_now,
+                                     overshoot_target[0], overshoot_target[1])
                         elif capture_phase in ('approach', 'idle') and not movement_active:
                             log.warning("⚠️  Completa fase 1 primero (ESPACIO): posición + alineación")
                         elif capture_phase == 'approach' and movement_active:
@@ -906,6 +922,7 @@ def control_loop_behavior_pure(perception_pipe, control_state_pipe, keyboard_pip
                         movement_active = False
                         robot_stopped = False
                         if capture_phase in ('capture_creeping',):
+                            _restore_controller_speed(controller)
                             if rf_controller:
                                 rf_controller.set_motors(firmware_id, 0, 0)
                         capture_phase = 'idle'
@@ -970,15 +987,17 @@ def control_loop_behavior_pure(perception_pipe, control_state_pipe, keyboard_pip
                 except Exception as e:
                     log.error(f"Error recibiendo comando: {e}")
 
-            # --- Fase 2a: Creep lento hacia la pelota (sin PID) ---
-            if capture_phase == 'capture_creeping' and robot and rf_controller:
+            # --- Fase 2a: PID con velocidad limitada hacia overshoot target ---
+            if capture_phase == 'capture_creeping' and robot and overshoot_target:
                 bx = ball_waypoint[0] - robot.x
                 by = ball_waypoint[1] - robot.y
                 dist_to_ball_now = math.sqrt(bx * bx + by * by)
                 confirm_px = behavior_params['capture_confirm_px']
                 if dist_to_ball_now < confirm_px:
-                    # Contacto confirmado: detener robot, empezar asentamiento
-                    rf_controller.set_motors(firmware_id, 0, 0)
+                    # Contacto confirmado: detener PID, empezar asentamiento
+                    _restore_controller_speed(controller)
+                    if rf_controller:
+                        rf_controller.set_motors(firmware_id, 0, 0)
                     last_cmd_type = 'stop'
                     capture_phase = 'capture_settling'
                     contact_start_time = current_time
@@ -986,17 +1005,17 @@ def control_loop_behavior_pure(perception_pipe, control_state_pipe, keyboard_pip
                     log.info("🤝 CONTACTO confirmado | dist=%.1fpx | Asentando %.2fs...",
                              dist_to_ball_now, behavior_params['contact_settle_time_s'])
                 else:
-                    # Enviar creep directo cada ciclo (100 Hz mantiene motor activo)
-                    speed = behavior_params['creep_speed_pwm']
-                    rf_controller.set_motors(firmware_id, speed, speed)
-                    last_cmd_type = f'creep_{speed}'
-                    # Log periódico cada 500ms para monitorear alineación durante creep
+                    # PID con velocidad limitada: corrección angular activa
+                    controller.move_to_position(robot, tuple(overshoot_target))
+                    last_cmd_type = f'pid_creep_{behavior_params["creep_speed_pwm"]}'
+                    # Log periódico cada 500ms para monitorear alineación durante PID creep
                     if current_time - last_creep_log_time >= 0.5:
                         robot_deg = math.degrees(robot.angle)
                         ang_to_ball = math.degrees(math.atan2(by, bx))
                         err_creep = ((ang_to_ball - robot_deg + 180) % 360) - 180
-                        log.info("🏃 FASE 2 | dist=%.0fpx | Robot=%.1f° | →Pelota=%.1f° | err=%+.1f°",
-                                 dist_to_ball_now, robot_deg, ang_to_ball, err_creep)
+                        log.info("🏃 FASE 2 PID | dist=%.0fpx | Robot=%.1f° | →Pelota=%.1f° | err=%+.1f° | overshoot=(%d,%d)",
+                                 dist_to_ball_now, robot_deg, ang_to_ball, err_creep,
+                                 overshoot_target[0], overshoot_target[1])
                         last_creep_log_time = current_time
 
             # --- Fase 2b: Asentamiento (robot quieto, esperando estabilización) ---
@@ -1045,23 +1064,41 @@ def control_loop_behavior_pure(perception_pipe, control_state_pipe, keyboard_pip
                     bx_r = ball_waypoint[0] - robot.x
                     by_r = ball_waypoint[1] - robot.y
                     angle_to_ball = math.degrees(math.atan2(by_r, bx_r))
-                    goal_x_f = float(CAMERA_PERSPECTIVE_WIDTH)
-                    goal_y_f = float(CAMERA_PERSPECTIVE_HEIGHT) / 2.0
-                    angle_to_goal = math.degrees(math.atan2(goal_y_f - robot.y,
-                                                             goal_x_f - robot.x))
                     err_robot_ball = ((angle_to_ball - robot_deg + 180) % 360) - 180
-                    err_robot_goal = ((angle_to_goal - robot_deg + 180) % 360) - 180
-                    err_ball_goal  = ((angle_to_ball - angle_to_goal + 180) % 360) - 180
-                    log.info("✅ FASE 1 completada | dist_pelota=%.0fpx", dist_bh)
-                    log.info("   Robot=%.1f° | →Pelota=%.1f° (err=%+.1f°) | →Arco=%.1f° (err=%+.1f°)",
-                             robot_deg, angle_to_ball, err_robot_ball,
-                             angle_to_goal, err_robot_goal)
-                    log.info("   Desalineación pelota↔arco: %+.1f° "
-                             "(0°=perfectos | <5°=aceptable | >10°=problema)",
-                             err_ball_goal)
-                    log.info("   Presiona D para fase 2 (creep).")
-                    movement_active = False
-                    robot_stopped = False
+
+                    # ── Retry si error a pelota demasiado grande ──────────────
+                    retry_tol = behavior_params['angle_threshold'] * 2
+                    if abs(err_robot_ball) > retry_tol:
+                        behind_ball_target_angle_deg = angle_to_ball
+                        robot_stopped = False
+                        log.info("🔁 Fase 1b RETRY: err=%.1f° > %.1f° | nuevo obj=%.1f°",
+                                 err_robot_ball, retry_tol, angle_to_ball)
+                    else:
+                        # ── Cono del arco rival ───────────────────────────────
+                        gx = float(FIELD_CAM.goal_right_x)
+                        g_top_y    = float(FIELD_CAM.goal_right_top_y)
+                        g_bottom_y = float(FIELD_CAM.goal_right_bottom_y)
+                        ang_top    = math.degrees(math.atan2(g_top_y    - robot.y, gx - robot.x))
+                        ang_bottom = math.degrees(math.atan2(g_bottom_y - robot.y, gx - robot.x))
+                        ang_center = (ang_top + ang_bottom) / 2.0
+                        half_cone  = abs(ang_bottom - ang_top) / 2.0
+                        err_robot_goal = ((ang_center - robot_deg + 180) % 360) - 180
+                        err_ball_goal  = ((angle_to_ball - ang_center + 180) % 360) - 180
+                        robot_in_cone  = abs(err_robot_goal) <= half_cone
+                        ball_in_cone   = abs(err_ball_goal)  <= half_cone
+
+                        log.info("✅ FASE 1 completada | dist_pelota=%.0fpx", dist_bh)
+                        log.info("   Robot=%.1f° | →Pelota=%.1f° (err=%+.1f°)",
+                                 robot_deg, angle_to_ball, err_robot_ball)
+                        log.info("   Arco: centro=%.1f° cono=[%.1f°..%.1f°] (±%.1f°)",
+                                 ang_center, ang_top, ang_bottom, half_cone)
+                        log.info("   Robot dentro del cono: %s (err=%+.1f°) | "
+                                 "Pelota dentro del cono: %s (err=%+.1f°)",
+                                 "✓ SÍ" if robot_in_cone else "✗ NO", err_robot_goal,
+                                 "✓ SÍ" if ball_in_cone  else "✗ NO", err_ball_goal)
+                        log.info("   Presiona D para fase 2 (creep).")
+                        movement_active = False
+                        robot_stopped = False
 
             # --- Sin movimiento activo: detener robot (excepto fases de creep/settling) ---
             elif capture_phase not in ('capture_creeping', 'capture_settling', 'confirmed'):
