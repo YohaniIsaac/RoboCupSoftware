@@ -22,12 +22,15 @@ from robot_soccer.config import (
     CAPTURE_ACTIVATE_DISTANCE_PX,
     CAPTURE_OVERSHOOT_PX,
     CAPTURE_CONFIRM_DISTANCE_PX,
+    CAPTURE_CREEP_SPEED_PWM,
     DRIBBLER_HOLD_POWER,
     BEHIND_BALL_APPROACH_PX,
     BEHIND_BALL_LATERAL_OFFSET_PX,
     BEHIND_BALL_ALIGN_TOLERANCE_DEG,
     PUSH_BURST_PWM,
     CONTACT_SETTLE_TIME_S,
+    ADVANCE_ESCAPE_FACTOR,
+    SETTLE_ESCAPE_FACTOR,
 )
 
 from .base import (
@@ -1208,6 +1211,17 @@ def _path_near_ball(p1, p2, ball, threshold=35):
     return bool(np.linalg.norm(closest - b) < threshold)
 
 
+def _clear_advance_state(blackboard, player_id):
+    """Limpia estado del avance al contacto: para motores, desactiva creep PID."""
+    blackboard.command_manager.actions_in_progress.pop(player_id, None)
+    controller = blackboard.command_manager.controllers.get(player_id)
+    if controller:
+        controller.max_linear_pwm_override = None
+    rf = blackboard.command_manager.rf_controller
+    if rf:
+        rf.set_motors(player_id + 1, 0, 0)
+
+
 def _move_behind_ball_start(blackboard):
     """on_start: calcula la posición detrás de la pelota y emite el movimiento.
 
@@ -1218,9 +1232,36 @@ def _move_behind_ball_start(blackboard):
     if not hasattr(blackboard, "command_manager"):
         return NodeStatus.FAILURE
 
+    # Limpiar override de velocidad residual de Phase 2 previa
+    controller = blackboard.command_manager.controllers.get(blackboard.player.id)
+    if controller and controller.max_linear_pwm_override is not None:
+        controller.max_linear_pwm_override = None
+
     ball_pos   = np.array(blackboard.ball.get_position(), dtype=float)
     goal_pos   = np.array(blackboard.opponent_goal_pos, dtype=float)
     player_pos = np.array(blackboard.player.get_position(), dtype=float)
+
+    # Fast path: si estamos cerca de la pelota Y la pelota está entre el robot
+    # y el arco Y el robot está mirando hacia la pelota → saltar Phase 1.
+    # Caso típico: post-kick fallido, la pelota sigue al frente del robot.
+    # Se requieren 3 condiciones:
+    #   1. Proximidad: dist < BEHIND_BALL_APPROACH_PX
+    #   2. Geometría: pelota en dirección al arco (alignment < 30°)
+    #   3. Heading:   robot mirando hacia la pelota (err < 2x tolerancia)
+    dist_to_ball = float(np.linalg.norm(ball_pos - player_pos))
+    if dist_to_ball <= BEHIND_BALL_APPROACH_PX:
+        ang_to_ball = float(np.degrees(np.arctan2(
+            ball_pos[1] - player_pos[1], ball_pos[0] - player_pos[0])))
+        ang_to_goal = float(np.degrees(np.arctan2(
+            goal_pos[1] - player_pos[1], goal_pos[0] - player_pos[0])))
+        alignment = abs((ang_to_ball - ang_to_goal + 180) % 360 - 180)
+        err_heading = abs((ang_to_ball - blackboard.player.angle + 180) % 360 - 180)
+        if alignment < 30 and err_heading < BEHIND_BALL_ALIGN_TOLERANCE_DEG * 2:
+            blackboard.last_action = "behind_ball_ready"
+            log.info("[behind_ball] Robot %d | pelota al frente (%.0fpx, alin=%.1f°, "
+                     "heading=%.1f°) → avance directo",
+                     blackboard.player.id, dist_to_ball, alignment, err_heading)
+            return NodeStatus.SUCCESS
 
     # Vector del arco hacia la pelota (dirección "detrás de la pelota")
     goal_to_ball = ball_pos - goal_pos
@@ -1336,93 +1377,140 @@ def create_move_behind_ball_node():
     )
 
 
-def _advance_to_contact_start(blackboard):
-    """on_start: inicia acercamiento LENTO a la pelota sin PID.
+def _compute_overshoot_target(ball_pos, goal_pos, overshoot_px):
+    """Calcula target de overshoot: punto más allá de la pelota hacia el arco.
 
-    El robot ya está alineado con el arco (llegó desde detrás).
-    Usa creep_forward (PWM fijo bajo) en vez del PID para no empujar la pelota.
-    Inicializa los flags de contacto y asentamiento.
+    El PID persigue este punto, que está PAST la pelota en dirección al arco.
+    El robot físicamente se detiene al hacer contacto con la pelota antes de
+    alcanzar el overshoot, garantizando que el PID no frene prematuramente.
+    """
+    ball_to_goal = goal_pos - ball_pos
+    dist_bg = float(np.linalg.norm(ball_to_goal))
+    if dist_bg > 0:
+        unit_to_goal = ball_to_goal / dist_bg
+    else:
+        unit_to_goal = np.array([1, 0], dtype=float)
+    return ball_pos + unit_to_goal * overshoot_px
+
+
+def _advance_to_contact_start(blackboard):
+    """on_start: inicia acercamiento con PID lento hacia la pelota.
+
+    El robot ya está alineado (llegó desde detrás de la pelota).
+    Usa move_robot_to con max_linear_pwm_override para mantener corrección
+    angular activa a baja velocidad, en vez de PWM fijo sin steering.
+    El target es un punto de overshoot (más allá de la pelota hacia el arco)
+    para evitar que el PID se detenga a ROBOT_POSITION_THRESHOLD del target
+    antes de hacer contacto.
     """
     if not hasattr(blackboard, "command_manager"):
         return NodeStatus.FAILURE
 
+    player_id  = blackboard.player.id
     player_pos = np.array(blackboard.player.get_position(), dtype=float)
     ball_pos   = np.array(blackboard.ball.get_position(), dtype=float)
+    goal_pos   = np.array(blackboard.opponent_goal_pos, dtype=float)
     dist       = float(np.linalg.norm(ball_pos - player_pos))
 
     # Reiniciar estado de contacto
-    blackboard._contact_made        = False
+    blackboard._contact_made         = False
     blackboard._contact_settle_start = None
 
     # ¿Ya en contacto desde el inicio?
+    # Requiere proximidad Y alineación: si el robot está cerca pero no mira
+    # la pelota, no es contacto real (ej: post-kick con robot girado).
     if dist < CAPTURE_CONFIRM_DISTANCE_PX:
-        blackboard._contact_made         = True
-        blackboard._contact_settle_start = time.time()
-        blackboard.player._has_ball      = True
-        blackboard.last_action           = "settling_contact"
-        log.info("[advance_contact] Robot %d | contacto inmediato | dist=%.1fpx",
-                 blackboard.player.id, dist)
-        return NodeStatus.RUNNING
+        ang_to_ball = float(np.degrees(np.arctan2(
+            ball_pos[1] - player_pos[1], ball_pos[0] - player_pos[0])))
+        err_heading = abs((ang_to_ball - blackboard.player.angle + 180) % 360 - 180)
+        if err_heading <= BEHIND_BALL_ALIGN_TOLERANCE_DEG * 2:
+            blackboard._contact_made         = True
+            blackboard._contact_settle_start = time.time()
+            blackboard.player._has_ball      = True
+            blackboard.last_action           = "settling_contact"
+            log.info("[advance_contact] Robot %d | contacto inmediato | dist=%.1fpx | heading=%.1f°",
+                     player_id, dist, err_heading)
+            return NodeStatus.RUNNING
+        else:
+            log.info("[advance_contact] Robot %d | cerca (%.1fpx) pero desalineado "
+                     "(heading=%.1f° > %.1f°) → FAILURE",
+                     player_id, dist, err_heading,
+                     BEHIND_BALL_ALIGN_TOLERANCE_DEG * 2)
+            return NodeStatus.FAILURE
 
-    # Iniciar creep lento directo (execute_commands lo mantiene activo)
-    blackboard.command_manager.creep_forward(blackboard.player.id)
+    # Calcular target de overshoot (más allá de la pelota hacia el arco)
+    overshoot = _compute_overshoot_target(ball_pos, goal_pos, CAPTURE_OVERSHOOT_PX)
+    target = (int(overshoot[0]), int(overshoot[1]))
+
+    # Activar PID con velocidad lineal limitada (creep mode con steering)
+    controller = blackboard.command_manager.controllers.get(player_id)
+    if controller:
+        controller.max_linear_pwm_override = CAPTURE_CREEP_SPEED_PWM
+
+    blackboard.command_manager.move_robot_to(player_id, target)
     blackboard.last_action = "advancing_to_contact"
-    log.info("[advance_contact] Robot %d | creep lento iniciado | dist=%.1fpx",
-             blackboard.player.id, dist)
+    log.info("[advance_contact] Robot %d | PID creep iniciado | dist=%.1fpx "
+             "| overshoot=(%d,%d) | creep_pwm=%d",
+             player_id, dist, *target, CAPTURE_CREEP_SPEED_PWM)
     return NodeStatus.RUNNING
 
 
 def _advance_to_contact_running(blackboard):
     """on_running: monitorea contacto, asentamiento y posible escape de la pelota.
 
+    Usa PID con velocidad lineal limitada (max_linear_pwm_override) en vez de
+    PWM fijo, manteniendo corrección angular activa durante el avance.
+    Recalcula el overshoot target cada tick para seguir la pelota si se mueve.
+
     Fases:
-      Acercamiento: creep activo hasta que dist < CAPTURE_CONFIRM_DISTANCE_PX.
-        - Si la pelota escapa (dist > BEHIND_BALL_APPROACH_PX * 1.5) → FAILURE.
+      Acercamiento: PID activo hasta que dist < CAPTURE_CONFIRM_DISTANCE_PX.
+        - Si la pelota escapa (dist > BEHIND_BALL_APPROACH_PX * ADVANCE_ESCAPE_FACTOR) → FAILURE.
       Asentamiento: robot detenido, espera CONTACT_SETTLE_TIME_S.
-        - Si la pelota escapa (dist > CAPTURE_CONFIRM_DISTANCE_PX * 2) → FAILURE.
+        - Si la pelota escapa (dist > CAPTURE_CONFIRM_DISTANCE_PX * SETTLE_ESCAPE_FACTOR) → FAILURE.
         - Tras el tiempo de espera → SUCCESS y se dispara el solenoide.
     """
     player_id  = blackboard.player.id
     player_pos = np.array(blackboard.player.get_position(), dtype=float)
     ball_pos   = np.array(blackboard.ball.get_position(), dtype=float)
+    goal_pos   = np.array(blackboard.opponent_goal_pos, dtype=float)
     dist       = float(np.linalg.norm(ball_pos - player_pos))
 
     contact_made = getattr(blackboard, '_contact_made', False)
 
     # ──────────────────────────────
-    # FASE 1: Acercamiento (creep activo)
+    # FASE 1: Acercamiento (PID con velocidad limitada)
     # ──────────────────────────────
     if not contact_made:
-        # Pelota empujada demasiado lejos → robot fue rápido o pelota libre
-        if dist > BEHIND_BALL_APPROACH_PX * 1.5:
-            blackboard.command_manager.actions_in_progress.pop(player_id, None)
-            rf = blackboard.command_manager.rf_controller
-            if rf:
-                rf.set_motors(player_id + 1, 0, 0)
+        # Pelota empujada demasiado lejos
+        if dist > BEHIND_BALL_APPROACH_PX * ADVANCE_ESCAPE_FACTOR:
+            _clear_advance_state(blackboard, player_id)
             log.info("[advance_contact] Robot %d | pelota escapó (%.0fpx) → FAILURE",
                      player_id, dist)
             return NodeStatus.FAILURE
 
-        # Contacto alcanzado: detener robot y empezar asentamiento
+        # Contacto alcanzado: detener PID y empezar asentamiento
         if dist < CAPTURE_CONFIRM_DISTANCE_PX:
-            blackboard.command_manager.actions_in_progress.pop(player_id, None)
-            rf = blackboard.command_manager.rf_controller
-            if rf:
-                rf.set_motors(player_id + 1, 0, 0)
+            _clear_advance_state(blackboard, player_id)
             blackboard._contact_made         = True
             blackboard._contact_settle_start = time.time()
             blackboard.player._has_ball      = True
             blackboard.last_action           = "settling_contact"
-            log.info("[advance_contact] Robot %d | contacto! Asentando %.2fs...",
-                     player_id, CONTACT_SETTLE_TIME_S)
+            log.info("[advance_contact] Robot %d | contacto! dist=%.1fpx | Asentando %.2fs...",
+                     player_id, dist, CONTACT_SETTLE_TIME_S)
+            return NodeStatus.RUNNING
 
+        # Recalcular overshoot target (la pelota pudo moverse ligeramente).
+        # El guard en move_robot_to ignora si delta < 20px (mismo target).
+        overshoot = _compute_overshoot_target(ball_pos, goal_pos, CAPTURE_OVERSHOOT_PX)
+        target = (int(overshoot[0]), int(overshoot[1]))
+        blackboard.command_manager.move_robot_to(player_id, target)
         return NodeStatus.RUNNING
 
     # ──────────────────────────────
     # FASE 2: Asentamiento (robot quieto)
     # ──────────────────────────────
     # Pelota escapó durante el asentamiento
-    if dist > CAPTURE_CONFIRM_DISTANCE_PX * 2:
+    if dist > CAPTURE_CONFIRM_DISTANCE_PX * SETTLE_ESCAPE_FACTOR:
         blackboard.player._has_ball = False
         log.info("[advance_contact] Robot %d | pelota escapó en asentamiento (%.0fpx) → FAILURE",
                  player_id, dist)
