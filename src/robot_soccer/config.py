@@ -395,14 +395,14 @@ ROBOT_LINEAR_START_ANGLE_THRESHOLD_DEG = 30.0  # Grados (30° = conservador, 45�
 MAX_ANGULAR_CORRECTION_PWM = 10  # Máximo ±10 PWM de diferencia L/R para corrección angular
 
 # --- Thresholds de Precisión ---
-ROBOT_POSITION_THRESHOLD = 32  # Distancia para considerar waypoint alcanzado (píxeles)
+ROBOT_POSITION_THRESHOLD = 5  # Distancia para considerar waypoint alcanzado (píxeles)
 ROBOT_ANGLE_THRESHOLD_DEG = 1  # Error angular aceptable (grados)
 
 # --- Captura de pelota con dribbler ---
 # Distancia (ArUco center → ball center) a la que se activa el dribbler y
 # se emite el target de overshoot. Debe superar ROBOT_POSITION_THRESHOLD.
 # Calibrar con scripts/calibrate_behavior_thresholds.py (teclas U/J)
-CAPTURE_ACTIVATE_DISTANCE_PX = 58  # px — activar dribbler + iniciar creep
+CAPTURE_ACTIVATE_DISTANCE_PX = 47  # px — activar dribbler + iniciar creep
 
 # Píxeles MÁS ALLÁ del centro de la pelota donde apunta el creep.
 # Tras move_to_ball, el robot queda a ~dist_real px de la pelota (por inercia).
@@ -412,21 +412,21 @@ CAPTURE_ACTIVATE_DISTANCE_PX = 58  # px — activar dribbler + iniciar creep
 # El robot es detenido físicamente por la pelota; CAPTURE_CONFIRM_DISTANCE_PX
 # confirma que el dribbler la tocó.
 # Calibrar con scripts/calibrate_behavior_thresholds.py (teclas I/K)
-CAPTURE_OVERSHOOT_PX = 23  # px — empuje suave para asegurar contacto dribbler-pelota
+CAPTURE_OVERSHOOT_PX = 27  # px — empuje suave para asegurar contacto dribbler-pelota
 
 # Distancia a la que se confirma la captura (_has_ball = True).
 # El robot físicamente captura cuando el dribbler toca la pelota, lo que ocurre
 # cuando dist(ArUco_center, ball_center) ≈ robot_radius - ball_radius ≈ 23-27px.
 # Este valor debe ser mayor que la distancia real de parada (~23px observado).
 # Calibrar con scripts/calibrate_behavior_thresholds.py (teclas O/L)
-CAPTURE_CONFIRM_DISTANCE_PX = 28  # px — confirmar pelota en dribbler
+CAPTURE_CONFIRM_DISTANCE_PX = 17  # px — confirmar pelota en dribbler
 
 # Velocidad PWM para el acercamiento lento hacia la pelota (sin dribbler).
 # Se envía directamente a los motores sin PID.
 # Debe superar MOTOR_DEAD_ZONE_PWM (30) para garantizar movimiento.
 # A mayor valor: más rápido pero más riesgo de empujar la pelota.
 # Calibrar con scripts/calibrate_behavior_thresholds.py (teclas N/M)
-CAPTURE_CREEP_SPEED_PWM = 17  # PWM — velocidad máxima lineal durante PID de avance al contacto
+CAPTURE_CREEP_SPEED_PWM = 18  # PWM — velocidad máxima lineal durante PID de avance al contacto
                               # Se aplica como max_linear_pwm_override: capea v pero permite
                               # corrección angular completa. Calibrar con teclas N/M.
 
@@ -474,10 +474,20 @@ DRIBBLER_PULSE_OFF_MS = 0  # ms — duración del pulso apagado (0=continuo)
 # eliminando la necesidad de rotar con la pelota o activar el dribbler.
 # BEHIND_BALL_APPROACH_PX debe ser > CAPTURE_ACTIVATE_DISTANCE_PX para no
 # rozar la pelota durante el posicionamiento.
-BEHIND_BALL_APPROACH_PX = 65  # px — distancia robot-pelota al posicionarse detrás
+BEHIND_BALL_APPROACH_PX = 52  # px — distancia robot-pelota al posicionarse detrás
 BEHIND_BALL_LATERAL_OFFSET_PX = 75 # px — desvío lateral para rodear la pelota
 BEHIND_BALL_ALIGN_TOLERANCE_DEG = 15.0  # ° — tolerancia angular aceptable al posicionar
 PUSH_BURST_PWM = 70                # PWM — pulso anti-stiction al iniciar avance al contacto
+
+# --- Detección de robot atascado (stuck / anti-stall) ---
+# Si el robot no avanza más de STUCK_MOVEMENT_THRESHOLD_PX píxeles dentro de una
+# ventana de STUCK_DETECTION_WINDOW_S segundos, se suma STUCK_BOOST_INCREMENT PWM
+# adicional por cada ventana consecutiva (máx STUCK_BOOST_MAX). Al moverse, decae.
+STUCK_MOVEMENT_THRESHOLD_PX = 8   # px — desplazamiento mínimo para "no estar atascado"
+STUCK_DETECTION_WINDOW_S = 0.8    # s  — ventana de tiempo (~20 frames @ 25 FPS)
+STUCK_BOOST_INCREMENT = 3         # PWM — boost adicional por ventana sin movimiento
+STUCK_BOOST_MAX = 25              # PWM — boost máximo acumulado (hard cap)
+STUCK_BOOST_DECAY = 5             # PWM — reducción por ventana con movimiento
 
 # =============================================================================
 # Parámetros de Control PID

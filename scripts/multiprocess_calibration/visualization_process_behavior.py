@@ -62,6 +62,10 @@ def visualization_loop_behavior(perception_pipe, control_state_pipe, keyboard_pi
         'dribbler_pulse_off_ms': 0,
         'behind_ball_approach_px': 65,
         'contact_settle_time_s': 0.35,
+        'stuck_movement_threshold_px': 8,
+        'stuck_detection_window_s':    0.8,
+        'stuck_boost_increment':       3,
+        'stuck_boost_max':             25,
     }
     last_target_waypoint = None
     last_movement_active = False
@@ -80,6 +84,7 @@ def visualization_loop_behavior(perception_pipe, control_state_pipe, keyboard_pi
     last_dist_to_ball = None
     last_settle_elapsed = None
     last_cmd_type = 'idle'
+    last_stuck_boost = 0
 
     # Waypoint persistence: keeps showing where the target was after arrival
     reached_waypoint = None       # waypoint that was reached (persists until new one is set)
@@ -191,6 +196,7 @@ def visualization_loop_behavior(perception_pipe, control_state_pipe, keyboard_pi
                     last_dist_to_ball = control_data.get('dist_to_ball')
                     last_settle_elapsed = control_data.get('settle_elapsed')
                     last_cmd_type = control_data.get('last_cmd_type', last_cmd_type)
+                    last_stuck_boost = control_data.get('stuck_boost', 0)
 
                     # Detect waypoint reached: target went from something to None
                     if prev_target_waypoint is not None and new_target is None:
@@ -388,14 +394,16 @@ def visualization_loop_behavior(perception_pipe, control_state_pipe, keyboard_pi
                                              last_target_waypoint, last_robot_available,
                                              last_robot_detected, last_angle_error_deg,
                                              last_movement_mode, reached_waypoint,
-                                             panel_height, total_w)
+                                             panel_height, total_w,
+                                             stuck_boost=last_stuck_boost)
                 combined = np.vstack([panel, video_frame])
                 cv2.imshow(window_name, combined)
             else:
                 panel = _draw_behavior_panel(last_behavior_params, last_robot_pos,
                                              last_target_waypoint, last_robot_available,
                                              last_robot_detected, None, None, None,
-                                             panel_height, total_w)
+                                             panel_height, total_w,
+                                             stuck_boost=last_stuck_boost)
                 placeholder = np.zeros((zoom_h, total_w, 3), dtype=np.uint8)
                 cv2.putText(placeholder, "Esperando frames...",
                            (total_w // 2 - 100, zoom_h // 2),
@@ -543,6 +551,22 @@ def visualization_loop_behavior(perception_pipe, control_state_pipe, keyboard_pi
                     command = 'adjust_threshold'
                     param = 'contact_settle_time_s'
                     delta = 0.05
+                elif key == ord('z') or key == ord('Z'):
+                    command = 'adjust_threshold'
+                    param = 'stuck_movement_threshold_px'
+                    delta = -1
+                elif key == ord('b') or key == ord('B'):
+                    command = 'adjust_threshold'
+                    param = 'stuck_movement_threshold_px'
+                    delta = 1
+                elif key == ord('f') or key == ord('F'):
+                    command = 'adjust_threshold'
+                    param = 'stuck_detection_window_s'
+                    delta = -0.1
+                elif key == ord('h') or key == ord('H'):
+                    command = 'adjust_threshold'
+                    param = 'stuck_detection_window_s'
+                    delta = 0.1
                 elif key in [82, 84, 81, 83] and last_robot_pos:
                     command = 'move_waypoint'
                     reached_waypoint = None  # New waypoint movement clears reached
@@ -857,7 +881,8 @@ def _draw_overlays_zoom(frame, robot_pos, robot_data, waypoint,
 
 def _draw_behavior_panel(behavior_params, robot_pos, waypoint, robot_available,
                           robot_detected, angle_error_deg, movement_mode,
-                          reached_waypoint, panel_height=520, panel_width=960):
+                          reached_waypoint, panel_height=520, panel_width=960,
+                          stuck_boost=0):
     """Dibuja el panel de control de comportamiento."""
     panel = np.zeros((panel_height, panel_width, 3), dtype=np.uint8)
 
@@ -974,6 +999,36 @@ def _draw_behavior_panel(behavior_params, robot_pos, waypoint, robot_available,
                cv2.FONT_HERSHEY_SIMPLEX, 0.33, (100, 160, 180), 1)
     y_left += lh
 
+    # --- Anti-atasco (stuck detection) ---
+    cv2.putText(panel, "ANTI-ATASCO (stuck detection)", (col_left_x, y_left),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 200, 100), 1)
+    y_left += lh
+
+    thr_px = behavior_params.get('stuck_movement_threshold_px', 8)
+    win_s  = behavior_params.get('stuck_detection_window_s', 0.8)
+    bmax   = behavior_params.get('stuck_boost_max', 25)
+    binc   = behavior_params.get('stuck_boost_increment', 3)
+    cv2.putText(panel, f"Min. movimiento: {thr_px}px", (col_left_x, y_left),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 200, 100), 1)
+    cv2.putText(panel, "(Z/B)", (250, y_left), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (150, 150, 150), 1)
+    y_left += lh
+    cv2.putText(panel, f"Ventana: {win_s:.1f}s  |  Max: {bmax} PWM  (+{binc})", (col_left_x, y_left),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 200, 100), 1)
+    cv2.putText(panel, "(F/H)", (250, y_left), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (150, 150, 150), 1)
+    y_left += lh
+
+    # Barra dinámica de boost activo
+    boost_ratio = stuck_boost / max(1, bmax)
+    boost_color = (0, 255, 80) if stuck_boost == 0 else (0, 165, 255) if stuck_boost < bmax else (0, 0, 255)
+    bar_w = 190
+    cv2.rectangle(panel, (col_left_x, y_left), (col_left_x + bar_w, y_left + 12), (40, 40, 40), -1)
+    if stuck_boost > 0:
+        cv2.rectangle(panel, (col_left_x, y_left),
+                      (col_left_x + int(bar_w * boost_ratio), y_left + 12), boost_color, -1)
+    cv2.putText(panel, f"Boost: {stuck_boost} PWM", (col_left_x + bar_w + 6, y_left + 10),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.38, boost_color, 1)
+    y_left += lh + 2
+
     factor = behavior_params.get('dribble_pwm_factor', 1.0)
     cv2.putText(panel, f"Dribble (inactivo): {factor:.2f}x  (T/Y)", (col_left_x, y_left),
                cv2.FONT_HERSHEY_SIMPLEX, 0.38, (80, 80, 80), 1)
@@ -1029,6 +1084,8 @@ def _draw_behavior_panel(behavior_params, robot_pos, waypoint, robot_available,
         "─── Captura (sin dribbler) ───────────────",
         "O/L: Confirm dist (contacto)  N/M: Creep PWM",
         "Q/E: ±1px detrás pelota  A/S: ±0.05s asent.",
+        "─── Anti-atasco ──────────────────────────",
+        "Z/B: ±1px mov.min  F/H: ±0.1s ventana",
         "─── Dribbler (inactivo) ──────────────────",
         "1/2: Cap  3/4: Hold  5/6: ON  7/8: OFF",
         "─── Vista ────────────────────────────────",

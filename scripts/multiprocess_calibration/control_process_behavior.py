@@ -42,6 +42,10 @@ from robot_soccer.config import (
     CAMERA_PERSPECTIVE_WIDTH,
     CAMERA_PERSPECTIVE_HEIGHT,
     FIELD_CAM,
+    STUCK_MOVEMENT_THRESHOLD_PX,
+    STUCK_DETECTION_WINDOW_S,
+    STUCK_BOOST_INCREMENT,
+    STUCK_BOOST_MAX,
 )
 
 log = logging.getLogger(__name__)
@@ -114,6 +118,10 @@ def control_loop_behavior(robot_positions_pipe, frame_pipe, robot_id, serial_por
         'dribbler_hold_power': DRIBBLER_HOLD_POWER,
         'dribbler_pulse_on_ms': DRIBBLER_PULSE_ON_MS,
         'dribbler_pulse_off_ms': DRIBBLER_PULSE_OFF_MS,
+        'stuck_movement_threshold_px': STUCK_MOVEMENT_THRESHOLD_PX,
+        'stuck_detection_window_s':    STUCK_DETECTION_WINDOW_S,
+        'stuck_boost_increment':       STUCK_BOOST_INCREMENT,
+        'stuck_boost_max':             STUCK_BOOST_MAX,
     }
 
     # Controlador
@@ -275,6 +283,10 @@ def _update_behavior_controller(controller, behavior_params):
     controller.angle_threshold = math.radians(behavior_params['angle_threshold'])
     controller.dribble_pwm_factor = behavior_params.get('dribble_pwm_factor', 1.0)
     # MAX_ANGULAR_CORRECTION ya no se usa (reemplazado por Dual PID v+ω)
+    controller.stuck_movement_threshold_px = behavior_params.get('stuck_movement_threshold_px', STUCK_MOVEMENT_THRESHOLD_PX)
+    controller.stuck_detection_window_s    = behavior_params.get('stuck_detection_window_s',    STUCK_DETECTION_WINDOW_S)
+    controller.stuck_boost_increment       = behavior_params.get('stuck_boost_increment',       STUCK_BOOST_INCREMENT)
+    controller.stuck_boost_max             = behavior_params.get('stuck_boost_max',             STUCK_BOOST_MAX)
 
 
 def _set_controller_creep_speed(controller, creep_pwm):
@@ -672,6 +684,10 @@ def _save_behavior_to_config(behavior_params):
         'DRIBBLER_PULSE_OFF_MS': f"{behavior_params.get('dribbler_pulse_off_ms', 150)}",
         'BEHIND_BALL_APPROACH_PX': f"{behavior_params.get('behind_ball_approach_px', BEHIND_BALL_APPROACH_PX)}",
         'CONTACT_SETTLE_TIME_S': f"{behavior_params.get('contact_settle_time_s', CONTACT_SETTLE_TIME_S)}",
+        'STUCK_MOVEMENT_THRESHOLD_PX': f"{int(behavior_params.get('stuck_movement_threshold_px', STUCK_MOVEMENT_THRESHOLD_PX))}",
+        'STUCK_DETECTION_WINDOW_S':    f"{behavior_params.get('stuck_detection_window_s', STUCK_DETECTION_WINDOW_S):.1f}",
+        'STUCK_BOOST_INCREMENT':       f"{int(behavior_params.get('stuck_boost_increment', STUCK_BOOST_INCREMENT))}",
+        'STUCK_BOOST_MAX':             f"{int(behavior_params.get('stuck_boost_max', STUCK_BOOST_MAX))}",
     }
 
     new_lines = []
@@ -752,6 +768,10 @@ def control_loop_behavior_pure(perception_pipe, control_state_pipe, keyboard_pip
         'dribbler_pulse_off_ms': DRIBBLER_PULSE_OFF_MS,
         'behind_ball_approach_px': BEHIND_BALL_APPROACH_PX,
         'contact_settle_time_s': CONTACT_SETTLE_TIME_S,
+        'stuck_movement_threshold_px': STUCK_MOVEMENT_THRESHOLD_PX,
+        'stuck_detection_window_s':    STUCK_DETECTION_WINDOW_S,
+        'stuck_boost_increment':       STUCK_BOOST_INCREMENT,
+        'stuck_boost_max':             STUCK_BOOST_MAX,
     }
 
     controller = DifferentialDriveController(rf_controller=rf_controller)
@@ -971,12 +991,19 @@ def control_loop_behavior_pure(perception_pipe, control_state_pipe, keyboard_pip
                                 'dribbler_pulse_off_ms': (0, 500),
                                 'behind_ball_approach_px': (30, 120),
                                 'contact_settle_time_s': (0.05, 2.0),
+                                'stuck_movement_threshold_px': (2, 30),
+                                'stuck_detection_window_s':    (0.2, 3.0),
+                                'stuck_boost_increment':       (1, 15),
+                                'stuck_boost_max':             (5, 60),
                             }
                             lo, hi = _param_bounds.get(param, (0, 9999))
                             behavior_params[param] = max(lo, min(hi, round(behavior_params[param] + delta, 2)))
                             controller.position_threshold = behavior_params['position_threshold']
                             controller.angle_threshold = math.radians(behavior_params['angle_threshold'])
                             controller.dribble_pwm_factor = behavior_params.get('dribble_pwm_factor', 1.0)
+                            if param in ('stuck_movement_threshold_px', 'stuck_detection_window_s',
+                                         'stuck_boost_increment', 'stuck_boost_max'):
+                                _update_behavior_controller(controller, behavior_params)
                             log.info(f"  {param}: {behavior_params[param]}")
                     elif command == 'save_params':
                         _save_behavior_to_config(behavior_params)
@@ -1161,6 +1188,7 @@ def control_loop_behavior_pure(perception_pipe, control_state_pipe, keyboard_pip
                         'dist_to_ball': round(dist_to_ball_now, 1) if ball_waypoint and robot else None,
                         'settle_elapsed': round(settle_elapsed, 2) if capture_phase == 'capture_settling' else None,
                         'last_cmd_type': last_cmd_type,
+                        'stuck_boost': controller._pid_state.get(robot_id, {}).get('stuck_boost', 0),
                         'timestamp': current_time
                     })
                     last_state_send_time = current_time

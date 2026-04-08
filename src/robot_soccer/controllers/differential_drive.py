@@ -21,6 +21,11 @@ from robot_soccer.config import (
     PID_ANGLE_KP,
     PID_ANGLE_KI,
     PID_ANGLE_KD,
+    STUCK_MOVEMENT_THRESHOLD_PX,
+    STUCK_DETECTION_WINDOW_S,
+    STUCK_BOOST_INCREMENT,
+    STUCK_BOOST_MAX,
+    STUCK_BOOST_DECAY,
 )
 
 log = logging.getLogger(__name__)
@@ -152,6 +157,13 @@ class DifferentialDriveController:
         self.last_pid_debug_log_time = {}  # {robot_id: timestamp}
         self.PID_DEBUG_LOG_INTERVAL = 0.1  # 100ms entre logs de PID
 
+        # Parámetros de detección de atasco (calibrables externamente)
+        self.stuck_movement_threshold_px = STUCK_MOVEMENT_THRESHOLD_PX
+        self.stuck_detection_window_s    = STUCK_DETECTION_WINDOW_S
+        self.stuck_boost_increment       = STUCK_BOOST_INCREMENT
+        self.stuck_boost_max             = STUCK_BOOST_MAX
+        self.stuck_boost_decay           = STUCK_BOOST_DECAY
+
     def _get_robot_speed_limits(self, robot_id):
         """Obtiene límites de velocidad PWM desde la calibración JSON del robot.
 
@@ -206,6 +218,11 @@ class DifferentialDriveController:
                 'last_rotation_speed': 0,
                 'in_rotation_mode': False,
                 'last_pid_time': 0,
+                # Stuck detection
+                'stuck_boost': 0,          # PWM adicional actualmente aplicado
+                'stuck_ref_x': None,       # posición de referencia al inicio de la ventana
+                'stuck_ref_y': None,
+                'stuck_window_start': 0.0, # timestamp de inicio de la ventana actual
             }
         return self._pid_state[robot_id]
 
@@ -529,6 +546,39 @@ class DifferentialDriveController:
                 angle_error=angle_error, speed=v, omega_pwm=omega_pwm,
                 min_spd=robot_min_speed, max_spd=robot_max_speed,
                 left=left_speed, right=right_speed)
+
+        # === STUCK DETECTION ===
+        _pid_st = self._get_pid_state(robot.id)
+        _now = time.monotonic()
+        if distance > self.position_threshold:
+            if _pid_st['stuck_ref_x'] is None:
+                _pid_st['stuck_ref_x'] = robot.x
+                _pid_st['stuck_ref_y'] = robot.y
+                _pid_st['stuck_window_start'] = _now
+            elif _now - _pid_st['stuck_window_start'] >= self.stuck_detection_window_s:
+                _moved = math.sqrt(
+                    (robot.x - _pid_st['stuck_ref_x'])**2 +
+                    (robot.y - _pid_st['stuck_ref_y'])**2
+                )
+                if _moved < self.stuck_movement_threshold_px:
+                    _pid_st['stuck_boost'] = min(
+                        _pid_st['stuck_boost'] + self.stuck_boost_increment,
+                        self.stuck_boost_max
+                    )
+                    if _pid_st['stuck_boost'] > 0:
+                        log.debug("Robot %d: ATASCADO — boost=%d PWM (moved=%.1fpx)",
+                                  robot.id, _pid_st['stuck_boost'], _moved)
+                else:
+                    _pid_st['stuck_boost'] = max(
+                        0, _pid_st['stuck_boost'] - self.stuck_boost_decay
+                    )
+                _pid_st['stuck_ref_x'] = robot.x
+                _pid_st['stuck_ref_y'] = robot.y
+                _pid_st['stuck_window_start'] = _now
+        else:
+            _pid_st['stuck_ref_x'] = None
+            _pid_st['stuck_window_start'] = 0.0
+            _pid_st['stuck_boost'] = max(0, _pid_st['stuck_boost'] - self.stuck_boost_decay)
 
         self._send_motor_commands(robot, left_speed, right_speed)
         return False
@@ -937,6 +987,12 @@ class DifferentialDriveController:
         if self.dribble_pwm_factor != 1.0:
             left_speed_pwm = left_speed_pwm * self.dribble_pwm_factor
             right_speed_pwm = right_speed_pwm * self.dribble_pwm_factor
+
+        # Aplicar boost anti-atasco (aditivo, preserva dirección del motor)
+        _boost = self._pid_state.get(robot.id, {}).get('stuck_boost', 0)
+        if _boost > 0:
+            left_speed_pwm  += (1 if left_speed_pwm  > 0 else -1 if left_speed_pwm  < 0 else 0) * _boost
+            right_speed_pwm += (1 if right_speed_pwm > 0 else -1 if right_speed_pwm < 0 else 0) * _boost
 
         # Limitar velocidades a rango válido PWM
         left_speed_pwm = int(max(-255, min(255, left_speed_pwm)))
