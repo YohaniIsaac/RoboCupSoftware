@@ -65,7 +65,7 @@ def visualization_loop_behavior(perception_pipe, control_state_pipe, keyboard_pi
         'stuck_movement_threshold_px': 3,
         'stuck_detection_window_s':    1.2,
         'stuck_boost_increment':       1,
-        'stuck_boost_max':             8,
+        'stuck_boost_max':             12,
     }
     last_target_waypoint = None
     last_movement_active = False
@@ -314,7 +314,7 @@ def visualization_loop_behavior(perception_pipe, control_state_pipe, keyboard_pi
                     'approach_align':   ('FASE 1b: Alineando...',   (255, 140, 0)),
                     'capture_creeping': ('FASE 2: Creep lento',     (0, 200, 255)),
                     'capture_settling': ('FASE 2: Asentando...',    (0, 165, 255)),
-                    'confirmed':        ('CONTACTO CONFIRMADO',     (0, 255, 80)),
+                    'confirmed':        ('CONFIRMADO — pulsa G para KICK', (0, 255, 80)),
                 }
                 ph_text, ph_color = phase_info.get(
                     last_capture_phase, (last_capture_phase.upper(), (255, 255, 255)))
@@ -567,6 +567,14 @@ def visualization_loop_behavior(perception_pipe, control_state_pipe, keyboard_pi
                     command = 'adjust_threshold'
                     param = 'stuck_detection_window_s'
                     delta = 0.1
+                elif key == ord('p') or key == ord('P'):
+                    command = 'adjust_threshold'
+                    param = 'stuck_boost_max'
+                    delta = -1
+                elif key == ord(';'):
+                    command = 'adjust_threshold'
+                    param = 'stuck_boost_max'
+                    delta = 1
                 elif key in [82, 84, 81, 83] and last_robot_pos:
                     command = 'move_waypoint'
                     reached_waypoint = None  # New waypoint movement clears reached
@@ -1006,15 +1014,19 @@ def _draw_behavior_panel(behavior_params, robot_pos, waypoint, robot_available,
 
     thr_px = behavior_params.get('stuck_movement_threshold_px', 3)
     win_s  = behavior_params.get('stuck_detection_window_s', 1.2)
-    bmax   = behavior_params.get('stuck_boost_max', 8)
+    bmax   = behavior_params.get('stuck_boost_max', 12)
     binc   = behavior_params.get('stuck_boost_increment', 1)
     cv2.putText(panel, f"Min. movimiento: {thr_px}px", (col_left_x, y_left),
                cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 200, 100), 1)
     cv2.putText(panel, "(Z/B)", (250, y_left), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (150, 150, 150), 1)
     y_left += lh
-    cv2.putText(panel, f"Ventana: {win_s:.1f}s  |  Max: {bmax} PWM  (+{binc})", (col_left_x, y_left),
+    cv2.putText(panel, f"Ventana: {win_s:.1f}s  (+{binc} PWM/ventana)", (col_left_x, y_left),
                cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 200, 100), 1)
     cv2.putText(panel, "(F/H)", (250, y_left), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (150, 150, 150), 1)
+    y_left += lh
+    cv2.putText(panel, f"Max boost: {bmax} PWM", (col_left_x, y_left),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 200, 100), 1)
+    cv2.putText(panel, "(P/;)", (250, y_left), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (150, 150, 150), 1)
     y_left += lh
 
     # Barra dinámica de boost activo
@@ -1078,6 +1090,7 @@ def _draw_behavior_panel(behavior_params, robot_pos, waypoint, robot_available,
         "ESPACIO: FASE 1 — robot va DETRÁS de la pelota",
         "D: FASE 2 — creep lento hacia la pelota",
         "  (contact auto) → asentamiento → CONFIRMADO",
+        "G: FASE 3 — KICK (solenoide) solo desde CONFIRMADO",
         "X: Cancelar y reiniciar  |  ENTER: Guardar",
         "─── Parámetros de posición ───────────────",
         "9/0: PosThresh  -/=: AngThresh  [/]: InicioLineal",
@@ -1085,7 +1098,7 @@ def _draw_behavior_panel(behavior_params, robot_pos, waypoint, robot_available,
         "O/L: Confirm dist (contacto)  N/M: Creep PWM",
         "Q/E: ±1px detrás pelota  A/S: ±0.05s asent.",
         "─── Anti-atasco ──────────────────────────",
-        "Z/B: ±1px mov.min  F/H: ±0.1s ventana",
+        "Z/B: ±1px mov.min  F/H: ±0.1s ventana  P/;: ±1 max PWM",
         "─── Dribbler (inactivo) ──────────────────",
         "1/2: Cap  3/4: Hold  5/6: ON  7/8: OFF",
         "─── Vista ────────────────────────────────",

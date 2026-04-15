@@ -433,7 +433,7 @@ CAPTURE_CREEP_SPEED_PWM = 18  # PWM — velocidad máxima lineal durante PID de 
 # Tiempo de espera (segundos) tras confirmar contacto con la pelota.
 # Permite que la pelota se acomode contra el robot antes de disparar.
 # Si la pelota escapa durante este tiempo, el ciclo se reinicia.
-CONTACT_SETTLE_TIME_S = 0.35  # s — espera de asentamiento antes del disparo
+CONTACT_SETTLE_TIME_S = 0.3  # s — espera de asentamiento antes del disparo
 
 # Factores de escape para detectar que la pelota se alejó demasiado.
 # Durante avance: dist > BEHIND_BALL_APPROACH_PX * ADVANCE_ESCAPE_FACTOR → abortar
@@ -474,7 +474,7 @@ DRIBBLER_PULSE_OFF_MS = 0  # ms — duración del pulso apagado (0=continuo)
 # eliminando la necesidad de rotar con la pelota o activar el dribbler.
 # BEHIND_BALL_APPROACH_PX debe ser > CAPTURE_ACTIVATE_DISTANCE_PX para no
 # rozar la pelota durante el posicionamiento.
-BEHIND_BALL_APPROACH_PX = 52  # px — distancia robot-pelota al posicionarse detrás
+BEHIND_BALL_APPROACH_PX = 60  # px — distancia robot-pelota al posicionarse detrás
 BEHIND_BALL_LATERAL_OFFSET_PX = 75 # px — desvío lateral para rodear la pelota
 BEHIND_BALL_ALIGN_TOLERANCE_DEG = 15.0  # ° — tolerancia angular aceptable al posicionar
 PUSH_BURST_PWM = 70                # PWM — pulso anti-stiction al iniciar avance al contacto
@@ -483,10 +483,10 @@ PUSH_BURST_PWM = 70                # PWM — pulso anti-stiction al iniciar avan
 # Si el robot no avanza más de STUCK_MOVEMENT_THRESHOLD_PX píxeles dentro de una
 # ventana de STUCK_DETECTION_WINDOW_S segundos, se suma STUCK_BOOST_INCREMENT PWM
 # adicional por cada ventana consecutiva (máx STUCK_BOOST_MAX). Al moverse, decae.
-STUCK_MOVEMENT_THRESHOLD_PX = 3   # px — desplazamiento mínimo para "no estar atascado"
-STUCK_DETECTION_WINDOW_S = 1.2    # s  — ventana de tiempo (~30 frames @ 25 FPS)
-STUCK_BOOST_INCREMENT = 1         # PWM — boost adicional por ventana sin movimiento
-STUCK_BOOST_MAX = 8               # PWM — boost máximo acumulado (hard cap)
+STUCK_MOVEMENT_THRESHOLD_PX = 3  # px — desplazamiento mínimo para "no estar atascado"
+STUCK_DETECTION_WINDOW_S = 0.8  # s  — ventana de tiempo (~30 frames @ 25 FPS)
+STUCK_BOOST_INCREMENT = 1  # PWM — boost adicional por ventana sin movimiento
+STUCK_BOOST_MAX = 12  # PWM — boost máximo acumulado (hard cap)
 STUCK_BOOST_DECAY = 5             # PWM — reducción por ventana con movimiento
 
 # =============================================================================

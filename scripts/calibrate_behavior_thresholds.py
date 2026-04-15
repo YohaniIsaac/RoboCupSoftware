@@ -55,10 +55,10 @@ Controles:
     7/8: Disminuir/Aumentar dribbler_pulse_off_ms (tiempo apagado)
 
     CONTROL DE MOVIMIENTO:
-    ESPACIO: Fase 1 - Robot avanza y para a capture_activate_px del waypoint
-    D: Fase 2 - Activa dribbler + creep hacia overshoot target
-    G: Fase 3 - Gira en lugar con dribbler activo (test de pulsos)
-    X: Cancelar waypoint y apagar dribbler
+    ESPACIO: Fase 1 - Robot navega a posición DETRÁS de la pelota, luego alinea
+    D: Fase 2 - Creep lento hacia la pelota hasta confirmar contacto
+    G: Fase 3 - Dispara SOLENOIDE (kick) solo si fase = CONFIRMADO
+    X: Cancelar waypoint y reiniciar
 
     OTROS CONTROLES:
     ENTER: Guardar parámetros a config.py

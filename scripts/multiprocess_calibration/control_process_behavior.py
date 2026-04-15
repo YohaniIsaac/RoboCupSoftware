@@ -930,9 +930,24 @@ def control_loop_behavior_pure(perception_pipe, control_state_pipe, keyboard_pip
                         else:
                             log.warning("Estado inesperado: %s | movement=%s", capture_phase, movement_active)
                     elif command == 'start_rotate':
-                        # Sin dribbler: G ya no gira. Muestra instrucción útil.
-                        log.info("ℹ️  Fase 3 (girar) no aplica sin dribbler. "
-                                 "Usa D para fase 2 (creep), luego X para reiniciar.")
+                        # FASE 3: Disparar solenoide (kick) tras confirmar posesión
+                        if capture_phase == 'confirmed':
+                            if rf_controller:
+                                rf_controller.kick(firmware_id)
+                                rf_controller.set_motors(firmware_id, 0, 0)
+                                log.info("💥 FASE 3: KICK disparado (robot %d, firmware_id=%d)",
+                                         robot_id, firmware_id)
+                            else:
+                                log.info("💥 FASE 3: KICK (simulación — sin RF)")
+                            capture_phase = 'idle'
+                            movement_active = False
+                            contact_start_time = None
+                            overshoot_target = None
+                            _restore_controller_speed(controller)
+                        elif capture_phase in ('capture_creeping', 'capture_settling'):
+                            log.warning("⚠️  Espera a CONFIRMADO antes de disparar (fase actual: %s)", capture_phase)
+                        else:
+                            log.warning("⚠️  Completa fase 1+2 primero. Estado actual: %s", capture_phase)
                     elif command == 'cancel_waypoint':
                         target_waypoint = None
                         ball_waypoint = None
