@@ -45,6 +45,7 @@ from robot_soccer.config import (
     DRIBBLER_PULSE_OFF_MS,
 )
 from robot_soccer.utils.camera_utils import get_camera_index
+from robot_soccer.utils.robot_logger import robot_status_logger
 
 logging.basicConfig(
     level=logging.INFO,
@@ -450,36 +451,56 @@ def decision_process(perception_pipe, viz_state_pipe, keyboard_pipe,
                 blackboard = behavior_manager.blackboards.get(robot_id)
                 bt_action = blackboard.last_action if blackboard else None
                 if bt_action != prev_bt_action:
-                    d_str  = f"dist={distance:.0f}px "       if distance is not None else ""
-                    eb_str = f"err_pelota={err_to_ball_deg:+.1f}° " if err_to_ball_deg is not None else ""
-                    eg_str = f"err_arco={err_to_goal_deg:+.1f}°"    if err_to_goal_deg is not None else ""
                     if behavior_active:
                         # Fin de la fase anterior
                         if prev_bt_action is not None and prev_bt_action in phase_start_time:
                             elapsed = now - phase_start_time[prev_bt_action]
-                            log.info("[FASE FIN ] %-25s duración=%.2fs",
-                                     prev_bt_action, elapsed)
+                            robot_status_logger.emit_event(
+                                robot_id,
+                                f"FASE FIN:  {prev_bt_action:<24s} duracion={elapsed:.2f}s"
+                            )
                         # Inicio de la nueva fase
-                        log.info("[FASE INIT] %-25s | %s%s%s",
-                                 bt_action or "?", d_str, eb_str, eg_str)
+                        d_str  = f" dist={distance:.0f}px"       if distance is not None else ""
+                        eb_str = f" Dball={err_to_ball_deg:+.1f}°" if err_to_ball_deg is not None else ""
+                        eg_str = f" Dgoal={err_to_goal_deg:+.1f}°" if err_to_goal_deg is not None else ""
+                        robot_status_logger.emit_event(
+                            robot_id,
+                            f"FASE INIT: {(bt_action or '?'):<24s}{d_str}{eb_str}{eg_str}"
+                        )
                         if bt_action:
                             phase_start_time[bt_action] = now
                     prev_bt_action = bt_action
             except Exception:
                 pass
 
-            # --- Log periódico de ángulos (2 Hz cuando BT activo) ---
+            # --- Status periodico unificado (2 Hz cuando BT activo) ---
             if behavior_active and player_initialized and ball_initialized:
                 if now - last_angle_log >= 0.5:
-                    log.info(
-                        "[ANG] fase=%-22s | robot=%6.1f° "
-                        "| →pelota=%6.1f° (err %+5.1f°) "
-                        "| →arco=%6.1f° (err %+5.1f°)",
-                        prev_bt_action or "?",
-                        player.angle,
-                        angle_to_ball_deg, err_to_ball_deg,
-                        angle_to_goal_deg, err_to_goal_deg,
+                    action_info = behavior_manager.command_manager.actions_in_progress.get(robot_id)
+                    # Siempre resetear ambos modos; solo el activo se rellena
+                    tgt_pos_v = tgt_ang_v = dist_v = None
+                    if action_info:
+                        if action_info['type'] == 'move':
+                            tp = action_info['target_pos']
+                            tgt_pos_v = (int(tp[0]), int(tp[1]))
+                            dist_v = float(np.linalg.norm(
+                                np.array([player.x, player.y]) - np.array(tp[:2])
+                            ))
+                        elif action_info['type'] == 'rotate':
+                            tgt_ang_v = action_info['target_angle']
+                    # Nota: err_ang lo actualiza el controlador directamente (no se sobreescribe)
+                    robot_status_logger.update(
+                        robot_id,
+                        state=prev_bt_action or "unknown",
+                        ang=player.angle,
+                        pos=(int(player.x), int(player.y)),
+                        tgt_pos=tgt_pos_v,
+                        tgt_ang=tgt_ang_v,
+                        ball_err=err_to_ball_deg,
+                        goal_err=err_to_goal_deg,
+                        dist=dist_v,
                     )
+                    robot_status_logger.emit(robot_id)
                     last_angle_log = now
 
             # --- Enviar estado a visualizacion ---

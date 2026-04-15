@@ -2,6 +2,7 @@ import logging
 import math
 import time
 
+from robot_soccer.utils.robot_logger import robot_status_logger
 from robot_soccer.config import (
     ROBOT_MIN_ROTATION_SPEED,
     ROBOT_MAX_ROTATION_SPEED,
@@ -312,9 +313,11 @@ class DifferentialDriveController:
         distance = math.sqrt(dx**2 + dy**2)
 
         if not hasattr(self, '_last_target') or self._last_target != target_pos:
-            log.info("📍 Robot(%d, %d) → Target(%d, %d) | dist=%.1f",
-                     int(robot.x), int(robot.y),
-                     int(target_pos[0]), int(target_pos[1]), distance)
+            robot_status_logger.emit_event(
+                robot.id,
+                f"NUEVO TARGET: ({int(target_pos[0])},{int(target_pos[1])}) "
+                f"desde ({int(robot.x)},{int(robot.y)}) d={distance:.0f}px"
+            )
             self._last_target = target_pos
 
         state = self._get_pid_state(robot.id)
@@ -326,8 +329,10 @@ class DifferentialDriveController:
         predicted_dist = distance - speed_norm * 200.0 * latency_s
 
         if predicted_dist < self.position_threshold and state['last_linear_speed'] > 0:
-            log.info("🎯 Robot %d STOP PREDICTIVO | Dist=%.1f Pred=%.1f",
-                     robot.id, distance, predicted_dist)
+            robot_status_logger.emit_event(
+                robot.id,
+                f"STOP PREDICTIVO: dist={distance:.1f}px pred={predicted_dist:.1f}px"
+            )
             state['last_linear_speed'] = 0
             if target_angle is not None:
                 # No enviar STOP: rotate_to_angle gestiona los motores directamente
@@ -336,8 +341,10 @@ class DifferentialDriveController:
             return True
 
         if distance < self.position_threshold:
-            log.info("🎯 Waypoint alcanzado: dist=%.1f < %d",
-                     distance, self.position_threshold)
+            robot_status_logger.emit_event(
+                robot.id,
+                f"WAYPOINT ALCANZADO: dist={distance:.1f}px"
+            )
             state['last_linear_speed'] = 0
             if target_angle is not None:
                 # No enviar STOP: rotate_to_angle gestiona los motores directamente
@@ -584,34 +591,31 @@ class DifferentialDriveController:
         return False
 
     def _log_periodic(self, robot, now, mode, **kwargs):
-        """Log periódico unificado para rotación y movimiento lineal."""
+        """Actualiza el status logger con datos del controlador (rotacion o movimiento)."""
         last_time = self.last_periodic_log_time.get(robot.id, 0)
         if (now - last_time) < self.PERIODIC_LOG_INTERVAL:
             return
         self.last_periodic_log_time[robot.id] = now
 
         angle_err_deg = math.degrees(kwargs.get('angle_error', 0))
-        left = kwargs.get('left', 0)
-        right = kwargs.get('right', 0)
-        min_s = kwargs.get('min_spd', 0)
-        max_s = kwargs.get('max_spd', 0)
 
         if mode == 'rotation':
-            speed = kwargs.get('speed', 0)
-            log.info("🔄 Robot %d | Error∠=%.1f° | PWM=%d [%d-%d] | (L=%d R=%d)",
-                     robot.id, angle_err_deg, abs(speed), min_s, max_s,
-                     left, right)
+            robot_status_logger.update(
+                robot.id,
+                ang=math.degrees(robot.angle),
+                err_ang=angle_err_deg,
+            )
         else:
             tp = kwargs.get('target_pos', (0, 0))
             dist = kwargs.get('distance', 0)
-            v = kwargs.get('speed', 0)
-            omega = kwargs.get('omega_pwm', 0)
-            zone = "RAMPA" if dist <= self.distance_near else "LEJOS"
-            log.info("🚗 Robot %d | Pos(%.0f,%.0f)→(%.0f,%.0f) d=%.0f %s | "
-                     "v=%d ω=%d [%d-%d] | ∠=%.1f° | (L=%d R=%d)",
-                     robot.id, robot.x, robot.y, tp[0], tp[1],
-                     dist, zone, v, omega, min_s, max_s,
-                     angle_err_deg, left, right)
+            robot_status_logger.update(
+                robot.id,
+                ang=math.degrees(robot.angle),
+                err_ang=angle_err_deg,
+                pos=(int(robot.x), int(robot.y)),
+                tgt_pos=(int(tp[0]), int(tp[1])),
+                dist=dist,
+            )
 
     def rotate_to_angle(self, robot, target_angle_deg):
         """Rota el robot hacia un ángulo específico usando control PID.
@@ -667,9 +671,10 @@ class DifferentialDriveController:
 
             if sign_changed and error_decreased and not_near_180:
                 # CRUZAMOS el objetivo! Detener inmediatamente
-                log.info("🎯 Robot %d CRUCE DE OBJETIVO | Actual=%.1f° Target=%.1f° Error: %.1f° → %.1f°",
-                         robot.id, current_normalized, target_normalized,
-                         robot._last_angle_error_deg, angle_error_deg)
+                robot_status_logger.emit_event(
+                    robot.id,
+                    f"TARGET CROSS: ang={current_normalized:+.1f}° -> tgt={target_normalized:+.1f}°"
+                )
                 self._send_motor_commands(robot, 0, 0)
                 state['last_rotation_speed'] = 0
                 self.last_logged_rotation_speed[robot.id] = 0
@@ -738,7 +743,7 @@ class DifferentialDriveController:
         # Integral (con anti-windup, basado en tiempo)
         if (state['last_error_angle'] * angle_error) < 0:
             state['integral_angle'] = 0
-            log.debug("🔄 Reset integral angular (cambio de dirección)")
+            log.debug("Reset integral angular (cambio de direccion)")
         else:
             state['integral_angle'] += angle_error * dt_angle
 
@@ -780,9 +785,11 @@ class DifferentialDriveController:
 
         if in_ramp_zone and not robot._was_in_ramp:
             # Primera vez que entra en rampa
-            log.info("📉 Robot %d ENTRA EN RAMPA | Actual=%.1f° Target=%.1f° Error=%.1f° | Speed antes=%.3f",
-                    robot.id, current_normalized, target_normalized, angle_error_deg,
-                    abs(rotation_speed))
+            robot_status_logger.emit_event(
+                robot.id,
+                f"RAMP ENTRY: ang={current_normalized:+.1f}° tgt={target_normalized:+.1f}° "
+                f"err={angle_error_deg:+.1f}°"
+            )
             robot._was_in_ramp = True
         elif not in_ramp_zone:
             # Salió de rampa, resetear flag
@@ -821,7 +828,7 @@ class DifferentialDriveController:
         # Guardar velocidad de rotación para predictive stopping en la próxima iteración
         state['last_rotation_speed'] = rotation_speed
 
-        # ===== LOGGING DETALLADO =====
+        # ===== ACTUALIZAR STATUS LOGGER =====
         current_time = time.time()
         last_logged_speed = self.last_logged_rotation_speed.get(robot.id, None)
         last_periodic_time = self.last_periodic_log_time.get(robot.id, 0)
@@ -830,39 +837,13 @@ class DifferentialDriveController:
                         abs(abs(rotation_speed) - abs(last_logged_speed)) >= 1)
         periodic_log_due = (current_time - last_periodic_time) >= self.PERIODIC_LOG_INTERVAL
 
-        # Determinar zona
-        angle_error_abs = abs(angle_error)
-        if angle_error_abs <= self.angle_threshold:
-            zone = "THRESHOLD"
-        elif angle_error_abs <= self.angle_near:
-            zone = "RAMPA"
-        else:
-            zone = "LEJOS"
-
-        # Log cuando cambia velocidad O cada 250ms
         if speed_changed or periodic_log_due:
-            # Verificar límites
-            speed_abs = abs(rotation_speed)
-            limits_info = ""
-
-            # Comparar con límites calibrados per-robot
-            if zone == "LEJOS":
-                limits_info = f"Límites[{robot_min_speed}-{robot_max_speed}PWM]"
-            elif zone == "RAMPA":
-                limits_info = f"Límites[{robot_min_speed}-{robot_max_speed}PWM]"
-            else:  # THRESHOLD
-                limits_info = "Límites[0-threshold]"
-
-            # Log tipo según razón
-            if speed_changed:
-                log.info("🔄 Robot %d | Actual=%.1f° Target=%.1f° Error=%.1f° | Zona=%s | PWM=%d %s | (L=%d R=%d)",
-                        robot.id, current_normalized, target_normalized, angle_error_deg,
-                        zone, speed_abs, limits_info, left_speed, right_speed)
-            else:
-                log.info("⏱️  Robot %d | Actual=%.1f° Target=%.1f° Error=%.1f° | Zona=%s | PWM=%d %s | (L=%d R=%d)",
-                        robot.id, current_normalized, target_normalized, angle_error_deg,
-                        zone, speed_abs, limits_info, left_speed, right_speed)
-
+            robot_status_logger.update(
+                robot.id,
+                ang=current_normalized,
+                tgt_ang=target_normalized,
+                err_ang=angle_error_deg,
+            )
             self.last_logged_rotation_speed[robot.id] = rotation_speed
             self.last_periodic_log_time[robot.id] = current_time
 
@@ -997,6 +978,9 @@ class DifferentialDriveController:
         # Limitar velocidades a rango válido PWM
         left_speed_pwm = int(max(-255, min(255, left_speed_pwm)))
         right_speed_pwm = int(max(-255, min(255, right_speed_pwm)))
+
+        # Registrar PWM final en el status logger (incluye boost y dribble)
+        robot_status_logger.update(robot.id, left_pwm=left_speed_pwm, right_pwm=right_speed_pwm)
 
         # Si tenemos controlador RF, enviar comandos PWM directamente
         if self.rf_controller:

@@ -10,6 +10,7 @@ import time
 import numpy as np
 
 log = logging.getLogger(__name__)
+from robot_soccer.utils.robot_logger import robot_status_logger
 from robot_soccer.ai.behavior_tree.utils import calculate_ball_approach_position
 from robot_soccer.config import (
     ROL_ATACANTE, ROL_DEFENSIVO, FIELD_SIM,
@@ -1258,9 +1259,11 @@ def _move_behind_ball_start(blackboard):
         err_heading = abs((ang_to_ball - blackboard.player.angle + 180) % 360 - 180)
         if alignment < 30 and err_heading < BEHIND_BALL_ALIGN_TOLERANCE_DEG * 2:
             blackboard.last_action = "behind_ball_ready"
-            log.info("[behind_ball] Robot %d | pelota al frente (%.0fpx, alin=%.1f°, "
-                     "heading=%.1f°) → avance directo",
-                     blackboard.player.id, dist_to_ball, alignment, err_heading)
+            robot_status_logger.emit_event(
+                blackboard.player.id,
+                f"behind_ball PELOTA AL FRENTE: dist={dist_to_ball:.0f}px "
+                f"alin={alignment:.1f}° heading={err_heading:.1f}° -> avance directo"
+            )
             return NodeStatus.SUCCESS
 
     # Vector del arco hacia la pelota (dirección "detrás de la pelota")
@@ -1296,14 +1299,18 @@ def _move_behind_ball_start(blackboard):
         blackboard._behind_ball_detour = lateral.copy()
         blackboard._behind_ball_phase  = 'detour'
         target = (int(lateral[0]), int(lateral[1]))
-        log.info("[behind_ball] Robot %d | desvío lateral → (%d,%d)",
-                 blackboard.player.id, *target)
+        robot_status_logger.emit_event(
+            blackboard.player.id,
+            f"behind_ball DESVIO LATERAL: tgt=({target[0]},{target[1]})"
+        )
     else:
         blackboard._behind_ball_detour = None
         blackboard._behind_ball_phase  = 'direct'
         target = (int(behind_pos[0]), int(behind_pos[1]))
-        log.info("[behind_ball] Robot %d | camino directo → (%d,%d)",
-                 blackboard.player.id, *target)
+        robot_status_logger.emit_event(
+            blackboard.player.id,
+            f"behind_ball CAMINO DIRECTO: tgt=({target[0]},{target[1]})"
+        )
 
     blackboard.command_manager.move_robot_to(blackboard.player.id, target)
     blackboard.last_action = "move_behind_ball"
@@ -1325,7 +1332,7 @@ def _move_behind_ball_running(blackboard):
 
     # Recalcular si la pelota se movió demasiado
     if np.linalg.norm(ball_pos - blackboard._behind_ball_ref) > 60:
-        log.info("[behind_ball] Robot %d | pelota movida, recalculando", player_id)
+        robot_status_logger.emit_event(player_id, "behind_ball PELOTA MOVIDA: recalculando")
         return _move_behind_ball_start(blackboard)
 
     in_progress = player_id in blackboard.command_manager.actions_in_progress
@@ -1339,8 +1346,10 @@ def _move_behind_ball_running(blackboard):
             bp = blackboard._behind_ball_pos
             target = (int(bp[0]), int(bp[1]))
             blackboard.command_manager.move_robot_to(player_id, target)
-            log.info("[behind_ball] Robot %d | desvío OK, yendo a behind_pos (%d,%d)",
-                     player_id, *target)
+            robot_status_logger.emit_event(
+                player_id,
+                f"behind_ball DESVIO OK: yendo a behind_pos ({target[0]},{target[1]})"
+            )
         return NodeStatus.RUNNING
 
     # phase == 'direct'
@@ -1356,14 +1365,18 @@ def _move_behind_ball_running(blackboard):
 
     if angle_diff <= BEHIND_BALL_ALIGN_TOLERANCE_DEG:
         blackboard.last_action = "behind_ball_ready"
-        log.info("[behind_ball] Robot %d | listo | dist_ball=%.0fpx | align=%.1f°",
-                 player_id,
-                 np.linalg.norm(ball_pos - player_pos),
-                 angle_diff)
+        robot_status_logger.emit_event(
+            player_id,
+            f"behind_ball LISTO: dist={np.linalg.norm(ball_pos - player_pos):.0f}px "
+            f"align={angle_diff:.1f}°"
+        )
         return NodeStatus.SUCCESS
 
     # Rotar para alinearse con la pelota
-    log.info("[behind_ball] Robot %d | ajustando ángulo | diff=%.1f°", player_id, angle_diff)
+    robot_status_logger.emit_event(
+        player_id,
+        f"behind_ball AJUSTE ANGULO: diff={angle_diff:.1f}°"
+    )
     blackboard.command_manager.rotate_robot_to(player_id, angle_to_ball)
     return NodeStatus.RUNNING
 
@@ -1428,14 +1441,17 @@ def _advance_to_contact_start(blackboard):
             blackboard._contact_settle_start = time.time()
             blackboard.player._has_ball      = True
             blackboard.last_action           = "settling_contact"
-            log.info("[advance_contact] Robot %d | contacto inmediato | dist=%.1fpx | heading=%.1f°",
-                     player_id, dist, err_heading)
+            robot_status_logger.emit_event(
+                player_id,
+                f"advance_contact CONTACTO INMEDIATO: dist={dist:.1f}px heading_err={err_heading:.1f}°"
+            )
             return NodeStatus.RUNNING
         else:
-            log.info("[advance_contact] Robot %d | cerca (%.1fpx) pero desalineado "
-                     "(heading=%.1f° > %.1f°) → FAILURE",
-                     player_id, dist, err_heading,
-                     BEHIND_BALL_ALIGN_TOLERANCE_DEG * 2)
+            robot_status_logger.emit_event(
+                player_id,
+                f"advance_contact DESALINEADO: dist={dist:.1f}px "
+                f"heading_err={err_heading:.1f}° > {BEHIND_BALL_ALIGN_TOLERANCE_DEG * 2:.1f}° -> FAILURE"
+            )
             return NodeStatus.FAILURE
 
     # Calcular target de overshoot (más allá de la pelota hacia el arco)
@@ -1449,9 +1465,11 @@ def _advance_to_contact_start(blackboard):
 
     blackboard.command_manager.move_robot_to(player_id, target)
     blackboard.last_action = "advancing_to_contact"
-    log.info("[advance_contact] Robot %d | PID creep iniciado | dist=%.1fpx "
-             "| overshoot=(%d,%d) | creep_pwm=%d",
-             player_id, dist, *target, CAPTURE_CREEP_SPEED_PWM)
+    robot_status_logger.emit_event(
+        player_id,
+        f"advance_contact CREEP INICIADO: dist={dist:.1f}px "
+        f"overshoot=({target[0]},{target[1]}) pwm={CAPTURE_CREEP_SPEED_PWM}"
+    )
     return NodeStatus.RUNNING
 
 
@@ -1484,8 +1502,10 @@ def _advance_to_contact_running(blackboard):
         # Pelota empujada demasiado lejos
         if dist > BEHIND_BALL_APPROACH_PX * ADVANCE_ESCAPE_FACTOR:
             _clear_advance_state(blackboard, player_id)
-            log.info("[advance_contact] Robot %d | pelota escapó (%.0fpx) → FAILURE",
-                     player_id, dist)
+            robot_status_logger.emit_event(
+                player_id,
+                f"advance_contact PELOTA ESCAPO: dist={dist:.0f}px -> FAILURE"
+            )
             return NodeStatus.FAILURE
 
         # Contacto alcanzado: detener PID y empezar asentamiento
@@ -1495,8 +1515,10 @@ def _advance_to_contact_running(blackboard):
             blackboard._contact_settle_start = time.time()
             blackboard.player._has_ball      = True
             blackboard.last_action           = "settling_contact"
-            log.info("[advance_contact] Robot %d | contacto! dist=%.1fpx | Asentando %.2fs...",
-                     player_id, dist, CONTACT_SETTLE_TIME_S)
+            robot_status_logger.emit_event(
+                player_id,
+                f"advance_contact CONTACTO: dist={dist:.1f}px asentando {CONTACT_SETTLE_TIME_S:.2f}s..."
+            )
             return NodeStatus.RUNNING
 
         # Recalcular overshoot target (la pelota pudo moverse ligeramente).
@@ -1512,8 +1534,10 @@ def _advance_to_contact_running(blackboard):
     # Pelota escapó durante el asentamiento
     if dist > CAPTURE_CONFIRM_DISTANCE_PX * SETTLE_ESCAPE_FACTOR:
         blackboard.player._has_ball = False
-        log.info("[advance_contact] Robot %d | pelota escapó en asentamiento (%.0fpx) → FAILURE",
-                 player_id, dist)
+        robot_status_logger.emit_event(
+            player_id,
+            f"advance_contact PELOTA ESCAPO EN ASENTAMIENTO: dist={dist:.0f}px -> FAILURE"
+        )
         return NodeStatus.FAILURE
 
     # ¿Terminó el tiempo de asentamiento?
@@ -1521,8 +1545,10 @@ def _advance_to_contact_running(blackboard):
     if elapsed >= CONTACT_SETTLE_TIME_S:
         blackboard.player._has_ball = True
         blackboard.last_action      = "contact_confirmed"
-        log.info("[advance_contact] Robot %d | asentamiento OK (%.2fs) → SUCCESS",
-                 player_id, elapsed)
+        robot_status_logger.emit_event(
+            player_id,
+            f"advance_contact ASENTAMIENTO OK: t={elapsed:.2f}s -> SUCCESS"
+        )
         return NodeStatus.SUCCESS
 
     return NodeStatus.RUNNING
