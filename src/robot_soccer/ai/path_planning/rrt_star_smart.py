@@ -87,7 +87,7 @@ class RrtStarSmart:
         path (list): Ruta final encontrada.
     """
     def __init__(self, step_len, goal_sample_rate, search_radius,
-                 iter_max, list_obs=None, x_start=None, x_goal=None,):
+                 iter_max, list_obs=None, x_start=None, x_goal=None, field=None):
         """Inicializa el planificador RRT* Smart.
 
         Args:
@@ -98,6 +98,7 @@ class RrtStarSmart:
             list_obs (list, optional): Lista de obstáculos en el entorno.
             x_start (tuple, optional): Coordenadas del punto inicial.
             x_goal (tuple, optional): Coordenadas del punto objetivo.
+            field (FieldGeometry, optional): Geometría del campo. Por defecto FIELD_SIM.
         """
         self.x_start = Node(x_start) if x_start else None
         self.vertex = [self.x_start]
@@ -107,9 +108,10 @@ class RrtStarSmart:
         self.goal_sample_rate = goal_sample_rate
         self.search_radius = search_radius
         self.iter_max = iter_max
+        self._field = field  # guardar para setup() y replanificaciones internas
         if list_obs is not None:
-            self.env = Env(list_obs)
-            self.utils = Utils(list_obs)
+            self.env = Env(list_obs, field=field)
+            self.utils = Utils(list_obs, field=field)
             self.obs_vertex = self.utils.get_obs_vertex()
             self.obs_circle = self.env.obs_circle
             self.obs_rectangle = self.env.obs_rectangle
@@ -138,13 +140,14 @@ class RrtStarSmart:
 
         self.last_node = None
 
-    def setup(self, x_start, x_goal, list_obs):
+    def setup(self, x_start, x_goal, list_obs, field=None):
         """Configura el planificador con nuevos parámetros.
 
         Args:
             x_start (tuple): Coordenadas del punto inicial.
             x_goal (tuple): Coordenadas del punto objetivo.
             list_obs (list): Lista de obstáculos en el entorno.
+            field (FieldGeometry, optional): Geometría del campo. Usa self._field si no se pasa.
         """
         if x_start is not None:
             self.x_start = Node(x_start)
@@ -153,9 +156,10 @@ class RrtStarSmart:
         if x_goal is not None:
             self.x_goal = Node(x_goal)
 
+        _field = field if field is not None else getattr(self, '_field', None)
         if list_obs is not None:
-            self.env = Env(list_obs)
-            self.utils = Utils(list_obs)
+            self.env = Env(list_obs, field=_field)
+            self.utils = Utils(list_obs, field=_field)
             self.obs_vertex = self.utils.get_obs_vertex()
             self.obs_circle = self.env.obs_circle
             self.obs_rectangle = self.env.obs_rectangle
@@ -528,7 +532,8 @@ class RrtStarSmart:
             else:
                 self.trim_rrt()
 
-        elif self.x_start != Node(start_new):
+        elif math.hypot(self.x_start.x - start_new[0],
+                        self.x_start.y - start_new[1]) > 30:
             self.setup(start_new, (self.x_goal.x, self.x_goal.y), n_list_obs)
             self.planning()
 
