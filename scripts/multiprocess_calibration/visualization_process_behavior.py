@@ -62,10 +62,10 @@ def visualization_loop_behavior(perception_pipe, control_state_pipe, keyboard_pi
         'dribbler_pulse_off_ms': 0,
         'behind_ball_approach_px': 65,
         'contact_settle_time_s': 0.35,
-        'stuck_movement_threshold_px': 8,
-        'stuck_detection_window_s':    0.8,
-        'stuck_boost_increment':       3,
-        'stuck_boost_max':             25,
+        'stuck_movement_threshold_px': 3,
+        'stuck_detection_window_s':    1.2,
+        'stuck_boost_increment':       1,
+        'stuck_boost_max':             8,
     }
     last_target_waypoint = None
     last_movement_active = False
@@ -96,7 +96,7 @@ def visualization_loop_behavior(perception_pipe, control_state_pipe, keyboard_pi
     zoom_center = None
 
     window_name = 'Calibracion Behavior (3 Procesos)'
-    panel_height = 520
+    panel_height = 760
     frame_height = CAMERA_PERSPECTIVE_HEIGHT  # 480
     frame_width = CAMERA_PERSPECTIVE_WIDTH    # 640
 
@@ -881,7 +881,7 @@ def _draw_overlays_zoom(frame, robot_pos, robot_data, waypoint,
 
 def _draw_behavior_panel(behavior_params, robot_pos, waypoint, robot_available,
                           robot_detected, angle_error_deg, movement_mode,
-                          reached_waypoint, panel_height=520, panel_width=960,
+                          reached_waypoint, panel_height=760, panel_width=960,
                           stuck_boost=0):
     """Dibuja el panel de control de comportamiento."""
     panel = np.zeros((panel_height, panel_width, 3), dtype=np.uint8)
@@ -1004,10 +1004,10 @@ def _draw_behavior_panel(behavior_params, robot_pos, waypoint, robot_available,
                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 200, 100), 1)
     y_left += lh
 
-    thr_px = behavior_params.get('stuck_movement_threshold_px', 8)
-    win_s  = behavior_params.get('stuck_detection_window_s', 0.8)
-    bmax   = behavior_params.get('stuck_boost_max', 25)
-    binc   = behavior_params.get('stuck_boost_increment', 3)
+    thr_px = behavior_params.get('stuck_movement_threshold_px', 3)
+    win_s  = behavior_params.get('stuck_detection_window_s', 1.2)
+    bmax   = behavior_params.get('stuck_boost_max', 8)
+    binc   = behavior_params.get('stuck_boost_increment', 1)
     cv2.putText(panel, f"Min. movimiento: {thr_px}px", (col_left_x, y_left),
                cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 200, 100), 1)
     cv2.putText(panel, "(Z/B)", (250, y_left), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (150, 150, 150), 1)

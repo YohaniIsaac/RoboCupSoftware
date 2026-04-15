@@ -483,10 +483,10 @@ PUSH_BURST_PWM = 70                # PWM — pulso anti-stiction al iniciar avan
 # Si el robot no avanza más de STUCK_MOVEMENT_THRESHOLD_PX píxeles dentro de una
 # ventana de STUCK_DETECTION_WINDOW_S segundos, se suma STUCK_BOOST_INCREMENT PWM
 # adicional por cada ventana consecutiva (máx STUCK_BOOST_MAX). Al moverse, decae.
-STUCK_MOVEMENT_THRESHOLD_PX = 8   # px — desplazamiento mínimo para "no estar atascado"
-STUCK_DETECTION_WINDOW_S = 0.8    # s  — ventana de tiempo (~20 frames @ 25 FPS)
-STUCK_BOOST_INCREMENT = 3         # PWM — boost adicional por ventana sin movimiento
-STUCK_BOOST_MAX = 25              # PWM — boost máximo acumulado (hard cap)
+STUCK_MOVEMENT_THRESHOLD_PX = 3   # px — desplazamiento mínimo para "no estar atascado"
+STUCK_DETECTION_WINDOW_S = 1.2    # s  — ventana de tiempo (~30 frames @ 25 FPS)
+STUCK_BOOST_INCREMENT = 1         # PWM — boost adicional por ventana sin movimiento
+STUCK_BOOST_MAX = 8               # PWM — boost máximo acumulado (hard cap)
 STUCK_BOOST_DECAY = 5             # PWM — reducción por ventana con movimiento
 
 # =============================================================================
