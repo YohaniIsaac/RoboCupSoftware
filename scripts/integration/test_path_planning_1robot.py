@@ -59,7 +59,9 @@ log = logging.getLogger(__name__)
 SHM_NAME = "robot_path_plan"
 
 # Umbral de distancia (px) para enviar nueva posicion al planner
-REPLAN_POSITION_THRESHOLD = 30
+REPLAN_POSITION_THRESHOLD = 80
+# Segundos minimos entre replans basados en posicion (obstaculos ignoran esto)
+REPLAN_COOLDOWN_S = 2.0
 # Umbral de llegada a waypoints intermedios (px)
 WAYPOINT_ARRIVAL_THRESHOLD = 20
 # Radio (px) con que se representa cada robot obstáculo como circulo
@@ -258,6 +260,29 @@ def planning_process(ctrl_to_plan_pipe, path_queue, goal_pos):
 # PROCESO 3: Control (PID + RF)
 # =============================================================================
 
+def _find_closest_wp_idx(path, rx, ry):
+    """Retorna el indice del waypoint mas cercano a (rx, ry).
+
+    Evita que el robot retroceda al inicio de la nueva ruta cuando ya
+    habia avanzado por la ruta anterior.
+    """
+    best_idx, best_d = 0, float('inf')
+    for i, wp in enumerate(path):
+        d = math.hypot(rx - wp[0], ry - wp[1])
+        if d < best_d:
+            best_d, best_idx = d, i
+    return best_idx
+
+
+def _path_length_from(path, from_idx):
+    """Longitud total del path desde from_idx hasta el final."""
+    total = 0.0
+    for i in range(from_idx, len(path) - 1):
+        p1, p2 = path[i], path[i + 1]
+        total += math.hypot(p2[0] - p1[0], p2[1] - p1[1])
+    return total
+
+
 def _obstacles_moved(last_positions, all_robots, robot_id):
     """Retorna True si algun obstaculo se movio mas de OBSTACLE_MOVE_THRESHOLD px,
     o si el numero de obstaculos cambio (aparecio/desaparecio un robot).
@@ -327,6 +352,8 @@ def control_process(perc_pipe, ctrl_to_plan_pipe, path_queue,
     # Posicion que se envio al planner la ultima vez (para filtrar threshold)
     last_sent_pos = None
     force_replan = False
+    last_replan_time = 0.0
+    last_replan_reason = None   # 'position', 'obstacles', o 'force'
     # Posiciones de obstaculos enviadas al planner la ultima vez {robot_id: (x,y)}
     last_obstacle_positions = {}
     # Obstaculos actuales (dinamicos + estaticos) para enviar al planner
@@ -398,23 +425,51 @@ def control_process(perc_pipe, ctrl_to_plan_pipe, path_queue,
                 result = path_queue.get_nowait()
                 new_path = result.get('path', [])
                 if new_path:
-                    current_path = new_path
-                    current_wp_idx = 0
-                    goal_reached = False
-                    # Resetear estado PID al recibir nueva ruta
-                    controller._pid_state.pop(robot_id, None)
-                    log.info("Ruta actualizada: %d waypoints", len(current_path))
+                    # Encontrar el waypoint mas cercano para no retroceder
+                    if robot is not None:
+                        new_wp_idx = _find_closest_wp_idx(new_path, robot.x, robot.y)
+                    else:
+                        new_wp_idx = 0
+
+                    # Decidir si aceptar la nueva ruta
+                    if not current_path:
+                        # Sin ruta actual: siempre aceptar
+                        accept = True
+                        reason_log = "primera ruta"
+                    elif last_replan_reason in ('obstacles', 'force'):
+                        # Replan por obstaculos o forzado: siempre aceptar
+                        # (la ruta de desvio es mas larga por definicion, no rechazarla)
+                        accept = True
+                        reason_log = f"replan={last_replan_reason}"
+                    else:
+                        # Replan por posicion: solo aceptar si la nueva es mas corta
+                        remaining_current = _path_length_from(current_path, current_wp_idx)
+                        remaining_new = _path_length_from(new_path, new_wp_idx)
+                        accept = remaining_new < remaining_current * 0.9
+                        reason_log = f"nueva={remaining_new:.0f}px actual={remaining_current:.0f}px"
+
+                    if accept:
+                        current_path = new_path
+                        current_wp_idx = new_wp_idx
+                        goal_reached = False
+                        controller._pid_state.pop(robot_id, None)
+                        log.info("Ruta aceptada: %d wp desde idx %d (%s)",
+                                 len(current_path), new_wp_idx, reason_log)
+                    else:
+                        log.debug("Ruta descartada (%s)", reason_log)
             except Exception:
                 pass
 
             # --- Enviar posicion+obstaculos al planner si algo cambio ---
             if robot is not None and active and not goal_reached:
                 new_pos = (int(robot.x), int(robot.y))
+                # Cooldown solo aplica a replans por posicion; force_replan y obs lo ignoran
                 robot_moved = (
                     force_replan or
                     last_sent_pos is None or
-                    math.hypot(new_pos[0] - last_sent_pos[0],
-                               new_pos[1] - last_sent_pos[1]) > REPLAN_POSITION_THRESHOLD
+                    (math.hypot(new_pos[0] - last_sent_pos[0],
+                                new_pos[1] - last_sent_pos[1]) > REPLAN_POSITION_THRESHOLD
+                     and now - last_replan_time >= REPLAN_COOLDOWN_S)
                 )
                 obs_changed = _obstacles_moved(
                     last_obstacle_positions, all_robots, robot_id
@@ -428,13 +483,19 @@ def control_process(perc_pipe, ctrl_to_plan_pipe, path_queue,
                             'obstacles': current_obstacles,
                         })
                         last_sent_pos = new_pos
+                        last_replan_time = now
                         last_obstacle_positions = {
                             r['id']: (r['x'], r['y'])
                             for r in all_robots if r['id'] != robot_id
                         }
-                        force_replan = False
-                        if obs_changed:
+                        if force_replan:
+                            last_replan_reason = 'force'
+                        elif obs_changed:
+                            last_replan_reason = 'obstacles'
                             log.info("Obstaculos cambiaron -> replanificando")
+                        else:
+                            last_replan_reason = 'position'
+                        force_replan = False
                     except Exception:
                         pass
 
