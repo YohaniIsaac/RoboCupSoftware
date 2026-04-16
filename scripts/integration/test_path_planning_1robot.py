@@ -48,6 +48,11 @@ from robot_soccer.config import (
     RRT_STEP_LEN, RRT_GOAL_SAMPLE_RATE, RRT_SEARCH_RADIUS, RRT_ITER_MAX,
 )
 from robot_soccer.utils.camera_utils import get_camera_index
+from robot_soccer.ai.path_planning.tools_for_path_planing import (
+    path_closest_waypoint_idx,
+    path_length_from,
+    obstacles_moved,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -260,46 +265,6 @@ def planning_process(ctrl_to_plan_pipe, path_queue, goal_pos):
 # PROCESO 3: Control (PID + RF)
 # =============================================================================
 
-def _find_closest_wp_idx(path, rx, ry):
-    """Retorna el indice del waypoint mas cercano a (rx, ry).
-
-    Evita que el robot retroceda al inicio de la nueva ruta cuando ya
-    habia avanzado por la ruta anterior.
-    """
-    best_idx, best_d = 0, float('inf')
-    for i, wp in enumerate(path):
-        d = math.hypot(rx - wp[0], ry - wp[1])
-        if d < best_d:
-            best_d, best_idx = d, i
-    return best_idx
-
-
-def _path_length_from(path, from_idx):
-    """Longitud total del path desde from_idx hasta el final."""
-    total = 0.0
-    for i in range(from_idx, len(path) - 1):
-        p1, p2 = path[i], path[i + 1]
-        total += math.hypot(p2[0] - p1[0], p2[1] - p1[1])
-    return total
-
-
-def _obstacles_moved(last_positions, all_robots, robot_id):
-    """Retorna True si algun obstaculo se movio mas de OBSTACLE_MOVE_THRESHOLD px,
-    o si el numero de obstaculos cambio (aparecio/desaparecio un robot).
-    """
-    current_ids = {r['id'] for r in all_robots if r['id'] != robot_id}
-    if current_ids != set(last_positions.keys()):
-        return True
-    for r in all_robots:
-        if r['id'] == robot_id:
-            continue
-        if r['id'] in last_positions:
-            lx, ly = last_positions[r['id']]
-            if math.hypot(r['x'] - lx, r['y'] - ly) > OBSTACLE_MOVE_THRESHOLD:
-                return True
-    return False
-
-
 def control_process(perc_pipe, ctrl_to_plan_pipe, path_queue,
                     viz_pipe, keyboard_pipe, robot_id, serial_port,
                     goal_pos, static_obstacles):
@@ -427,7 +392,7 @@ def control_process(perc_pipe, ctrl_to_plan_pipe, path_queue,
                 if new_path:
                     # Encontrar el waypoint mas cercano para no retroceder
                     if robot is not None:
-                        new_wp_idx = _find_closest_wp_idx(new_path, robot.x, robot.y)
+                        new_wp_idx = path_closest_waypoint_idx(new_path, robot.x, robot.y)
                     else:
                         new_wp_idx = 0
 
@@ -443,8 +408,8 @@ def control_process(perc_pipe, ctrl_to_plan_pipe, path_queue,
                         reason_log = f"replan={last_replan_reason}"
                     else:
                         # Replan por posicion: solo aceptar si la nueva es mas corta
-                        remaining_current = _path_length_from(current_path, current_wp_idx)
-                        remaining_new = _path_length_from(new_path, new_wp_idx)
+                        remaining_current = path_length_from(current_path, current_wp_idx)
+                        remaining_new = path_length_from(new_path, new_wp_idx)
                         accept = remaining_new < remaining_current * 0.9
                         reason_log = f"nueva={remaining_new:.0f}px actual={remaining_current:.0f}px"
 
@@ -471,8 +436,8 @@ def control_process(perc_pipe, ctrl_to_plan_pipe, path_queue,
                                 new_pos[1] - last_sent_pos[1]) > REPLAN_POSITION_THRESHOLD
                      and now - last_replan_time >= REPLAN_COOLDOWN_S)
                 )
-                obs_changed = _obstacles_moved(
-                    last_obstacle_positions, all_robots, robot_id
+                obs_changed = obstacles_moved(
+                    last_obstacle_positions, all_robots, robot_id, OBSTACLE_MOVE_THRESHOLD
                 )
                 if robot_moved or obs_changed:
                     try:

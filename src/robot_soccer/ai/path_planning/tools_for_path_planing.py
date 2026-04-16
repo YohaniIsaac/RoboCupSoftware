@@ -426,3 +426,79 @@ class Utils:
             float: Distancia euclidiana entre los dos nodos.
         """
         return math.hypot(end.x - start.x, end.y - start.y)
+
+
+# =============================================================================
+# Utilidades de seguimiento de ruta y trigger de replanificacion
+# =============================================================================
+
+def path_closest_waypoint_idx(path, rx, ry):
+    """Retorna el indice del waypoint mas cercano a la posicion (rx, ry).
+
+    Util al recibir una ruta nueva: permite continuar desde el punto mas
+    cercano a la posicion actual del robot en lugar de retroceder al inicio.
+
+    Args:
+        path (list): Lista de tuplas [(x, y), ...] que forman la ruta.
+        rx (float): Coordenada x actual del robot.
+        ry (float): Coordenada y actual del robot.
+
+    Returns:
+        int: Indice del waypoint mas cercano.
+    """
+    best_idx, best_d = 0, float('inf')
+    for i, wp in enumerate(path):
+        d = math.hypot(rx - wp[0], ry - wp[1])
+        if d < best_d:
+            best_d, best_idx = d, i
+    return best_idx
+
+
+def path_length_from(path, from_idx):
+    """Calcula la longitud total del path desde from_idx hasta el final.
+
+    Permite comparar la longitud restante de dos rutas para decidir si
+    aceptar una ruta nueva o conservar la actual.
+
+    Args:
+        path (list): Lista de tuplas [(x, y), ...] que forman la ruta.
+        from_idx (int): Indice desde el que calcular la longitud restante.
+
+    Returns:
+        float: Longitud acumulada en unidades del campo desde from_idx.
+    """
+    total = 0.0
+    for i in range(from_idx, len(path) - 1):
+        p1, p2 = path[i], path[i + 1]
+        total += math.hypot(p2[0] - p1[0], p2[1] - p1[1])
+    return total
+
+
+def obstacles_moved(last_positions, all_robots, robot_id, threshold=40):
+    """Detecta si algun robot obstaculo cambio de posicion mas alla del umbral.
+
+    Compara posiciones actuales de robots detectados por percepcion contra
+    las ultimas posiciones registradas. Retorna True si algun obstaculo
+    aparecio, desaparecio, o se movio mas del umbral dado.
+
+    Args:
+        last_positions (dict): Mapa {robot_id: (x, y)} de la ultima actualizacion.
+        all_robots (list): Lista de dicts de percepcion:
+            [{'id': int, 'x': float, 'y': float, 'angulo': float}, ...]
+        robot_id (int): ID del robot controlado (excluido de la comparacion).
+        threshold (float): Desplazamiento minimo en px para considerar cambio.
+
+    Returns:
+        bool: True si el conjunto de obstaculos cambio; False si todo igual.
+    """
+    current_ids = {r['id'] for r in all_robots if r['id'] != robot_id}
+    if current_ids != set(last_positions.keys()):
+        return True
+    for r in all_robots:
+        if r['id'] == robot_id:
+            continue
+        if r['id'] in last_positions:
+            lx, ly = last_positions[r['id']]
+            if math.hypot(r['x'] - lx, r['y'] - ly) > threshold:
+                return True
+    return False
