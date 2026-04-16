@@ -12,6 +12,9 @@ import serial
 
 log = logging.getLogger(__name__)
 
+# Cambiar a True para loguear cada comando escrito al serial (diagnóstico)
+DEBUG_SERIAL_TX = False
+
 
 class SerialManager:
     """Gestor de comunicación serial con Arduino para control de robots.
@@ -199,9 +202,13 @@ class SerialManager:
 
             # Advertencia si la cola crece demasiado (indica problema de rendimiento)
             queue_size = len(self.command_queue)
+            total_queued = queue_size + len(self.medium_priority_queue) + len(self.high_priority_queue)
             if queue_size > self.MAX_QUEUE_SIZE and not self.queue_overflow_warned:
-                log.warning("⚠️  Cola NORMAL grande: %d comandos (límite sugerido: %d)",
-                           queue_size, self.MAX_QUEUE_SIZE)
+                log.warning(
+                    "⚠️  Cola saturada: normal=%d media=%d alta=%d (total=%d, límite=%d)",
+                    queue_size, len(self.medium_priority_queue),
+                    len(self.high_priority_queue), total_queued, self.MAX_QUEUE_SIZE
+                )
                 self.queue_overflow_warned = True
             elif queue_size <= self.MAX_QUEUE_SIZE // 2:
                 self.queue_overflow_warned = False  # Reset warning
@@ -248,14 +255,24 @@ class SerialManager:
 
         with self.lock:
             if priority == 'high':
-                # ===== PRIORIDAD ALTA: FRENADO DE EMERGENCIA =====
-                # CRÍTICO: Debe detener TODO inmediatamente, sin condiciones
-                # Limpia TODAS las colas de TODOS los robots (comportamiento original)
-                total_cleared = len(self.command_queue) + len(self.medium_priority_queue)
-                if total_cleared > 0:
-                    log.debug("🚨 EMERGENCIA: %d comandos descartados (seguridad)", total_cleared)
-                    self.command_queue.clear()
-                    self.medium_priority_queue.clear()
+                # PRIORIDAD ALTA: limpiar comandos pendientes solo de ESTE robot.
+                # No limpiar comandos de otros robots (multi-robot: cada uno
+                # gestiona su propia cola independientemente).
+                if robot_id is not None:
+                    removed_n = self._remove_old_commands_for_robot(self.command_queue, robot_id)
+                    removed_m = self._remove_old_commands_for_robot(self.medium_priority_queue, robot_id)
+                    total_cleared = removed_n + removed_m
+                    if total_cleared > 0:
+                        log.debug("🚨 Robot %d: %d comandos previos descartados (stop)",
+                                 robot_id, total_cleared)
+                else:
+                    # Sin robot_id conocido → limpiar todo (fallback de seguridad)
+                    total_cleared = len(self.command_queue) + len(self.medium_priority_queue)
+                    if total_cleared > 0:
+                        log.debug("🚨 EMERGENCIA (robot_id=None): %d comandos descartados",
+                                 total_cleared)
+                        self.command_queue.clear()
+                        self.medium_priority_queue.clear()
 
                 # Eliminar comandos viejos del MISMO robot en cola alta
                 if robot_id is not None:
@@ -414,12 +431,17 @@ class SerialManager:
 
             try:
                 self.serial.write(command.encode('utf-8'))
-                if priority_level == 'high':
-                    log.debug("⚡ ALTA enviado: %s", command.strip())
-                elif priority_level == 'medium':
-                    log.debug("🔶 MEDIA enviado: %s", command.strip())
+                if DEBUG_SERIAL_TX:
+                    prefix = {'high': '[TX-H]', 'medium': '[TX-M]', 'normal': '[TX]'}.get(
+                        priority_level, '[TX]')
+                    log.info("%s %s", prefix, command.strip())
                 else:
-                    log.debug("Enviado: %s", command.strip())
+                    if priority_level == 'high':
+                        log.debug("⚡ ALTA enviado: %s", command.strip())
+                    elif priority_level == 'medium':
+                        log.debug("🔶 MEDIA enviado: %s", command.strip())
+                    else:
+                        log.debug("Enviado: %s", command.strip())
 
                 # Leer respuestas disponibles
                 # Motor commands: timeout corto (respuesta llega en <3ms a 115200)

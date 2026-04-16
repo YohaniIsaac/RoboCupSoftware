@@ -1056,16 +1056,17 @@ def move_to_defensive_position(blackboard):
     if not defensive_pos:
         defensive_pos = blackboard.defensive_positions[0]
 
-    # Ordenar movimiento
-    blackboard.command_manager.move_robot_to(blackboard.player.id, defensive_pos)
-
-    # Verificar si hemos llegado
+    # Verificar llegada ANTES de ordenar movimiento.
+    # Si ya estamos en posición, no re-ordenar: evita que el PID mande (0,0)
+    # cada tick, lo cual borraba los comandos de otros robots de la cola serial.
     distance = np.linalg.norm(np.array(player_pos) - np.array(defensive_pos))
 
     if distance < blackboard.field.ratio_to_px(BT_DEFENSIVE_ARRIVAL_RATIO):
         return NodeStatus.SUCCESS
 
-    # Continuar ejecutando la acción
+    # No estamos en posición: ordenar movimiento
+    blackboard.command_manager.move_robot_to(blackboard.player.id, defensive_pos)
+    blackboard.last_action = "move_to_defensive_position"
     return NodeStatus.RUNNING
 
 
