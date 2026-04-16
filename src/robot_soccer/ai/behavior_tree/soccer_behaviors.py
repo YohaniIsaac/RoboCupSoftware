@@ -1016,6 +1016,16 @@ def move_to_defensive_position(blackboard):
     ball_pos = blackboard.ball.get_position()
     player_pos = blackboard.player.get_position()
 
+    # Helpers para orientación a la pelota (player.angle en GRADOS en contexto BT)
+    def _angle_to_ball_deg():
+        return np.degrees(np.arctan2(
+            ball_pos[1] - player_pos[1],
+            ball_pos[0] - player_pos[0]
+        ))
+
+    def _heading_error_to_ball():
+        return abs((_angle_to_ball_deg() - blackboard.player.angle + 180) % 360 - 180)
+
     # PRIORIDAD 1: Verificar si el atacante está en fase de contacto final con la pelota.
     # Solo esperar si el atacante está dentro de CAPTURE_ACTIVATE_DISTANCE_PX (fase final),
     # con un timeout de DEFENDER_WAIT_MAX_S para evitar bloqueo permanente.
@@ -1035,6 +1045,11 @@ def move_to_defensive_position(blackboard):
         if not hasattr(blackboard, '_defender_wait_start') or blackboard._defender_wait_start is None:
             blackboard._defender_wait_start = now
         if now - blackboard._defender_wait_start < DEFENDER_WAIT_MAX_S:
+            # Mientras espera, orientar hacia la pelota para reaccionar más rápido
+            if _heading_error_to_ball() > BEHIND_BALL_ALIGN_TOLERANCE_DEG:
+                blackboard.command_manager.rotate_robot_to(
+                    blackboard.player.id, _angle_to_ball_deg()
+                )
             blackboard.last_action = "waiting_for_attacker"
             return NodeStatus.RUNNING
         blackboard._defender_wait_start = None  # timeout: caer hacia posición defensiva
@@ -1062,6 +1077,13 @@ def move_to_defensive_position(blackboard):
     distance = np.linalg.norm(np.array(player_pos) - np.array(defensive_pos))
 
     if distance < blackboard.field.ratio_to_px(BT_DEFENSIVE_ARRIVAL_RATIO):
+        # En posición: orientar hacia la pelota para estar listo para reaccionar
+        if _heading_error_to_ball() > BEHIND_BALL_ALIGN_TOLERANCE_DEG:
+            blackboard.command_manager.rotate_robot_to(
+                blackboard.player.id, _angle_to_ball_deg()
+            )
+            blackboard.last_action = "orienting_to_ball"
+            return NodeStatus.RUNNING
         return NodeStatus.SUCCESS
 
     # No estamos en posición: ordenar movimiento
