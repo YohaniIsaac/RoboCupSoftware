@@ -32,6 +32,8 @@ from robot_soccer.config import (
     CONTACT_SETTLE_TIME_S,
     ADVANCE_ESCAPE_FACTOR,
     SETTLE_ESCAPE_FACTOR,
+    ADVANCE_MAX_TIME_S,
+    ADVANCE_BALL_DRIFT_DEG,
 )
 
 from .base import (
@@ -1028,7 +1030,7 @@ def move_to_defensive_position(blackboard):
             # Si el atacante está cerca de la pelota, esperar
             if attacker_distance_to_ball < blackboard.field.ratio_to_px(BT_DEFENDER_WAIT_RATIO) * 2:
                 # No moverse, quedarse en posición actual
-                # El defensor esperará hasta que el atacante termine
+                blackboard.last_action = "waiting_for_attacker"
                 return NodeStatus.RUNNING
 
     # PRIORIDAD 2: Si el atacante NO está activo, elegir posición defensiva
@@ -1429,6 +1431,12 @@ def _advance_to_contact_start(blackboard):
     blackboard._contact_made         = False
     blackboard._contact_settle_start = None
 
+    # Guardar timestamp y ángulo inicial para timeout y detección de deriva
+    blackboard._advance_start_time      = time.time()
+    blackboard._advance_init_ball_angle = float(np.degrees(
+        np.arctan2(ball_pos[1] - player_pos[1], ball_pos[0] - player_pos[0])
+    ))
+
     # ¿Ya en contacto desde el inicio?
     # Requiere proximidad Y alineación: si el robot está cerca pero no mira
     # la pelota, no es contacto real (ej: post-kick con robot girado).
@@ -1505,6 +1513,30 @@ def _advance_to_contact_running(blackboard):
             robot_status_logger.emit_event(
                 player_id,
                 f"advance_contact PELOTA ESCAPO: dist={dist:.0f}px -> FAILURE"
+            )
+            return NodeStatus.FAILURE
+
+        # Timeout: demasiado tiempo sin alcanzar contacto (ej: pelota pegada al costado)
+        _elapsed = time.time() - getattr(blackboard, '_advance_start_time', time.time())
+        if _elapsed > ADVANCE_MAX_TIME_S:
+            _clear_advance_state(blackboard, player_id)
+            robot_status_logger.emit_event(
+                player_id,
+                f"advance_contact TIMEOUT: {_elapsed:.1f}s sin contacto -> FAILURE"
+            )
+            return NodeStatus.FAILURE
+
+        # Deriva angular: la pelota se desplazó al costado del robot
+        _ang_now  = float(np.degrees(np.arctan2(
+            ball_pos[1] - player_pos[1], ball_pos[0] - player_pos[0]
+        )))
+        _init_ang = getattr(blackboard, '_advance_init_ball_angle', _ang_now)
+        _drift    = abs((_ang_now - _init_ang + 180) % 360 - 180)
+        if _drift > ADVANCE_BALL_DRIFT_DEG:
+            _clear_advance_state(blackboard, player_id)
+            robot_status_logger.emit_event(
+                player_id,
+                f"advance_contact DERIVA ANGULAR: {_drift:.1f}° > {ADVANCE_BALL_DRIFT_DEG:.0f}° -> FAILURE"
             )
             return NodeStatus.FAILURE
 

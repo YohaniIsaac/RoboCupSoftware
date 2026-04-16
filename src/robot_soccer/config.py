@@ -440,8 +440,10 @@ CONTACT_SETTLE_TIME_S = 0.3  # s — espera de asentamiento antes del disparo
 # Factores de escape para detectar que la pelota se alejó demasiado.
 # Durante avance: dist > BEHIND_BALL_APPROACH_PX * ADVANCE_ESCAPE_FACTOR → abortar
 # Durante asentamiento: dist > CAPTURE_CONFIRM_DISTANCE_PX * SETTLE_ESCAPE_FACTOR → abortar
-ADVANCE_ESCAPE_FACTOR = 1.5  # factor — margen de escape durante avance al contacto
-SETTLE_ESCAPE_FACTOR = 2.0   # factor — margen de escape durante asentamiento
+ADVANCE_ESCAPE_FACTOR  = 1.5   # factor — margen de escape durante avance al contacto
+SETTLE_ESCAPE_FACTOR   = 2.0   # factor — margen de escape durante asentamiento
+ADVANCE_MAX_TIME_S     = 3.5   # s  — timeout en acercamiento sin lograr contacto
+ADVANCE_BALL_DRIFT_DEG = 50.0  # °  — deriva máx. del ángulo a pelota desde inicio del avance
 
 # Factor multiplicador de PWM cuando el robot tiene posesión de la pelota.
 # El dribbler genera fricción que frena la rotación/movimiento. Este factor
