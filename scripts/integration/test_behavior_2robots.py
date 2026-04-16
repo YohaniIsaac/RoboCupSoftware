@@ -1,22 +1,29 @@
 #!/usr/bin/env python3
-"""Test de integracion: 1 robot controlado por BehaviorManager.
+"""Test de integracion: 2 robots controlados por BehaviorManager con roles.
 
-PASO 2 del plan de integracion. Conecta el BehaviorManager al pipeline completo:
-  Camara -> Perspectiva -> Deteccion robot + pelota -> BehaviorManager -> PID -> RF -> Motor
+PASO 4 del plan de integracion. Valida que el sistema funciona con 2 robots
+simultáneos: percepción, RF, role assignment y coordinación.
 
-A diferencia del Paso 1 (PID directo hacia la pelota), aqui el arbol de
-comportamiento decide QUE hacer: acercarse por el angulo optimo, capturar,
-disparar al arco, etc.
+Pipeline completo:
+  Camara -> Perspectiva -> Deteccion robot 0 + robot 1 + pelota
+         -> BehaviorManager([p0, p1]) -> PID -> RF -> Motores
+
+Qué se valida:
+  - Ambos markers ArUco detectados en el mismo frame sin degradación
+  - Comandos RF a 2 robots sin colisión de paquetes
+  - Role assignment: robot 0 inicia como atacante, robot 1 como defensor
+  - PID per-robot independiente (sin corrupción de estado)
+  - Dribbler keepalive independiente por robot
 
 Arquitectura: 3 procesos
-  1. Percepcion: Detecta robot (ArUco) + pelota (HSV)
-  2. Decision:   BehaviorManager (src/robot_soccer/core/process/decision_process.py)
-  3. Visualizacion: Muestra video con estado del arbol de comportamiento
+  1. Percepcion: Detecta ambos robots (ArUco) + pelota (HSV)
+  2. Decision:   BehaviorManager([player0, player1])  ← src/robot_soccer/core/process/
+  3. Visualizacion: Video con overlay: rol A/D por robot, targets, estado BT
 
 Uso:
-    python scripts/integration/test_behavior_1robot.py --robot-id 0
-    python scripts/integration/test_behavior_1robot.py --robot-id 0 --serial-port /dev/ttyUSB0
-    python scripts/integration/test_behavior_1robot.py --robot-id 0 --camera-id 2
+    python scripts/integration/test_behavior_2robots.py
+    python scripts/integration/test_behavior_2robots.py --robot-ids 0 1
+    python scripts/integration/test_behavior_2robots.py --robot-ids 0 1 --serial-port /dev/ttyUSB0
 
 Controles:
     ESPACIO: START/STOP - Activar o pausar el BehaviorManager
@@ -49,26 +56,24 @@ logging.basicConfig(
     format='%(asctime)s [%(processName)-12s] %(levelname)-8s %(message)s',
     datefmt='%H:%M:%S'
 )
-# Desactivar DEBUG de BT/PID para reducir ruido (activar si se necesita depurar)
-# logging.getLogger('robot_soccer.ai.behavior_tree.base').setLevel(logging.DEBUG)
-# logging.getLogger('robot_soccer.controllers.robot_command_manager').setLevel(logging.DEBUG)
 log = logging.getLogger(__name__)
 
-SHM_NAME = "robot_behavior_1"
+SHM_NAME = "robot_behavior_2"
 
 
 # =============================================================================
-# PROCESO 1: Percepcion (robot + pelota)
+# PROCESO 1: Percepcion multi-robot (ambos markers + pelota)
 # =============================================================================
 
-def perception_process(control_pipe, viz_pipe, robot_id, camera_id,
-                       shm_name, frame_counter):
-    """Detecta robot (ArUco) y pelota (HSV) en cada frame."""
+def perception_process_multi(control_pipe, viz_pipe, robot_ids, camera_id,
+                              shm_name, frame_counter):
+    """Detecta todos los robots ArUco de robot_ids y la pelota HSV en cada frame."""
     import cv2
     import numpy as np
     from robot_soccer.perception.player_tracking import create_aruco_detector
 
-    log.info("Percepcion iniciada")
+    log.info("Percepcion multi iniciada para robots %s", robot_ids)
+    robot_ids_set = set(robot_ids)
 
     cap = cv2.VideoCapture(camera_id)
     if not cap.isOpened():
@@ -96,7 +101,7 @@ def perception_process(control_pipe, viz_pipe, robot_id, camera_id,
     ball_upper = np.array(RANGO_COLOR_NARANJO[1])
 
     frame_count = 0
-    detect_count = 0
+    detect_counts = {rid: 0 for rid in robot_ids}
     ball_detect_count = 0
     t0 = time.time()
 
@@ -116,25 +121,21 @@ def perception_process(control_pipe, viz_pipe, robot_id, camera_id,
 
             frame_count += 1
 
-            # Detectar robot (ArUco)
+            # Detectar TODOS los markers ArUco de interés
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             corners, ids, _ = detector.detectMarkers(gray)
 
-            robot_detected = False
-            robot_data = None
-
+            robots_data = {}
             if ids is not None:
-                for i, marker_id in enumerate(ids):
-                    if marker_id[0] == robot_id:
+                for i, marker_id in enumerate(ids.flatten()):
+                    if marker_id in robot_ids_set:
                         pts = corners[i].reshape(4, 2)
                         cx = int(pts[:, 0].mean())
                         cy = int(pts[:, 1].mean())
                         vec = pts[1] - pts[0]
                         angle = float(np.degrees(np.arctan2(vec[1], vec[0])))
-                        robot_data = {'x': cx, 'y': cy, 'angulo': angle}
-                        robot_detected = True
-                        detect_count += 1
-                        break
+                        robots_data[int(marker_id)] = {'x': cx, 'y': cy, 'angulo': angle}
+                        detect_counts[int(marker_id)] = detect_counts.get(int(marker_id), 0) + 1
 
             # Detectar pelota (HSV)
             hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
@@ -145,7 +146,6 @@ def perception_process(control_pipe, viz_pipe, robot_id, camera_id,
 
             ball_detected = False
             ball_pos = None
-
             contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             if contours:
                 largest = max(contours, key=cv2.contourArea)
@@ -161,12 +161,12 @@ def perception_process(control_pipe, viz_pipe, robot_id, camera_id,
             with frame_counter.get_lock():
                 frame_counter.value += 1
 
-            # Enviar datos a decision (formato multi-robot)
+            # Enviar datos a decision
             try:
                 while control_pipe.poll():
                     _ = control_pipe.recv()
                 control_pipe.send({
-                    'robots': {robot_id: robot_data} if robot_detected else {},
+                    'robots': robots_data,
                     'ball_detected': ball_detected,
                     'ball_pos': ball_pos,
                     'timestamp': time.time()
@@ -179,8 +179,7 @@ def perception_process(control_pipe, viz_pipe, robot_id, camera_id,
                 while viz_pipe.poll():
                     _ = viz_pipe.recv()
                 viz_pipe.send({
-                    'robot_detected': robot_detected,
-                    'robot_data': robot_data,
+                    'robots': robots_data,
                     'ball_detected': ball_detected,
                     'ball_pos': ball_pos,
                 })
@@ -191,62 +190,61 @@ def perception_process(control_pipe, viz_pipe, robot_id, camera_id,
             elapsed = time.time() - t0
             if frame_count % 150 == 0 and elapsed > 0:
                 fps = frame_count / elapsed
-                r_rate = detect_count / frame_count * 100
+                r_rates = {rid: detect_counts.get(rid, 0) / frame_count * 100
+                           for rid in robot_ids}
                 b_rate = ball_detect_count / frame_count * 100
-                log.info("FPS=%.1f | Robot=%.0f%% | Pelota=%.0f%%",
-                         fps, r_rate, b_rate)
+                rates_str = " | ".join(f"R{rid}={r_rates[rid]:.0f}%" for rid in robot_ids)
+                log.info("FPS=%.1f | %s | Pelota=%.0f%%", fps, rates_str, b_rate)
 
     finally:
         cap.release()
         shm.close()
-        log.info("Percepcion finalizada")
+        log.info("Percepcion multi finalizada")
 
 
 # =============================================================================
 # PROCESO 2: Decision — robot_soccer.core.process.decision_process
 # =============================================================================
-# Importado arriba; lanzado como proceso en main().
+# Importado arriba; lanzado como proceso en main() con robot_ids=[0, 1].
 
 
 # =============================================================================
-# PROCESO 3: Visualizacion
+# PROCESO 3: Visualizacion multi-robot
 # =============================================================================
 
-def visualization_process(perception_pipe, decision_pipe, keyboard_pipe,
-                          shm_name, frame_counter):
-    """Muestra video con overlays: robot, pelota, estado del behavior tree."""
+def visualization_process_multi(perception_pipe, decision_pipe, keyboard_pipe,
+                                 robot_ids, shm_name, frame_counter):
+    """Muestra video con overlays para ambos robots: rol, target, estado BT."""
     import cv2
     import numpy as np
 
-    log.info("Visualizacion iniciada")
+    log.info("Visualizacion multi iniciada")
 
     frame_shape = (CAMERA_PERSPECTIVE_HEIGHT, CAMERA_PERSPECTIVE_WIDTH, 3)
     shm = shared_memory.SharedMemory(name=shm_name)
     shared_array = np.ndarray(frame_shape, dtype=np.uint8, buffer=shm.buf)
     last_frame_counter = 0
-
     last_frame = None
-    robot_data = None
+
+    # Estado de percepción
+    robots_perc = {}
     ball_pos_perc = None
 
-    # Estado del decision process
-    player_pos = None
-    robot_angle_deg = None
+    # Estado de decisión
+    players_state = {}   # {robot_id: {pos, angle_deg, rol, has_ball, last_action, target, action_type}}
     ball_pos_ctrl = None
     behavior_active = False
-    has_ball = False
-    last_action = None
-    current_target = None
-    action_type = None
-    distance = None
     robot_available = False
-    angle_to_ball = None
-    angle_to_goal = None
-    err_to_ball = None
-    err_to_goal = None
 
-    window_name = 'Test Behavior 1 Robot'
+    window_name = 'Test Behavior 2 Robots'
     cv2.namedWindow(window_name)
+
+    # Colores por robot
+    ROBOT_COLORS = {
+        robot_ids[0]: (0, 220, 0),     # verde — atacante inicial
+        robot_ids[1]: (220, 100, 0),   # azul-naranja — defensor inicial
+    }
+    ROL_LABELS = {'atacante': 'A', 'defensor': 'D'}
 
     try:
         while True:
@@ -260,7 +258,7 @@ def visualization_process(perception_pipe, decision_pipe, keyboard_pipe,
             if perception_pipe.poll():
                 try:
                     data = perception_pipe.recv()
-                    robot_data = data.get('robot_data')
+                    robots_perc = data.get('robots', {})
                     ball_pos_perc = data.get('ball_pos')
                 except Exception:
                     pass
@@ -269,71 +267,91 @@ def visualization_process(perception_pipe, decision_pipe, keyboard_pipe,
             if decision_pipe.poll():
                 try:
                     data = decision_pipe.recv()
-                    player_pos = data.get('player_pos')
-                    robot_angle_deg = data.get('robot_angle_deg')
+                    players_state = data.get('players', {})
                     ball_pos_ctrl = data.get('ball_pos')
                     behavior_active = data.get('behavior_active', False)
-                    has_ball = data.get('has_ball', False)
-                    last_action = data.get('last_action')
-                    current_target = data.get('current_target')
-                    action_type = data.get('action_type')
-                    distance = data.get('distance')
                     robot_available = data.get('robot_available', False)
-                    angle_to_ball = data.get('angle_to_ball')
-                    angle_to_goal = data.get('angle_to_goal')
-                    err_to_ball = data.get('err_to_ball')
-                    err_to_goal = data.get('err_to_goal')
                 except Exception:
                     pass
 
             if last_frame is not None:
                 frame = last_frame.copy()
-
-                # Dibujar campo: linea central y arcos
                 h, w = frame.shape[:2]
+
+                # Dibujar campo: línea central y arcos
                 cv2.line(frame, (w // 2, 0), (w // 2, h), (40, 80, 40), 1)
-                # Arco izquierdo
                 cv2.rectangle(frame, (0, 196), (27, 295), (40, 80, 40), 1)
-                # Arco derecho
                 cv2.rectangle(frame, (616, 193), (640, 294), (40, 80, 40), 1)
 
-                # Dibujar target del behavior tree (cruz magenta)
-                if current_target:
-                    tx, ty = current_target
-                    arm = 10
-                    cv2.line(frame, (tx - arm, ty), (tx + arm, ty),
-                             (255, 0, 255), 2, cv2.LINE_AA)
-                    cv2.line(frame, (tx, ty - arm), (tx, ty + arm),
-                             (255, 0, 255), 2, cv2.LINE_AA)
-                    cv2.circle(frame, (tx, ty), 3, (255, 0, 255), -1, cv2.LINE_AA)
+                ball_pos = ball_pos_ctrl or ball_pos_perc
+
+                # Dibujar cada robot
+                for rid in robot_ids:
+                    pstate = players_state.get(rid, {})
+                    rd = robots_perc.get(rid)
+
+                    pos = pstate.get('pos')
+                    angle_deg = pstate.get('angle_deg')
+                    rol = pstate.get('rol', 'defensor')
+                    has_ball = pstate.get('has_ball', False)
+                    target = pstate.get('target')
+                    action_type = pstate.get('action_type')
+
+                    # Usar datos de percepción si decision aún no los tiene
+                    if pos is None and rd:
+                        pos = (rd['x'], rd['y'])
+                        angle_deg = rd['angulo']
+
+                    base_color = ROBOT_COLORS.get(rid, (180, 180, 180))
+                    robot_color = (0, 255, 255) if has_ball else base_color
+
+                    # Dibujar target (cruz)
+                    if target:
+                        tx, ty = target
+                        arm = 8
+                        cv2.line(frame, (tx - arm, ty), (tx + arm, ty),
+                                 (255, 0, 255), 2, cv2.LINE_AA)
+                        cv2.line(frame, (tx, ty - arm), (tx, ty + arm),
+                                 (255, 0, 255), 2, cv2.LINE_AA)
+
+                    if pos:
+                        rx, ry = pos
+
+                        # Línea robot → target (solo atacante)
+                        if target and rol == 'atacante':
+                            cv2.line(frame, (rx, ry), target,
+                                     (200, 0, 200), 1, cv2.LINE_AA)
+                        elif ball_pos and rol == 'atacante' and not target:
+                            cv2.line(frame, (rx, ry), ball_pos,
+                                     (200, 200, 0), 1, cv2.LINE_AA)
+
+                        # Círculo del robot
+                        cv2.circle(frame, (rx, ry), 16, robot_color, 2, cv2.LINE_AA)
+
+                        # Flecha de ángulo
+                        if angle_deg is not None:
+                            angle_rad = math.radians(angle_deg)
+                            ex = int(rx + 25 * math.cos(angle_rad))
+                            ey = int(ry + 25 * math.sin(angle_rad))
+                            cv2.arrowedLine(frame, (rx, ry), (ex, ey),
+                                           robot_color, 2, cv2.LINE_AA, tipLength=0.3)
+
+                        # Etiqueta: ID + rol (A/D)
+                        rol_label = ROL_LABELS.get(rol, '?')
+                        label = f"{rid}{rol_label}"
+                        cv2.putText(frame, label, (rx - 8, ry - 20),
+                                   cv2.FONT_HERSHEY_SIMPLEX, 0.55, robot_color, 2)
 
                 # Dibujar pelota
-                ball_pos = ball_pos_ctrl or ball_pos_perc
                 if ball_pos:
                     bx, by = ball_pos
-                    color = (0, 255, 255) if has_ball else (0, 165, 255)
-                    cv2.circle(frame, (bx, by), 12, color, 2, cv2.LINE_AA)
-                    cv2.circle(frame, (bx, by), 2, color, -1, cv2.LINE_AA)
-
-                # Dibujar robot
-                rd = robot_data
-                if rd:
-                    rx, ry = rd['x'], rd['y']
-                    r_color = (0, 255, 255) if has_ball else (0, 220, 0)
-                    cv2.circle(frame, (rx, ry), 16, r_color, 2, cv2.LINE_AA)
-                    angle_rad = math.radians(rd['angulo'])
-                    ex = int(rx + 25 * math.cos(angle_rad))
-                    ey = int(ry + 25 * math.sin(angle_rad))
-                    cv2.arrowedLine(frame, (rx, ry), (ex, ey),
-                                   r_color, 2, cv2.LINE_AA, tipLength=0.3)
-
-                    # Linea robot -> target (si existe)
-                    if current_target:
-                        cv2.line(frame, (rx, ry), current_target,
-                                (200, 0, 200), 1, cv2.LINE_AA)
-                    elif ball_pos:
-                        cv2.line(frame, (rx, ry), (ball_pos[0], ball_pos[1]),
-                                (200, 200, 0), 1, cv2.LINE_AA)
+                    any_has_ball = any(
+                        players_state.get(rid, {}).get('has_ball', False)
+                        for rid in robot_ids
+                    )
+                    ball_color = (0, 255, 255) if any_has_ball else (0, 165, 255)
+                    cv2.circle(frame, (bx, by), 12, ball_color, 2, cv2.LINE_AA)
+                    cv2.circle(frame, (bx, by), 2, ball_color, -1, cv2.LINE_AA)
 
                 # --- Overlay de texto ---
                 y = 25
@@ -348,74 +366,22 @@ def visualization_process(perception_pipe, decision_pipe, keyboard_pipe,
                 cv2.putText(frame, rf_text, (10, y),
                            cv2.FONT_HERSHEY_SIMPLEX, 0.45, rf_color, 1)
 
-                y += 18
-                r_text = "Robot: OK" if rd else "Robot: --"
-                r_color = (0, 255, 0) if rd else (0, 0, 200)
-                cv2.putText(frame, r_text, (10, y),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.45, r_color, 1)
-
-                y += 18
-                b_text = (f"Pelota: ({ball_pos[0]},{ball_pos[1]})"
-                          if ball_pos else "Pelota: --")
-                b_color = (0, 200, 255) if ball_pos else (0, 0, 200)
-                cv2.putText(frame, b_text, (10, y),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.45, b_color, 1)
-
-                if distance is not None:
+                # Estado por robot
+                for rid in robot_ids:
                     y += 18
-                    cv2.putText(frame, f"Dist: {distance:.0f}px", (10, y),
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1)
+                    pstate = players_state.get(rid, {})
+                    pos = pstate.get('pos')
+                    rol = pstate.get('rol', '?')
+                    last_action = pstate.get('last_action')
+                    has_ball = pstate.get('has_ball', False)
 
-                if has_ball:
-                    y += 18
-                    cv2.putText(frame, "TIENE PELOTA", (10, y),
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 255), 2)
-
-                if last_action:
-                    y += 18
-                    action_text = f"Fase: {str(last_action)[:28]}"
-                    cv2.putText(frame, action_text, (10, y),
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.40, (200, 200, 255), 1)
-
-                if action_type:
-                    y += 16
-                    ctrl_color = {
-                        'move': (100, 255, 100),
-                        'rotate': (100, 200, 255),
-                        'creep_forward': (255, 200, 100),
-                    }.get(action_type, (180, 180, 180))
-                    cv2.putText(frame, f"Ctrl: {action_type}", (10, y),
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.38, ctrl_color, 1)
-
-                if current_target:
-                    y += 16
-                    cv2.putText(frame,
-                               f"Target: ({current_target[0]},{current_target[1]})",
-                               (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.38,
-                               (255, 0, 255), 1)
-
-                # --- Errores angulares ---
-                y += 20
-                cv2.line(frame, (5, y - 4), (200, y - 4), (60, 60, 60), 1)
-
-                if robot_angle_deg is not None:
-                    y += 14
-                    cv2.putText(frame, f"Robot: {robot_angle_deg:6.1f}deg", (10, y),
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.38, (200, 200, 200), 1)
-
-                if err_to_ball is not None:
-                    y += 14
-                    eb_color = (0, 255, 0) if abs(err_to_ball) < 15 else (0, 140, 255) if abs(err_to_ball) < 45 else (0, 0, 255)
-                    cv2.putText(frame,
-                               f"Err pelota: {err_to_ball:+6.1f}deg",
-                               (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.38, eb_color, 1)
-
-                if err_to_goal is not None:
-                    y += 14
-                    eg_color = (0, 255, 0) if abs(err_to_goal) < 15 else (0, 140, 255) if abs(err_to_goal) < 45 else (0, 0, 255)
-                    cv2.putText(frame,
-                               f"Err arco:   {err_to_goal:+6.1f}deg",
-                               (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.38, eg_color, 1)
+                    base_color = ROBOT_COLORS.get(rid, (180, 180, 180))
+                    r_color = (0, 255, 255) if has_ball else base_color
+                    pos_str = f"({pos[0]},{pos[1]})" if pos else "--"
+                    action_str = f" {str(last_action)[:16]}" if last_action else ""
+                    label = f"R{rid}[{ROL_LABELS.get(rol,'?')}] {pos_str}{action_str}"
+                    cv2.putText(frame, label, (10, y),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.38, r_color, 1)
 
                 cv2.putText(frame, "ESPACIO=Activar/Pausar  ESC=Salir",
                            (10, CAMERA_PERSPECTIVE_HEIGHT - 10),
@@ -448,7 +414,7 @@ def visualization_process(perception_pipe, decision_pipe, keyboard_pipe,
     finally:
         shm.close()
         cv2.destroyAllWindows()
-        log.info("Visualizacion finalizada")
+        log.info("Visualizacion multi finalizada")
 
 
 # =============================================================================
@@ -457,9 +423,9 @@ def visualization_process(perception_pipe, decision_pipe, keyboard_pipe,
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Test de integracion: Robot controlado por BehaviorManager (Paso 2)')
-    parser.add_argument('--robot-id', type=int, choices=[0, 1, 2, 3],
-                        required=True, help='ID del robot (0-3)')
+        description='Test de integracion: 2 robots coordinados por BehaviorManager (Paso 4)')
+    parser.add_argument('--robot-ids', nargs='+', type=int, default=[0, 1],
+                        help='IDs de los robots (default: 0 1)')
     parser.add_argument('--serial-port', type=str, default='/dev/ttyUSB0',
                         help='Puerto serial (default: /dev/ttyUSB0)')
     parser.add_argument('--camera-id', type=int, default=None,
@@ -472,10 +438,10 @@ def main():
     else:
         camera_id = args.camera_id
 
-    robot_id = args.robot_id
-    shm_name = f"{SHM_NAME}_{robot_id}"
+    robot_ids = args.robot_ids
+    shm_name = f"{SHM_NAME}_{'_'.join(str(r) for r in robot_ids)}"
 
-    # Limpiar SHM huerfana
+    # Limpiar SHM huérfana
     try:
         old = shared_memory.SharedMemory(name=shm_name)
         old.close()
@@ -494,18 +460,20 @@ def main():
     viz_to_dec_s, viz_to_dec_r = multiprocessing.Pipe()
 
     log.info("=" * 60)
-    log.info("  TEST INTEGRACION: BEHAVIOR MANAGER (1 robot)")
+    log.info("  TEST INTEGRACION: BEHAVIOR MANAGER (2 robots)")
     log.info("=" * 60)
-    log.info("Robot ID: %d | Puerto: %s | Camara: /dev/video%d",
-             robot_id, args.serial_port, camera_id)
-    log.info("Rol: ATACANTE | Equipo: red | Campo: FIELD_CAM (640x480)")
+    log.info("Robot IDs: %s | Puerto: %s | Camara: /dev/video%d",
+             robot_ids, args.serial_port, camera_id)
+    log.info("Roles iniciales: R%d=ATACANTE, R%d=DEFENSOR",
+             robot_ids[0], robot_ids[1])
+    log.info("Campo: FIELD_CAM (640x480)")
     log.info("=" * 60)
 
     processes = []
 
     p1 = multiprocessing.Process(
-        target=perception_process,
-        args=(perc_to_dec_s, perc_to_viz_s, robot_id, camera_id,
+        target=perception_process_multi,
+        args=(perc_to_dec_s, perc_to_viz_s, robot_ids, camera_id,
               shm_name, frame_counter),
         name="Perception"
     )
@@ -514,15 +482,15 @@ def main():
     p2 = multiprocessing.Process(
         target=decision_process,
         args=(perc_to_dec_r, dec_to_viz_s, viz_to_dec_r,
-              robot_id, args.serial_port),
+              robot_ids, args.serial_port),
         name="Decision"
     )
     processes.append(p2)
 
     p3 = multiprocessing.Process(
-        target=visualization_process,
+        target=visualization_process_multi,
         args=(perc_to_viz_r, dec_to_viz_r, viz_to_dec_s,
-              shm_name, frame_counter),
+              robot_ids, shm_name, frame_counter),
         name="Visualization"
     )
     processes.append(p3)
@@ -534,6 +502,7 @@ def main():
 
         log.info("")
         log.info("Sistema corriendo. Presiona ESPACIO en la ventana para activar BT.")
+        log.info("Ambos robots deben ser visibles antes de activar.")
         log.info("=" * 60)
 
         for proc in processes:
