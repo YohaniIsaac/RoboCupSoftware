@@ -87,7 +87,8 @@ class RrtStarSmart:
         path (list): Ruta final encontrada.
     """
     def __init__(self, step_len, goal_sample_rate, search_radius,
-                 iter_max, list_obs=None, x_start=None, x_goal=None, field=None):
+                 iter_max, list_obs=None, x_start=None, x_goal=None, field=None,
+                 clearance=None):
         """Inicializa el planificador RRT* Smart.
 
         Args:
@@ -99,6 +100,8 @@ class RrtStarSmart:
             x_start (tuple, optional): Coordenadas del punto inicial.
             x_goal (tuple, optional): Coordenadas del punto objetivo.
             field (FieldGeometry, optional): Geometría del campo. Por defecto FIELD_SIM.
+            clearance (int, optional): Margen de seguridad (px) añadido a cada obstáculo.
+                Si es None usa PATH_PLANNING_OBSTACLE_CLEARANCE de config.
         """
         self.x_start = Node(x_start) if x_start else None
         self.vertex = [self.x_start]
@@ -109,9 +112,10 @@ class RrtStarSmart:
         self.search_radius = search_radius
         self.iter_max = iter_max
         self._field = field  # guardar para setup() y replanificaciones internas
+        self._clearance = clearance  # guardar para setup() y replanificaciones
         if list_obs is not None:
             self.env = Env(list_obs, field=field)
-            self.utils = Utils(list_obs, field=field)
+            self.utils = Utils(list_obs, field=field, delta=clearance)
             self.obs_vertex = self.utils.get_obs_vertex()
             self.obs_circle = self.env.obs_circle
             self.obs_rectangle = self.env.obs_rectangle
@@ -140,7 +144,7 @@ class RrtStarSmart:
 
         self.last_node = None
 
-    def setup(self, x_start, x_goal, list_obs, field=None):
+    def setup(self, x_start, x_goal, list_obs, field=None, clearance=None):
         """Configura el planificador con nuevos parámetros.
 
         Args:
@@ -148,6 +152,8 @@ class RrtStarSmart:
             x_goal (tuple): Coordenadas del punto objetivo.
             list_obs (list): Lista de obstáculos en el entorno.
             field (FieldGeometry, optional): Geometría del campo. Usa self._field si no se pasa.
+            clearance (int, optional): Margen de seguridad (px) añadido a cada obstáculo.
+                Si es None usa self._clearance (pasado en el constructor).
         """
         if x_start is not None:
             self.x_start = Node(x_start)
@@ -157,9 +163,10 @@ class RrtStarSmart:
             self.x_goal = Node(x_goal)
 
         _field = field if field is not None else getattr(self, '_field', None)
+        _clearance = clearance if clearance is not None else getattr(self, '_clearance', None)
         if list_obs is not None:
             self.env = Env(list_obs, field=_field)
-            self.utils = Utils(list_obs, field=_field)
+            self.utils = Utils(list_obs, field=_field, delta=_clearance)
             self.obs_vertex = self.utils.get_obs_vertex()
             self.obs_circle = self.env.obs_circle
             self.obs_rectangle = self.env.obs_rectangle

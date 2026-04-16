@@ -7,7 +7,7 @@ Incluye definición de obstáculos, límites del área y verificación de colisi
 """
 import math
 import numpy as np
-from robot_soccer.config import FIELD_SIM
+from robot_soccer.config import FIELD_SIM, PATH_PLANNING_OBSTACLE_CLEARANCE
 
 
 class Node:
@@ -186,15 +186,17 @@ class Utils:
         obs_boundary (list): Lista de obstáculos de límites.
     """
 
-    def __init__(self, list_obs, field=None):
+    def __init__(self, list_obs, field=None, delta=None):
         """Inicializa las utilidades con una lista de obstáculos.
 
         Args:
             list_obs (list): Lista de obstáculos en el entorno.
             field: FieldGeometry con geometría del campo. Defaults to FIELD_SIM.
+            delta (int, optional): Margen de seguridad (px) añadido a cada obstáculo.
+                Si es None usa PATH_PLANNING_OBSTACLE_CLEARANCE de config.
         """
         self.env = Env(list_obs, field=field)
-        self.delta = 20
+        self.delta = delta if delta is not None else PATH_PLANNING_OBSTACLE_CLEARANCE
         self.obs_circle = self.env.obs_circle
         self.obs_rectangle = self.env.obs_rectangle
         self.obs_boundary = self.env.obs_boundary

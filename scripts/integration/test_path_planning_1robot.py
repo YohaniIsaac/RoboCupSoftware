@@ -46,6 +46,7 @@ from robot_soccer.config import (
     CAMERA_PERSPECTIVE_ENABLED, CAMERA_PERSPECTIVE_SRC_POINTS,
     FIELD_CAM,
     RRT_STEP_LEN, RRT_GOAL_SAMPLE_RATE, RRT_SEARCH_RADIUS, RRT_ITER_MAX,
+    PATH_PLANNING_OBSTACLE_CLEARANCE, PATH_PLANNING_ROBOT_OBSTACLE_RADIUS,
 )
 from robot_soccer.utils.camera_utils import get_camera_index
 from robot_soccer.ai.path_planning.tools_for_path_planing import (
@@ -69,8 +70,6 @@ REPLAN_POSITION_THRESHOLD = 80
 REPLAN_COOLDOWN_S = 2.0
 # Umbral de llegada a waypoints intermedios (px)
 WAYPOINT_ARRIVAL_THRESHOLD = 20
-# Radio (px) con que se representa cada robot obstáculo como circulo
-ROBOT_OBSTACLE_RADIUS = 30
 # Cuánto debe moverse un obstáculo (px) para disparar replanificacion
 OBSTACLE_MOVE_THRESHOLD = 40
 # Intervalo de envio de estado a visualizacion
@@ -195,7 +194,7 @@ def perception_process(ctrl_pipe, viz_pipe, robot_id, camera_id,
 # PROCESO 2: Planning (RRT* Smart)
 # =============================================================================
 
-def planning_process(ctrl_to_plan_pipe, path_queue, goal_pos):
+def planning_process(ctrl_to_plan_pipe, path_queue, goal_pos, clearance):
     """Ejecuta RRT* Smart en proceso separado. Nunca bloquea al control.
 
     Recibe posicion del robot Y lista de obstaculos actuales por pipe.
@@ -204,7 +203,7 @@ def planning_process(ctrl_to_plan_pipe, path_queue, goal_pos):
     """
     from robot_soccer.ai.path_planning.rrt_star_smart import RrtStarSmart
 
-    log.info("Planning iniciado | Goal: %s", goal_pos)
+    log.info("Planning iniciado | Goal: %s | clearance: %d px", goal_pos, clearance)
 
     rrt = RrtStarSmart(
         step_len=RRT_STEP_LEN,
@@ -212,6 +211,7 @@ def planning_process(ctrl_to_plan_pipe, path_queue, goal_pos):
         search_radius=RRT_SEARCH_RADIUS,
         iter_max=RRT_ITER_MAX,
         field=FIELD_CAM,        # Fix #1: usar coordenadas de camara (640x480)
+        clearance=clearance,
     )
 
     try:
@@ -229,7 +229,7 @@ def planning_process(ctrl_to_plan_pipe, path_queue, goal_pos):
 
             t0 = time.time()
             try:
-                rrt.setup(robot_pos, goal_pos, obstacles, field=FIELD_CAM)
+                rrt.setup(robot_pos, goal_pos, obstacles, field=FIELD_CAM, clearance=clearance)
                 rrt.planning()
             except Exception as e:
                 log.error("Error en planning(): %s", e)
@@ -267,7 +267,7 @@ def planning_process(ctrl_to_plan_pipe, path_queue, goal_pos):
 
 def control_process(perc_pipe, ctrl_to_plan_pipe, path_queue,
                     viz_pipe, keyboard_pipe, robot_id, serial_port,
-                    goal_pos, static_obstacles):
+                    goal_pos, static_obstacles, robot_obstacle_radius):
     """Sigue waypoints del path planner via PID y RF.
 
     Extrae robots obstaculos de la percepcion, los combina con static_obstacles
@@ -357,7 +357,7 @@ def control_process(perc_pipe, ctrl_to_plan_pipe, path_queue,
 
                     # Construir lista de obstaculos dinamica (otros robots + estaticos)
                     dynamic_obstacles = [
-                        [r['x'], r['y'], ROBOT_OBSTACLE_RADIUS]
+                        [r['x'], r['y'], robot_obstacle_radius]
                         for r in all_robots if r['id'] != robot_id
                     ]
                     current_obstacles = dynamic_obstacles + static_obstacles
@@ -566,7 +566,8 @@ def control_process(perc_pipe, ctrl_to_plan_pipe, path_queue,
 # =============================================================================
 
 def visualization_process(perc_pipe, ctrl_pipe, keyboard_pipe,
-                          shm_name, frame_counter, robot_id):
+                          shm_name, frame_counter, robot_id,
+                          robot_obstacle_radius, clearance):
     """Muestra frame con ruta planificada, todos los robots y estado.
 
     Robot controlado: circulo verde. Robots obstáculo: circulo rojo.
@@ -707,7 +708,7 @@ def visualization_process(perc_pipe, ctrl_pipe, keyboard_pipe,
                     else:
                         # Robot obstáculo: rojo + circulo de radio de seguridad
                         cv2.circle(frame, (rx, ry), 16, (0, 0, 220), 2, cv2.LINE_AA)
-                        cv2.circle(frame, (rx, ry), ROBOT_OBSTACLE_RADIUS,
+                        cv2.circle(frame, (rx, ry), robot_obstacle_radius,
                                    (0, 0, 120), 1, cv2.LINE_AA)
                         cv2.arrowedLine(frame, (rx, ry), (ex, ey),
                                         (0, 0, 180), 1, cv2.LINE_AA, tipLength=0.3)
@@ -764,6 +765,11 @@ def visualization_process(perc_pipe, ctrl_pipe, keyboard_pipe,
                     cv2.putText(frame, f"Goal: {goal_pos}",
                                 (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.38,
                                 (0, 215, 255), 1)
+
+                y += 18
+                cv2.putText(frame,
+                            f"robot_r={robot_obstacle_radius}px  delta={clearance}px",
+                            (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (160, 160, 80), 1)
 
                 cv2.putText(frame,
                             "ESPACIO=Start/Stop  R=Replan  ESC=Salir",
@@ -830,6 +836,17 @@ def main():
                             '  Rectangulo:  "cx,cy,hw,hh,angulo_deg"\n'
                             'Ejemplo: --obstacle "320,240,50" --obstacle "100,100,30,20,45"'
                         ))
+    parser.add_argument('--clearance', type=int, default=PATH_PLANNING_OBSTACLE_CLEARANCE,
+                        help=(
+                            f'Margen de seguridad (px) añadido a cada obstáculo en el planificador '
+                            f'(default: {PATH_PLANNING_OBSTACLE_CLEARANCE})'
+                        ))
+    parser.add_argument('--robot-obstacle-radius', type=int,
+                        default=PATH_PLANNING_ROBOT_OBSTACLE_RADIUS,
+                        help=(
+                            f'Radio (px) con que se modela cada robot detectado como obstáculo '
+                            f'(default: {PATH_PLANNING_ROBOT_OBSTACLE_RADIUS})'
+                        ))
     args = parser.parse_args()
 
     if args.camera_id is None:
@@ -878,6 +895,8 @@ def main():
              robot_id, args.serial_port, camera_id)
     log.info("Goal: %s | Obstaculos: %d", goal_pos, len(obstacles))
     log.info("Campo: FIELD_CAM (%dx%d px)", CAMERA_PERSPECTIVE_WIDTH, CAMERA_PERSPECTIVE_HEIGHT)
+    log.info("robot_obstacle_radius: %d px | clearance (delta): %d px",
+             args.robot_obstacle_radius, args.clearance)
     log.info("=" * 60)
 
     # Limpiar SHM huerfana
@@ -914,7 +933,7 @@ def main():
 
     p2 = multiprocessing.Process(
         target=planning_process,
-        args=(ctrl_to_plan_r, path_queue, goal_pos),   # sin obstacles: llegan por pipe
+        args=(ctrl_to_plan_r, path_queue, goal_pos, args.clearance),
         name="Planning"
     )
     processes.append(p2)
@@ -923,7 +942,7 @@ def main():
         target=control_process,
         args=(perc_to_ctrl_r, ctrl_to_plan_s, path_queue,
               ctrl_to_viz_s, viz_to_ctrl_r, robot_id, args.serial_port,
-              goal_pos, obstacles),                     # obstacles estaticos del CLI
+              goal_pos, obstacles, args.robot_obstacle_radius),
         name="Control"
     )
     processes.append(p3)
@@ -931,7 +950,8 @@ def main():
     p4 = multiprocessing.Process(
         target=visualization_process,
         args=(perc_to_viz_r, ctrl_to_viz_r, viz_to_ctrl_s,
-              shm_name, frame_counter, robot_id),       # robot_id para distinguir colores
+              shm_name, frame_counter, robot_id,
+              args.robot_obstacle_radius, args.clearance),
         name="Visualization"
     )
     processes.append(p4)
