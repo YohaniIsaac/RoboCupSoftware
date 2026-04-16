@@ -170,6 +170,7 @@ BT_CAPTURE_CONFIRM_RATIO = 0.023
 BT_INTERCEPT_RATIO = 0.033
 BT_SUPPORT_DISTANCE_RATIO = 0.133
 BT_DEFENDER_WAIT_RATIO = 0.20
+DEFENDER_WAIT_MAX_S = 5.0  # s — timeout máximo de espera del defensor
 BT_DRIBBLE_SPACING_RATIO = 0.08
 BT_DRIBBLE_GOAL_RATIO = 0.133
 BT_DEFENSIVE_ARRIVAL_RATIO = 0.02
@@ -421,7 +422,7 @@ CAPTURE_OVERSHOOT_PX = 27  # px — empuje suave para asegurar contacto dribbler
 # cuando dist(ArUco_center, ball_center) ≈ robot_radius - ball_radius ≈ 23-27px.
 # Este valor debe ser mayor que la distancia real de parada (~23px observado).
 # Calibrar con scripts/calibrate_behavior_thresholds.py (teclas O/L)
-CAPTURE_CONFIRM_DISTANCE_PX = 17  # px — confirmar pelota en dribbler
+CAPTURE_CONFIRM_DISTANCE_PX = 35  # px — confirmar pelota en dribbler
 
 # Velocidad PWM para el acercamiento lento hacia la pelota (sin dribbler).
 # Se envía directamente a los motores sin PID.

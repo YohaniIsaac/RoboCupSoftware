@@ -34,6 +34,7 @@ from robot_soccer.config import (
     SETTLE_ESCAPE_FACTOR,
     ADVANCE_MAX_TIME_S,
     ADVANCE_BALL_DRIFT_DEG,
+    DEFENDER_WAIT_MAX_S,
 )
 
 from .base import (
@@ -1015,23 +1016,30 @@ def move_to_defensive_position(blackboard):
     ball_pos = blackboard.ball.get_position()
     player_pos = blackboard.player.get_position()
 
-    # PRIORIDAD 1: Verificar si el atacante está yendo activamente a la pelota
-    # Si es así, el defensor NO se mueve para no obstruir
+    # PRIORIDAD 1: Verificar si el atacante está en fase de contacto final con la pelota.
+    # Solo esperar si el atacante está dentro de CAPTURE_ACTIVATE_DISTANCE_PX (fase final),
+    # con un timeout de DEFENDER_WAIT_MAX_S para evitar bloqueo permanente.
     teammates = blackboard.team_players
+    attacker_in_contact_phase = False
     for teammate in teammates:
         if teammate.id != blackboard.player.id and teammate.rol == ROL_ATACANTE:
-            teammate_pos = teammate.get_position()
-
-            # Calcular distancia del atacante a la pelota
             attacker_distance_to_ball = np.linalg.norm(
-                np.array(teammate_pos) - np.array(ball_pos)
+                np.array(teammate.get_position()) - np.array(ball_pos)
             )
+            if attacker_distance_to_ball < CAPTURE_ACTIVATE_DISTANCE_PX:
+                attacker_in_contact_phase = True
+                break
 
-            # Si el atacante está cerca de la pelota, esperar
-            if attacker_distance_to_ball < blackboard.field.ratio_to_px(BT_DEFENDER_WAIT_RATIO) * 2:
-                # No moverse, quedarse en posición actual
-                blackboard.last_action = "waiting_for_attacker"
-                return NodeStatus.RUNNING
+    if attacker_in_contact_phase:
+        now = time.time()
+        if not hasattr(blackboard, '_defender_wait_start') or blackboard._defender_wait_start is None:
+            blackboard._defender_wait_start = now
+        if now - blackboard._defender_wait_start < DEFENDER_WAIT_MAX_S:
+            blackboard.last_action = "waiting_for_attacker"
+            return NodeStatus.RUNNING
+        blackboard._defender_wait_start = None  # timeout: caer hacia posición defensiva
+    else:
+        blackboard._defender_wait_start = None  # atacante lejos: resetear timer
 
     # PRIORIDAD 2: Si el atacante NO está activo, elegir posición defensiva
     # Elegir la posición defensiva MÁS CERCANA a la posición ACTUAL del defensor
@@ -1553,11 +1561,13 @@ def _advance_to_contact_running(blackboard):
             )
             return NodeStatus.RUNNING
 
-        # Recalcular overshoot target (la pelota pudo moverse ligeramente).
-        # El guard en move_robot_to ignora si delta < 20px (mismo target).
-        overshoot = _compute_overshoot_target(ball_pos, goal_pos, CAPTURE_OVERSHOOT_PX)
-        target = (int(overshoot[0]), int(overshoot[1]))
-        blackboard.command_manager.move_robot_to(player_id, target)
+        # Solo recalcular el target cuando el robot está lejos de la pelota.
+        # Si ya está dentro del radio de activación, mantener el target actual
+        # para que el PID cierre la distancia sin seguir la pelota que se mueve.
+        if dist > CAPTURE_ACTIVATE_DISTANCE_PX:
+            overshoot = _compute_overshoot_target(ball_pos, goal_pos, CAPTURE_OVERSHOOT_PX)
+            target = (int(overshoot[0]), int(overshoot[1]))
+            blackboard.command_manager.move_robot_to(player_id, target)
         return NodeStatus.RUNNING
 
     # ──────────────────────────────
