@@ -46,7 +46,10 @@ from robot_soccer.config import (
     STUCK_DETECTION_WINDOW_S,
     STUCK_BOOST_INCREMENT,
     STUCK_BOOST_MAX,
+    STUCK_AUTO_KICK,
 )
+
+from robot_soccer.utils.robot_logger import robot_status_logger
 
 log = logging.getLogger(__name__)
 
@@ -122,6 +125,7 @@ def control_loop_behavior(robot_positions_pipe, frame_pipe, robot_id, serial_por
         'stuck_detection_window_s':    STUCK_DETECTION_WINDOW_S,
         'stuck_boost_increment':       STUCK_BOOST_INCREMENT,
         'stuck_boost_max':             STUCK_BOOST_MAX,
+        'stuck_auto_kick':             STUCK_AUTO_KICK,
     }
 
     # Controlador
@@ -688,6 +692,7 @@ def _save_behavior_to_config(behavior_params):
         'STUCK_DETECTION_WINDOW_S':    f"{behavior_params.get('stuck_detection_window_s', STUCK_DETECTION_WINDOW_S):.1f}",
         'STUCK_BOOST_INCREMENT':       f"{int(behavior_params.get('stuck_boost_increment', STUCK_BOOST_INCREMENT))}",
         'STUCK_BOOST_MAX':             f"{int(behavior_params.get('stuck_boost_max', STUCK_BOOST_MAX))}",
+        'STUCK_AUTO_KICK':             f"{behavior_params.get('stuck_auto_kick', STUCK_AUTO_KICK)}",
     }
 
     new_lines = []
@@ -772,6 +777,7 @@ def control_loop_behavior_pure(perception_pipe, control_state_pipe, keyboard_pip
         'stuck_detection_window_s':    STUCK_DETECTION_WINDOW_S,
         'stuck_boost_increment':       STUCK_BOOST_INCREMENT,
         'stuck_boost_max':             STUCK_BOOST_MAX,
+        'stuck_auto_kick':             STUCK_AUTO_KICK,
     }
 
     controller = DifferentialDriveController(rf_controller=rf_controller)
@@ -934,13 +940,13 @@ def control_loop_behavior_pure(perception_pipe, control_state_pipe, keyboard_pip
                         if capture_phase == 'confirmed':
                             if rf_controller:
                                 rf_controller.kick(firmware_id)
-                                rf_controller.set_motors(firmware_id, 0, 0)
                                 log.info("💥 FASE 3: KICK disparado (robot %d, firmware_id=%d)",
                                          robot_id, firmware_id)
                             else:
                                 log.info("💥 FASE 3: KICK (simulación — sin RF)")
                             capture_phase = 'idle'
                             movement_active = False
+                            robot_stopped = True   # evitar stop de alta prioridad en esta iteración
                             contact_start_time = None
                             overshoot_target = None
                             _restore_controller_speed(controller)
@@ -1059,6 +1065,21 @@ def control_loop_behavior_pure(perception_pipe, control_state_pipe, keyboard_pip
                                  dist_to_ball_now, robot_deg, ang_to_ball, err_creep,
                                  overshoot_target[0], overshoot_target[1])
                         last_creep_log_time = current_time
+                    # Auto-kick disparado por el controlador cuando stuck_boost llegó al máximo
+                    if behavior_params.get('stuck_auto_kick', STUCK_AUTO_KICK):
+                        _kicked = controller._pid_state.get(robot_id, {}).pop(
+                            'stuck_auto_kicked', False
+                        )
+                        if _kicked:
+                            robot_status_logger.emit_event(
+                                robot_id, "AUTO-KICK: captura → idle"
+                            )
+                            capture_phase = 'idle'
+                            movement_active = False
+                            robot_stopped = True   # evitar stop de alta prioridad en esta iteración
+                            contact_start_time = None
+                            overshoot_target = None
+                            _restore_controller_speed(controller)
 
             # --- Fase 2b: Asentamiento (robot quieto, esperando estabilización) ---
             elif capture_phase == 'capture_settling' and robot:
@@ -1204,6 +1225,7 @@ def control_loop_behavior_pure(perception_pipe, control_state_pipe, keyboard_pip
                         'settle_elapsed': round(settle_elapsed, 2) if capture_phase == 'capture_settling' else None,
                         'last_cmd_type': last_cmd_type,
                         'stuck_boost': controller._pid_state.get(robot_id, {}).get('stuck_boost', 0),
+                        'stuck_auto_kick': behavior_params.get('stuck_auto_kick', STUCK_AUTO_KICK),
                         'timestamp': current_time
                     })
                     last_state_send_time = current_time

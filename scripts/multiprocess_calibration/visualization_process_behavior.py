@@ -66,6 +66,7 @@ def visualization_loop_behavior(perception_pipe, control_state_pipe, keyboard_pi
         'stuck_detection_window_s':    1.2,
         'stuck_boost_increment':       1,
         'stuck_boost_max':             12,
+        'stuck_auto_kick':             True,
     }
     last_target_waypoint = None
     last_movement_active = False
@@ -197,6 +198,8 @@ def visualization_loop_behavior(perception_pipe, control_state_pipe, keyboard_pi
                     last_settle_elapsed = control_data.get('settle_elapsed')
                     last_cmd_type = control_data.get('last_cmd_type', last_cmd_type)
                     last_stuck_boost = control_data.get('stuck_boost', 0)
+                    if 'stuck_auto_kick' in control_data:
+                        last_behavior_params['stuck_auto_kick'] = control_data['stuck_auto_kick']
 
                     # Detect waypoint reached: target went from something to None
                     if prev_target_waypoint is not None and new_target is None:
@@ -1040,6 +1043,11 @@ def _draw_behavior_panel(behavior_params, robot_pos, waypoint, robot_available,
     cv2.putText(panel, f"Boost: {stuck_boost} PWM", (col_left_x + bar_w + 6, y_left + 10),
                cv2.FONT_HERSHEY_SIMPLEX, 0.38, boost_color, 1)
     y_left += lh + 2
+    ak = behavior_params.get('stuck_auto_kick', True)
+    ak_color = (0, 200, 100) if ak else (100, 100, 100)
+    cv2.putText(panel, f"Auto-kick al max: {'ON' if ak else 'OFF'}",
+               (col_left_x, y_left), cv2.FONT_HERSHEY_SIMPLEX, 0.42, ak_color, 1)
+    y_left += lh
 
     factor = behavior_params.get('dribble_pwm_factor', 1.0)
     cv2.putText(panel, f"Dribble (inactivo): {factor:.2f}x  (T/Y)", (col_left_x, y_left),

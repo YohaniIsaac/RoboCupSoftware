@@ -19,7 +19,7 @@
     "bias": 0.022
   },
   "1": {
-    "pwm_min": 17,
+    "pwm_min": 19,
     "pwm_max": 27,
     "deadzone_left_fwd": 0,
     "deadzone_left_rev": 0,

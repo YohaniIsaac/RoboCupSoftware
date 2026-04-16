@@ -55,6 +55,11 @@ def _fmt_pwm(v: Optional[int]) -> str:
     return f"{v:+4d}" if v is not None else " ---"
 
 
+def _fmt_stuck(v: Optional[int]) -> str:
+    """Boost anti-atasco, 3 chars. Ej: '  0', '  5', ' 12' o '---'."""
+    return f"{v:3d}" if v is not None else "---"
+
+
 def _fmt_state(v: Optional[str]) -> str:
     """Estado alineado a la izquierda, 22 chars."""
     return f"{(v or '---'):<22s}"
@@ -84,6 +89,7 @@ FIELD_DEFS: list[FieldDef] = [
     FieldDef("dist",      "d=",      _fmt_dist,  enabled=True),
     FieldDef("ball_err",  "Dball=",  _fmt_angle, enabled=True),
     FieldDef("goal_err",  "Dgoal=",  _fmt_angle, enabled=True),
+    FieldDef("stuck_boost", "sb=",  _fmt_stuck, enabled=True),
     FieldDef("left_pwm",  "L=",      _fmt_pwm,   enabled=True),
     FieldDef("right_pwm", "R=",      _fmt_pwm,   enabled=True),
 ]
@@ -103,6 +109,7 @@ class RobotStatus:
     dist:      Optional[float] = None  # distancia al target en pixeles
     ball_err:  Optional[float] = None  # error angular hacia la pelota (grados)
     goal_err:  Optional[float] = None  # error angular hacia el arco (grados)
+    stuck_boost: Optional[int]  = None  # boost anti-atasco activo (0=libre, max=kick)
     left_pwm:  Optional[int]   = None  # PWM motor izquierdo (-255..255)
     right_pwm: Optional[int]   = None  # PWM motor derecho (-255..255)
 

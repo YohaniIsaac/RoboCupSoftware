@@ -488,6 +488,7 @@ STUCK_DETECTION_WINDOW_S = 0.8  # s  — ventana de tiempo (~30 frames @ 25 FPS)
 STUCK_BOOST_INCREMENT = 1  # PWM — boost adicional por ventana sin movimiento
 STUCK_BOOST_MAX = 12  # PWM — boost máximo acumulado (hard cap)
 STUCK_BOOST_DECAY = 5             # PWM — reducción por ventana con movimiento
+STUCK_AUTO_KICK = True  # Si True, dispara kick al llegar a STUCK_BOOST_MAX
 
 # =============================================================================
 # Parámetros de Control PID

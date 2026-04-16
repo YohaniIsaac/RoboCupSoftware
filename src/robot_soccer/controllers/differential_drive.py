@@ -27,6 +27,7 @@ from robot_soccer.config import (
     STUCK_BOOST_INCREMENT,
     STUCK_BOOST_MAX,
     STUCK_BOOST_DECAY,
+    STUCK_AUTO_KICK,
 )
 
 log = logging.getLogger(__name__)
@@ -224,6 +225,7 @@ class DifferentialDriveController:
                 'stuck_ref_x': None,       # posición de referencia al inicio de la ventana
                 'stuck_ref_y': None,
                 'stuck_window_start': 0.0, # timestamp de inicio de la ventana actual
+                'stuck_auto_kicked': False, # True cuando auto-kick fue disparado en esta ventana
             }
         return self._pid_state[robot_id]
 
@@ -568,17 +570,39 @@ class DifferentialDriveController:
                     (robot.y - _pid_st['stuck_ref_y'])**2
                 )
                 if _moved < self.stuck_movement_threshold_px:
+                    _prev_boost = _pid_st['stuck_boost']
                     _pid_st['stuck_boost'] = min(
                         _pid_st['stuck_boost'] + self.stuck_boost_increment,
                         self.stuck_boost_max
                     )
-                    if _pid_st['stuck_boost'] > 0:
-                        log.debug("Robot %d: ATASCADO — boost=%d PWM (moved=%.1fpx)",
-                                  robot.id, _pid_st['stuck_boost'], _moved)
+                    robot_status_logger.update(robot.id, stuck_boost=_pid_st['stuck_boost'])
+                    robot_status_logger.emit_event(
+                        robot.id,
+                        "STUCK: boost=%d/%d PWM (moved=%.1fpx)" % (
+                            _pid_st['stuck_boost'], self.stuck_boost_max, _moved
+                        )
+                    )
+                    # Auto-kick al alcanzar el boost máximo
+                    if STUCK_AUTO_KICK and _pid_st['stuck_boost'] >= self.stuck_boost_max:
+                        robot_status_logger.emit_event(
+                            robot.id,
+                            "AUTO-KICK: stuck_boost max=%d PWM — disparando" % self.stuck_boost_max
+                        )
+                        if self.rf_controller:
+                            self.rf_controller.kick(robot.id + 1, 1.0)
+                        _pid_st['stuck_auto_kicked'] = True
+                        _pid_st['stuck_boost'] = 0
+                        _pid_st['stuck_ref_x'] = robot.x
+                        _pid_st['stuck_ref_y'] = robot.y
+                        _pid_st['stuck_window_start'] = _now
+                        robot_status_logger.update(robot.id, stuck_boost=0)
+                        self._send_motor_commands(robot, left_speed, right_speed)
+                        return False
                 else:
                     _pid_st['stuck_boost'] = max(
                         0, _pid_st['stuck_boost'] - self.stuck_boost_decay
                     )
+                    robot_status_logger.update(robot.id, stuck_boost=_pid_st['stuck_boost'])
                 _pid_st['stuck_ref_x'] = robot.x
                 _pid_st['stuck_ref_y'] = robot.y
                 _pid_st['stuck_window_start'] = _now
@@ -586,6 +610,7 @@ class DifferentialDriveController:
             _pid_st['stuck_ref_x'] = None
             _pid_st['stuck_window_start'] = 0.0
             _pid_st['stuck_boost'] = max(0, _pid_st['stuck_boost'] - self.stuck_boost_decay)
+            robot_status_logger.update(robot.id, stuck_boost=_pid_st['stuck_boost'])
 
         self._send_motor_commands(robot, left_speed, right_speed)
         return False

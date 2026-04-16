@@ -1,6 +1,7 @@
 import logging
 import math
 import numpy as np
+from robot_soccer.utils.robot_logger import robot_status_logger
 from robot_soccer.config import (
     FIELD_SIM, DRIBBLER_CAPTURE_POWER,
     CAPTURE_ACTIVATE_DISTANCE_PX, CAPTURE_CONFIRM_DISTANCE_PX,
@@ -250,8 +251,10 @@ class RobotActionExecutor:
         # Desactivar la posesión
         player._has_ball = False
 
-        log.info("Robot %i: Pelota pateada hacia %.2f con potencia %.2f",
-                 player.id, target_pos, power)
+        robot_status_logger.emit_event(
+            player.id,
+            "KICK: tgt=(%d,%d) power=%.1f" % (int(target_pos[0]), int(target_pos[1]), power),
+        )
 
         return True
 

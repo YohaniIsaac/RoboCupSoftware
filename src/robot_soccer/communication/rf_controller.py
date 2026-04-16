@@ -235,6 +235,26 @@ class RFController:
 
         return success
 
+    def kick_priority(self, robot_id, power=1.0):
+        """Activa el mecanismo de pateo usando cola de ALTA prioridad.
+
+        Equivalente a kick() pero el comando se encola con prioridad alta para
+        que no sea descartado por comandos de stop que lleguen en la misma iteración.
+
+        Args:
+            robot_id (int): ID del robot (1-4).
+            power (float): Potencia del pateo (0.0-1.0). Defaults to 1.0.
+
+        Returns:
+            bool: True si el comando se envió correctamente, False en caso contrario.
+        """
+        power_val = int(power * 255)
+        command = self.protocol.format_kick_command(robot_id, power_val)
+        success = self.serial_manager.send_priority_command(command, priority='high')
+        if success:
+            log.debug("Robot %i: Pateo (alta prioridad) potencia %.2f", robot_id, power)
+        return success
+
     def set_dribbler(self, robot_id, power=255):
         """Establece la potencia del dribbler de un robot.
 

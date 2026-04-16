@@ -1596,8 +1596,10 @@ def kick_immediately(blackboard):
 
     blackboard.player._has_ball = False
     blackboard.last_action = "kick_immediately"
-    log.info("[kick] Robot %d | solenoide disparado → arco (%.0f, %.0f)",
-             blackboard.player.id, goal_pos[0], goal_pos[1])
+    robot_status_logger.emit_event(
+        blackboard.player.id,
+        "KICK SOLENOIDE: arco=(%d,%d)" % (int(goal_pos[0]), int(goal_pos[1])),
+    )
     return NodeStatus.SUCCESS
 
 
