@@ -1276,13 +1276,26 @@ def _move_behind_ball_start(blackboard):
     goal_pos   = np.array(blackboard.opponent_goal_pos, dtype=float)
     player_pos = np.array(blackboard.player.get_position(), dtype=float)
 
+    dist_to_ball    = float(np.linalg.norm(ball_pos - player_pos))
+    secs_since_kick = time.time() - getattr(blackboard, '_last_kick_time', 0.0)
+
+    # Fase RETROCESO: si acabamos de patear y la pelota sigue pegada al robot,
+    # retroceder en línea recta (sin rotar) antes de intentar el desvío lateral.
+    # Sin esto, cualquier rotación barre la pelota (radio robot ≈ 30px, bola a 34px).
+    if secs_since_kick < POST_KICK_COOLDOWN_S and dist_to_ball < BEHIND_BALL_APPROACH_PX:
+        blackboard._behind_ball_phase = 'retreat'
+        blackboard._behind_ball_ref   = ball_pos.copy()
+        blackboard.command_manager.creep_forward(player_id, speed=-CAPTURE_CREEP_SPEED_PWM)
+        blackboard.last_action = "retreating_from_ball"
+        robot_status_logger.emit_event(
+            player_id,
+            f"behind_ball RETROCESO: dist_bola={dist_to_ball:.0f}px -> alejarse antes de rotar"
+        )
+        return NodeStatus.RUNNING
+
     # Fast path: si estamos cerca de la pelota Y la pelota está entre el robot
     # y el arco Y el robot está mirando hacia la pelota → saltar Phase 1.
-    # Caso típico: robot ya bien posicionado sin haber pateado recientemente.
-    # BLOQUEADO durante POST_KICK_COOLDOWN_S tras un pateo para forzar
-    # reposicionamiento físico (sin cooldown el robot queda en ciclo de 0.1s).
-    dist_to_ball = float(np.linalg.norm(ball_pos - player_pos))
-    secs_since_kick = time.time() - getattr(blackboard, '_last_kick_time', 0.0)
+    # BLOQUEADO durante POST_KICK_COOLDOWN_S para forzar reposicionamiento físico.
     fast_path_allowed = secs_since_kick >= POST_KICK_COOLDOWN_S
     if fast_path_allowed and dist_to_ball <= BEHIND_BALL_APPROACH_PX:
         ang_to_ball = float(np.degrees(np.arctan2(
@@ -1363,6 +1376,16 @@ def _move_behind_ball_running(blackboard):
     player_pos = np.array(blackboard.player.get_position(), dtype=float)
     ball_pos   = np.array(blackboard.ball.get_position(), dtype=float)
     phase      = getattr(blackboard, '_behind_ball_phase', 'direct')
+
+    # Fase RETROCESO: retrocede hasta que la pelota esté a distancia segura para rotar
+    if phase == 'retreat':
+        dist_to_ball = float(np.linalg.norm(ball_pos - player_pos))
+        if dist_to_ball >= BEHIND_BALL_APPROACH_PX:
+            # Espacio suficiente: cancelar creep y recalcular posición detrás de la pelota
+            blackboard.command_manager.actions_in_progress.pop(player_id, None)
+            return _move_behind_ball_start(blackboard)
+        blackboard.last_action = "retreating_from_ball"
+        return NodeStatus.RUNNING
 
     # Recalcular si la pelota se movió demasiado
     if np.linalg.norm(ball_pos - blackboard._behind_ball_ref) > 60:
@@ -1644,11 +1667,13 @@ def kick_immediately(blackboard):
     player_pos = blackboard.player.get_position()
     goal_pos   = blackboard.opponent_goal_pos
 
-    # Disparar solenoide en robots reales
+    # Disparar solenoide en robots reales.
+    # Se usa kick_priority (cola alta) para que el comando "R{id}P" no sea
+    # borrado por comandos de motor del mismo robot (mecanismo "Last Command Wins").
     rf = blackboard.command_manager.rf_controller
     if rf:
         fw_id = blackboard.player.id + 1
-        rf.kick(fw_id, 1.0)
+        rf.kick_priority(fw_id, 1.0)
 
     # En simulación: aplicar velocidad a la pelota hacia el arco
     ball = blackboard.ball
