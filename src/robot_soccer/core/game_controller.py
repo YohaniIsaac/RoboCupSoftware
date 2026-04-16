@@ -10,11 +10,64 @@ from .process.main_simulation import simulacion_principal
 from .process.ball_search import busqueda_ball
 from .process.search_for_players import busqueda_player
 from .process.path import trayectoria
+from .process.decision_process import decision_process
 from .shared_frame import SharedFrameWriter
 from robot_soccer.config import (CAMERA_PERSPECTIVE_WIDTH, CAMERA_PERSPECTIVE_HEIGHT,
                                   ANCHO_TOTAL, ALTO_TOTAL)
 
 log = logging.getLogger(__name__)
+
+
+def _decision_perception_adapter(player_pipe, ball_pipe, decision_pipe, robot_id):
+    """Adapta player_pipe + ball_pipe al formato dict que espera decision_process.
+
+    Lee [{"id", "x", "y", "angulo"}, ...] desde player_pipe y (x, y) desde
+    ball_pipe, extrae el jugador con robot_id y combina en el dict esperado
+    por decision_process.
+    """
+    import time
+
+    latest_ball = None
+    latest_players = []
+
+    while True:
+        updated = False
+
+        if player_pipe.poll():
+            try:
+                latest_players = player_pipe.recv()
+                updated = True
+            except Exception:
+                break
+
+        if ball_pipe.poll():
+            try:
+                latest_ball = ball_pipe.recv()
+                updated = True
+            except Exception:
+                break
+
+        if updated:
+            robot_data = None
+            robot_detected = False
+            for p in latest_players:
+                if p.get('id') == robot_id:
+                    robot_data = {'x': p['x'], 'y': p['y'], 'angulo': p['angulo']}
+                    robot_detected = True
+                    break
+
+            ball_detected = latest_ball is not None
+            try:
+                decision_pipe.send({
+                    'robot_detected': robot_detected,
+                    'robot_data': robot_data,
+                    'ball_detected': ball_detected,
+                    'ball_pos': latest_ball,
+                })
+            except Exception:
+                break
+
+        time.sleep(0.005)
 
 
 def execute_multiprocessing(use_camera=False, camera_id=2, modules=None):
@@ -64,6 +117,11 @@ def execute_multiprocessing(use_camera=False, camera_id=2, modules=None):
         if modules is None:
             modules = {'perception': True, 'path_planning': True, 'full': True}
 
+        enable_decision = modules.get('decision', False)
+        if enable_decision and modules.get('path_planning', False):
+            log.warning("Modulos 'decision' y 'path_planning' no pueden correr "
+                        "simultaneamente (comparten pipes). Se omite path_planning.")
+
         # Log de configuración
         log.info("=" * 70)
         log.info("ROBOT SOCCER - CONFIGURACIÓN DE MÓDULOS")
@@ -77,7 +135,8 @@ def execute_multiprocessing(use_camera=False, camera_id=2, modules=None):
             log.info(f"Modo: Solo captura de video (sin procesamiento)")
         else:
             log.info(f"Módulo Percepción: {'✅' if modules['perception'] else '❌'}")
-            log.info(f"Módulo Planificación: {'✅' if modules['path_planning'] else '❌'}")
+            log.info(f"Módulo Planificación: {'✅' if modules.get('path_planning') else '❌'}")
+            log.info(f"Módulo Decisión:     {'✅' if enable_decision else '❌'}")
         log.info("=" * 70)
 
         # Crear shared memory con double buffering para frames
@@ -103,8 +162,9 @@ def execute_multiprocessing(use_camera=False, camera_id=2, modules=None):
 
         # PROCESO 1: Fuente de video (simulación o cámara)
         # Determinar qué pipes habilitar según los módulos activos
-        enable_perception = modules['perception']
-        enable_planning = modules['path_planning']
+        enable_perception = modules.get('perception', False)
+        # decision necesita que perception envíe datos (enable_planning=True en busqueda_*)
+        enable_planning = modules.get('path_planning', False) or enable_decision
 
         if use_camera:
             log.info("Inicializando cámara física...")
@@ -144,7 +204,7 @@ def execute_multiprocessing(use_camera=False, camera_id=2, modules=None):
             processes.append(p3)
 
         # PROCESO DE PLANIFICACIÓN
-        if modules['path_planning']:
+        if modules.get('path_planning', False) and not enable_decision:
             log.info("Inicializando módulo de planificación...")
 
             # PROCESO 4: Planificación de trayectorias
@@ -154,6 +214,34 @@ def execute_multiprocessing(use_camera=False, camera_id=2, modules=None):
                 name="PathPlanning"
             )
             processes.append(p4)
+
+        # PROCESO DE DECISIÓN (BehaviorManager)
+        if enable_decision:
+            log.info("Inicializando módulo de decision (BehaviorManager)...")
+
+            robot_id_dec = modules.get('decision_robot_id', 0)
+            serial_port_dec = modules.get('decision_serial_port', '/dev/ttyUSB0')
+            team_dec = modules.get('decision_team', 'red')
+
+            dec_perc_send, dec_perc_recv = multiprocessing.Pipe()
+            dec_viz_send, dec_viz_recv = multiprocessing.Pipe()   # no usado en game loop
+            dec_kbd_send, dec_kbd_recv = multiprocessing.Pipe()   # sin teclado en game loop
+
+            # Adapter: convierte player_received + ball_received → dec_perc_send
+            p_adapter = multiprocessing.Process(
+                target=_decision_perception_adapter,
+                args=(player_received, ball_received, dec_perc_send, robot_id_dec),
+                name="DecisionAdapter"
+            )
+            processes.append(p_adapter)
+
+            p_decision = multiprocessing.Process(
+                target=decision_process,
+                args=(dec_perc_recv, dec_viz_send, dec_kbd_recv,
+                      robot_id_dec, serial_port_dec, team_dec),
+                name="Decision"
+            )
+            processes.append(p_decision)
 
         # Iniciar todos los procesos
         log.info("")
