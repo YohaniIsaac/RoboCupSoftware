@@ -35,6 +35,7 @@ from robot_soccer.config import (
     ADVANCE_MAX_TIME_S,
     ADVANCE_BALL_DRIFT_DEG,
     DEFENDER_WAIT_MAX_S,
+    POST_KICK_COOLDOWN_S,
 )
 
 from .base import (
@@ -1277,13 +1278,13 @@ def _move_behind_ball_start(blackboard):
 
     # Fast path: si estamos cerca de la pelota Y la pelota está entre el robot
     # y el arco Y el robot está mirando hacia la pelota → saltar Phase 1.
-    # Caso típico: post-kick fallido, la pelota sigue al frente del robot.
-    # Se requieren 3 condiciones:
-    #   1. Proximidad: dist < BEHIND_BALL_APPROACH_PX
-    #   2. Geometría: pelota en dirección al arco (alignment < 30°)
-    #   3. Heading:   robot mirando hacia la pelota (err < 2x tolerancia)
+    # Caso típico: robot ya bien posicionado sin haber pateado recientemente.
+    # BLOQUEADO durante POST_KICK_COOLDOWN_S tras un pateo para forzar
+    # reposicionamiento físico (sin cooldown el robot queda en ciclo de 0.1s).
     dist_to_ball = float(np.linalg.norm(ball_pos - player_pos))
-    if dist_to_ball <= BEHIND_BALL_APPROACH_PX:
+    secs_since_kick = time.time() - getattr(blackboard, '_last_kick_time', 0.0)
+    fast_path_allowed = secs_since_kick >= POST_KICK_COOLDOWN_S
+    if fast_path_allowed and dist_to_ball <= BEHIND_BALL_APPROACH_PX:
         ang_to_ball = float(np.degrees(np.arctan2(
             ball_pos[1] - player_pos[1], ball_pos[0] - player_pos[0])))
         ang_to_goal = float(np.degrees(np.arctan2(
@@ -1660,6 +1661,7 @@ def kick_immediately(blackboard):
         ball.dy = 15.0 * direction[1]
 
     blackboard.player._has_ball = False
+    blackboard._last_kick_time  = time.time()  # bloquea fast-path en move_behind_ball
     blackboard.last_action = "kick_immediately"
     robot_status_logger.emit_event(
         blackboard.player.id,

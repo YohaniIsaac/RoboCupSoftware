@@ -436,7 +436,9 @@ CAPTURE_CREEP_SPEED_PWM = 18  # PWM — velocidad máxima lineal durante PID de 
 # Tiempo de espera (segundos) tras confirmar contacto con la pelota.
 # Permite que la pelota se acomode contra el robot antes de disparar.
 # Si la pelota escapa durante este tiempo, el ciclo se reinicia.
-CONTACT_SETTLE_TIME_S = 0.3  # s — espera de asentamiento antes del disparo
+CONTACT_SETTLE_TIME_S  = 0.3  # s — espera de asentamiento antes del disparo
+POST_KICK_COOLDOWN_S   = 0.8  # s — cooldown tras patear antes de poder detectar contacto
+                               #     inmediato de nuevo. Fuerza reposicionamiento físico.
 
 # Factores de escape para detectar que la pelota se alejó demasiado.
 # Durante avance: dist > BEHIND_BALL_APPROACH_PX * ADVANCE_ESCAPE_FACTOR → abortar
