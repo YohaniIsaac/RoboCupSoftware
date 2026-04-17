@@ -173,8 +173,13 @@ BT_DEFENDER_WAIT_RATIO = 0.20
 DEFENDER_WAIT_MAX_S = 5.0  # s — timeout máximo de espera del defensor
 BT_DRIBBLE_SPACING_RATIO = 0.08
 BT_DRIBBLE_GOAL_RATIO = 0.133
-BT_DEFENSIVE_ARRIVAL_RATIO = 0.02
+BT_DEFENSIVE_ARRIVAL_RATIO = 0.05   # 32px — umbral de llegada al punto defensivo
 BT_ATTACKER_PRIORITY_MARGIN_RATIO = 0.133
+
+# Arbitraje dinámico de roles
+BT_ROLE_SWITCH_HYSTERESIS  = 1.3   # El rival debe ser ×1.3 más cercano para robar el rol
+BT_ROLE_COMMITMENT_RATIO   = 0.23  # ratio → ~147px: si atacante está a <N px no se cambia rol
+BT_ROLE_SWITCH_COOLDOWN_S  = 3.0   # s — tiempo mínimo entre cambios de rol
 
 # ==========================================
 # Configuración de los robots

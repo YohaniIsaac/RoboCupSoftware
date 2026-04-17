@@ -200,15 +200,39 @@ class RobotCommandManager:
 
                         # 1. Consumir path nuevo si llegó del planner
                         try:
-                            result   = self._path_queues[player_id].get_nowait()
-                            new_path = result.get('path', [])
-                            if new_path and result.get('goal') == goal:
+                            result      = self._path_queues[player_id].get_nowait()
+                            new_path    = result.get('path', [])
+                            result_goal = result.get('goal') or (0, 0)
+                            goal_drift  = math.hypot(result_goal[0] - goal[0],
+                                                     result_goal[1] - goal[1])
+                            # Bug 3: comparación fuzzy (tolerancia 2×ARRIVAL) en vez de igualdad exacta.
+                            # Permite adoptar paths planificados para un goal cercano al actual.
+                            if new_path and goal_drift < RRT_WAYPOINT_ARRIVAL_PX * 2:
                                 wp_idx = path_closest_waypoint_idx(new_path, player.x, player.y)
-                                self._current_paths[player_id]  = new_path
-                                self._current_wp_idx[player_id] = wp_idx
-                                self.controllers[player_id]._pid_state.pop(player_id, None)
-                                log.info("R%d: path adoptado %d wp (desde idx %d)",
-                                         player_id, len(new_path), wp_idx)
+                                # Bug 1: saltar wps triviales al inicio para no enviar PWM=0.
+                                # move_to_position para wp[0]=robot_pos causaba "WAYPOINT ALCANZADO
+                                # dist=0.0px" + stop de motor en cada adopción de path.
+                                while wp_idx < len(new_path) - 1:
+                                    d = math.hypot(player.x - new_path[wp_idx][0],
+                                                   player.y - new_path[wp_idx][1])
+                                    if d < RRT_WAYPOINT_ARRIVAL_PX:
+                                        wp_idx += 1
+                                    else:
+                                        break
+                                # Descartar path si el único wp restante está en la posición actual
+                                # (cubre el caso len=1 y cualquier path donde todos los wps son triviales).
+                                # Sin este check, move_to_position con dist=0 enviaba PWM=0 → motor stop.
+                                last_d = math.hypot(player.x - new_path[wp_idx][0],
+                                                    player.y - new_path[wp_idx][1])
+                                if wp_idx == len(new_path) - 1 and last_d < RRT_WAYPOINT_ARRIVAL_PX:
+                                    log.debug("R%d: path trivial descartado (único wp restante "
+                                              "a %.0fpx)", player_id, last_d)
+                                else:
+                                    self._current_paths[player_id]  = new_path
+                                    self._current_wp_idx[player_id] = wp_idx
+                                    self.controllers[player_id]._pid_state.pop(player_id, None)
+                                    log.info("R%d: path adoptado %d wp (desde idx %d)",
+                                             player_id, len(new_path), wp_idx)
                         except Exception:
                             pass
 
@@ -216,16 +240,30 @@ class RobotCommandManager:
                         last_goal = self._last_sent_goal.get(player_id)
                         last_pos  = self._last_sent_pos.get(player_id)
                         need_replan = False
-                        if last_goal != goal:
-                            need_replan = True   # goal cambió
+                        # Bug 2b: comparación por distancia en vez de igualdad exacta.
+                        # Evita replans continuos por jitter mínimo del goal (pelota que tiembla <20px).
+                        if last_goal is None or math.hypot(
+                                last_goal[0] - goal[0],
+                                last_goal[1] - goal[1]) > RRT_WAYPOINT_ARRIVAL_PX:
+                            need_replan = True   # goal cambió significativamente
                         elif (last_pos is None or
                               math.hypot(cur_pos[0] - last_pos[0],
                                          cur_pos[1] - last_pos[1]) > RRT_REPLAN_POSITION_PX):
                             if now - self._last_replan_t.get(player_id, 0) >= RRT_REPLAN_COOLDOWN_S:
                                 need_replan = True   # robot se alejó del punto enviado
+                        # Bug 5: cooldown también para obstacles_moved (antes no lo tenía).
                         elif obstacles_moved(self._last_obs_pos.get(player_id, {}),
                                              obs_dicts, player_id, RRT_OBSTACLE_MOVE_PX):
-                            need_replan = True   # un obstáculo se movió
+                            if now - self._last_replan_t.get(player_id, 0) >= RRT_REPLAN_COOLDOWN_S:
+                                need_replan = True   # un obstáculo robot se movió
+                        # Bug 4: pelota no estaba en obs_dicts → no se detectaba su movimiento.
+                        elif self._ball_pos is not None:
+                            last_ball = self._last_obs_pos.get(player_id, {}).get('_ball')
+                            if last_ball is not None and math.hypot(
+                                    self._ball_pos[0] - last_ball[0],
+                                    self._ball_pos[1] - last_ball[1]) > RRT_OBSTACLE_MOVE_PX:
+                                if now - self._last_replan_t.get(player_id, 0) >= RRT_REPLAN_COOLDOWN_S:
+                                    need_replan = True   # pelota se movió significativamente
 
                         if need_replan:
                             pipe = self._plan_pipes[player_id]
@@ -240,9 +278,12 @@ class RobotCommandManager:
                                 self._last_sent_pos[player_id]  = cur_pos
                                 self._last_sent_goal[player_id] = goal
                                 self._last_replan_t[player_id]  = now
-                                self._last_obs_pos[player_id]   = {
+                                self._last_obs_pos[player_id] = {
                                     r['id']: (r['x'], r['y']) for r in obs_dicts
                                 }
+                                # Bug 4: guardar pelota para detectar si se mueve hacia el camino
+                                if self._ball_pos is not None:
+                                    self._last_obs_pos[player_id]['_ball'] = self._ball_pos
                                 log.debug("R%d: replan solicitado → %s", player_id, goal)
                             except Exception as e:
                                 log.warning("R%d: error enviando replan: %s", player_id, e)
@@ -265,10 +306,19 @@ class RobotCommandManager:
                                     arrived = True
                             if arrived:
                                 if is_last:
-                                    del self.actions_in_progress[player_id]
+                                    # Limpiar path siempre al terminar el último waypoint
                                     self._current_paths.pop(player_id, None)
                                     self._current_wp_idx.pop(player_id, None)
-                                    log.info("R%d: llegó al objetivo (último wp)", player_id)
+                                    # Solo completar la acción si este path apuntaba al goal actual.
+                                    # Si el goal cambió (path obsoleto), mantener la acción activa
+                                    # y dejar que el PID directo lleve al robot mientras llega el nuevo plan.
+                                    dist_wp_to_goal = math.hypot(wp[0] - goal[0], wp[1] - goal[1])
+                                    if dist_wp_to_goal < RRT_WAYPOINT_ARRIVAL_PX:
+                                        del self.actions_in_progress[player_id]
+                                        log.info("R%d: llegó al objetivo (último wp)", player_id)
+                                    else:
+                                        log.debug("R%d: path obsoleto (last wp a %.0fpx del goal actual), "
+                                                  "esperando nuevo plan", player_id, dist_wp_to_goal)
                                 else:
                                     self._current_wp_idx[player_id] = wp_idx + 1
                                     self.controllers[player_id]._pid_state.pop(player_id, None)
@@ -387,10 +437,13 @@ class RobotCommandManager:
                 return  # Mismo destino, dejar que el PID continúe
         log.debug("[Guard:move] Robot %i: nuevo target aceptado → %s", player_id, target_pos)
 
-        # Nuevo target → invalidar path anterior para forzar replanificación
-        self._current_paths.pop(player_id, None)
-        self._current_wp_idx.pop(player_id, None)
-        self._last_sent_goal.pop(player_id, None)
+        # Bug 2a: solo limpiar _last_sent_goal si el nuevo goal difiere significativamente del
+        # último planificado. Evita replans innecesarios cuando behind_pos jitters <20px entre ticks.
+        last_planned = self._last_sent_goal.get(player_id)
+        if last_planned is None or math.hypot(
+            target_pos[0] - last_planned[0], target_pos[1] - last_planned[1]
+        ) > RRT_WAYPOINT_ARRIVAL_PX:
+            self._last_sent_goal.pop(player_id, None)  # forzar replan solo si cambio significativo
 
         self.actions_in_progress[player_id] = {
             'type': 'move',

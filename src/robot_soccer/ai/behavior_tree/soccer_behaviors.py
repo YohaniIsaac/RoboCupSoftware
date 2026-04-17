@@ -1772,16 +1772,12 @@ def create_defender_tree():
                     ActionNode(dribble_forward, "AvanzarConPelota"),
                 ),
             ),
-            # Si la pelota está libre en zona neutral, intentar capturarla
-            SequenceNode("CapturarPelotaNeutral").add_children(
-                ConditionNode(is_ball_in_neutral_zone, "PelotaEnZonaNeutral"),
-                ConditionNode(is_ball_free, "PelotaLibre"),
-                ConditionNode(is_closest_defender_to_ball, "DefensorMasCercano"),
-                ConditionNode(is_no_attacker_closer_to_ball, "NoHayAtacanteMasCerca"),
-                create_move_to_ball_node(),
-                ActionNode(capture_ball, "CapturarPelota"),
-            ),
             # Mantener posición defensiva
+            # Nota: el rol ATACANTE se asigna dinámicamente en BehaviorManager._update_roles().
+            # Si el defensor es el robot más cercano a la pelota, el role switcher lo convierte
+            # en atacante y usa la secuencia completa (move_behind_ball → advance → capture).
+            # CapturarPelotaNeutral fue eliminado: usaba MoverHaciaPelota (directo a la pelota)
+            # sin la secuencia correcta, causando que el robot pasara por encima de la pelota.
             ActionNode(move_to_defensive_position, "MantenerPosicionDefensiva"),
         ),
     )
