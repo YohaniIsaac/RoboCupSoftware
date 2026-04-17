@@ -1285,10 +1285,10 @@ def _move_behind_ball_start(blackboard):
     if secs_since_kick < POST_KICK_COOLDOWN_S and dist_to_ball < BEHIND_BALL_APPROACH_PX:
         blackboard._behind_ball_phase = 'retreat'
         blackboard._behind_ball_ref   = ball_pos.copy()
-        blackboard.command_manager.creep_forward(player_id, speed=-CAPTURE_CREEP_SPEED_PWM)
+        blackboard.command_manager.creep_forward(blackboard.player.id, speed=-CAPTURE_CREEP_SPEED_PWM)
         blackboard.last_action = "retreating_from_ball"
         robot_status_logger.emit_event(
-            player_id,
+            blackboard.player.id,
             f"behind_ball RETROCESO: dist_bola={dist_to_ball:.0f}px -> alejarse antes de rotar"
         )
         return NodeStatus.RUNNING
