@@ -1085,6 +1085,7 @@ def move_to_defensive_position(blackboard):
             )
             blackboard.last_action = "orienting_to_ball"
             return NodeStatus.RUNNING
+        blackboard.last_action = "in_defensive_position"
         return NodeStatus.SUCCESS
 
     # No estamos en posición: ordenar movimiento
