@@ -461,6 +461,17 @@ def decision_process(
             time.sleep(0.01)  # ~100 Hz
 
     finally:
+        # Resetear tablero antes de cerrar la conexión RF
+        if robot_available:
+            try:
+                rf = behavior_manager.command_manager.rf_controller
+                if rf and rf.serial_manager.is_connected:
+                    rf.send_tablero(4)   # reset goles → 0:0
+                    rf.send_tablero(5)   # reset tiempo → minutos preestablecidos
+                    time.sleep(0.15)     # dar tiempo al worker serial para enviar
+                    log.info("Tablero: goles y tiempo reseteados al cerrar")
+            except Exception:
+                pass
         for proc in _planner_procs.values():
             proc.terminate()
             proc.join(timeout=1.0)
