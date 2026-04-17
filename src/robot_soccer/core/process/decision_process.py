@@ -313,6 +313,8 @@ def decision_process(
                 if p.id in players_initialized
             ]
             behavior_manager.command_manager.update_robot_data(_all_robot_data)
+            if ball_initialized:
+                behavior_manager.command_manager.update_ball_data(ball.x, ball.y)
 
             # --- Ejecutar árbol de comportamiento ---
             # Requiere que TODOS los robots hayan sido detectados al menos una vez

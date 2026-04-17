@@ -9,6 +9,8 @@ from robot_soccer.config import (
     DRIBBLER_HOLD_POWER,
     CAPTURE_CREEP_SPEED_PWM,
     PATH_PLANNING_ROBOT_OBSTACLE_RADIUS,
+    PATH_PLANNING_BALL_OBSTACLE_RADIUS,
+    CAPTURE_ACTIVATE_DISTANCE_PX,
     RRT_WAYPOINT_ARRIVAL_PX,
     RRT_REPLAN_POSITION_PX,
     RRT_REPLAN_COOLDOWN_S,
@@ -115,6 +117,7 @@ class RobotCommandManager:
         self._last_replan_t:  dict = {}  # player_id → float timestamp
         self._last_obs_pos:   dict = {}  # player_id → {robot_id: (x,y)}
         self._all_robot_data: list = []  # [{id,x,y}, ...] actualizado cada frame
+        self._ball_pos: tuple | None = None  # (x, y) de la pelota, actualizado cada frame
 
     def shutdown(self):
         """Cierra las conexiones y detiene todos los robots.
@@ -141,6 +144,10 @@ class RobotCommandManager:
     def update_robot_data(self, all_robot_data: list):
         """Actualiza posiciones de todos los robots para construir obstacles del planner."""
         self._all_robot_data = all_robot_data
+
+    def update_ball_data(self, ball_x: float, ball_y: float):
+        """Actualiza posición de la pelota para usarla como obstáculo en el planner."""
+        self._ball_pos = (int(ball_x), int(ball_y))
 
     def execute_commands(self):
         """Ejecuta los comandos pendientes para todos los robots del equipo.
@@ -179,6 +186,17 @@ class RobotCommandManager:
                             [r['x'], r['y'], PATH_PLANNING_ROBOT_OBSTACLE_RADIUS]
                             for r in obs_dicts
                         ]
+
+                        # Incluir pelota como obstáculo si el goal está lejos de ella
+                        # (excluir en fase de captura directa donde el robot DEBE llegar a la pelota)
+                        if self._ball_pos is not None:
+                            dist_goal_ball = math.hypot(
+                                goal[0] - self._ball_pos[0],
+                                goal[1] - self._ball_pos[1],
+                            )
+                            if dist_goal_ball > CAPTURE_ACTIVATE_DISTANCE_PX:
+                                obstacles.append([self._ball_pos[0], self._ball_pos[1],
+                                                  PATH_PLANNING_BALL_OBSTACLE_RADIUS])
 
                         # 1. Consumir path nuevo si llegó del planner
                         try:
