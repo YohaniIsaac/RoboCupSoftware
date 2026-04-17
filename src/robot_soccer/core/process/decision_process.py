@@ -216,6 +216,12 @@ def decision_process(
                                 if ctrl:
                                     ctrl.max_linear_pwm_override = None
                                 behavior_manager.command_manager.actions_in_progress.pop(p.id, None)
+                    elif command == 'tablero':
+                        cmd_num = cmd.get('cmd')
+                        if cmd_num and robot_available:
+                            rf = behavior_manager.command_manager.rf_controller
+                            if rf:
+                                rf.send_tablero(cmd_num)
                 except Exception:
                     pass
 

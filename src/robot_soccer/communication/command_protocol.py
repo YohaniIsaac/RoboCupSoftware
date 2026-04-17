@@ -121,3 +121,27 @@ class RobotCommandProtocol:
             'M,1,0,0'
         """
         return f"M,{robot_id},0,0"
+
+    @staticmethod
+    def format_tablero_command(cmd_num):
+        """Formatea un comando para el tablero de puntuación.
+
+        El transmisor lo convierte a un paquete RF de 3 bytes ['G', cmd, 0]
+        enviado a la dirección "00001" del tablero.
+
+        Args:
+            cmd_num (int): Número de comando (1-5).
+                1 = toggle pausa/resume del cronómetro
+                2 = gol equipo 1 (rojo)
+                3 = gol equipo 2 (azul)
+                4 = reset goles
+                5 = reset cronómetro
+
+        Returns:
+            str: Comando formateado "T{n}".
+
+        Example:
+            >>> RobotCommandProtocol.format_tablero_command(2)
+            'T2'
+        """
+        return f"T{cmd_num}"

@@ -304,6 +304,24 @@ class RFController:
 
         return success
 
+    def send_tablero(self, cmd_num):
+        """Envía un comando al tablero de puntuación.
+
+        Args:
+            cmd_num (int): 1=toggle_pausa, 2=gol_eq1, 3=gol_eq2,
+                           4=reset_goles, 5=reset_tiempo
+
+        Returns:
+            bool: True si el comando se encoló correctamente.
+        """
+        command = self.protocol.format_tablero_command(cmd_num)
+        # Cola normal: los comandos de tablero son eventos puntuales,
+        # no deben limpiar la cola de comandos de motores.
+        success = self.serial_manager.send_command(command)
+        if success:
+            log.info("Tablero: cmd=%d enviado", cmd_num)
+        return success
+
     def test_connections(self):
         """Prueba la conexión RF con todos los dispositivos.
 
