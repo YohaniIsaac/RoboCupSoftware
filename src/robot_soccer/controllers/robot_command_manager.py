@@ -1,7 +1,23 @@
+import math
 import time
 import logging
 import numpy as np
-from robot_soccer.config import FIELD_SIM, DRIBBLE_PWM_FACTOR, DRIBBLER_CAPTURE_POWER, DRIBBLER_HOLD_POWER, CAPTURE_CREEP_SPEED_PWM
+from robot_soccer.config import (
+    FIELD_SIM,
+    DRIBBLE_PWM_FACTOR,
+    DRIBBLER_CAPTURE_POWER,
+    DRIBBLER_HOLD_POWER,
+    CAPTURE_CREEP_SPEED_PWM,
+    PATH_PLANNING_ROBOT_OBSTACLE_RADIUS,
+    RRT_WAYPOINT_ARRIVAL_PX,
+    RRT_REPLAN_POSITION_PX,
+    RRT_REPLAN_COOLDOWN_S,
+    RRT_OBSTACLE_MOVE_PX,
+)
+from robot_soccer.ai.path_planning.tools_for_path_planing import (
+    path_closest_waypoint_idx,
+    obstacles_moved,
+)
 from robot_soccer.controllers.differential_drive import DifferentialDriveController
 from robot_soccer.controllers.robot_action_executor import RobotActionExecutor
 from robot_soccer.communication.rf_controller import RFController
@@ -88,6 +104,18 @@ class RobotCommandManager:
         # Memoria de acciones en curso
         self.actions_in_progress = {}
 
+        # Path planning: canales de comunicación con planning_worker subprocesses
+        self._plan_pipes:  dict = {}   # player_id → Pipe
+        self._path_queues: dict = {}   # player_id → Queue
+        # Estado de seguimiento de path por robot
+        self._current_paths:  dict = {}  # player_id → [(x,y), ...]
+        self._current_wp_idx: dict = {}  # player_id → int
+        self._last_sent_pos:  dict = {}  # player_id → (x,y)
+        self._last_sent_goal: dict = {}  # player_id → (x,y)
+        self._last_replan_t:  dict = {}  # player_id → float timestamp
+        self._last_obs_pos:   dict = {}  # player_id → {robot_id: (x,y)}
+        self._all_robot_data: list = []  # [{id,x,y}, ...] actualizado cada frame
+
     def shutdown(self):
         """Cierra las conexiones y detiene todos los robots.
 
@@ -104,6 +132,15 @@ class RobotCommandManager:
                 self.rf_controller.stop_robot(firmware_id)
 
             self.rf_controller.shutdown()
+
+    def set_planning_channels(self, plan_pipes: dict, path_queues: dict):
+        """Conecta los pipes/queues de los subprocesos planning_worker."""
+        self._plan_pipes  = plan_pipes
+        self._path_queues = path_queues
+
+    def update_robot_data(self, all_robot_data: list):
+        """Actualiza posiciones de todos los robots para construir obstacles del planner."""
+        self._all_robot_data = all_robot_data
 
     def execute_commands(self):
         """Ejecuta los comandos pendientes para todos los robots del equipo.
@@ -126,18 +163,120 @@ class RobotCommandManager:
                 action = self.actions_in_progress[player.id]
 
                 if action['type'] == 'move':
-                    # Movimiento a una posición
-                    is_completed = self.controllers[player.id].move_to_position(
-                        player,
-                        action['target_pos'],
-                        action.get('target_angle')
-                    )
+                    target_pos   = action['target_pos']
+                    target_angle = action.get('target_angle')
+                    player_id    = player.id
 
-                    if is_completed:
-                        # Acción completada, eliminar de la lista
-                        del self.actions_in_progress[player.id]
-                        log.info("Robot %i: Completado movimiento a %s",
-                                 player.id, action['target_pos'])
+                    if player_id in self._plan_pipes:
+                        # ── PATH PLANNING MODE ─────────────────────────────────────────
+                        now     = time.time()
+                        cur_pos = (int(player.x), int(player.y))
+                        goal    = (int(target_pos[0]), int(target_pos[1]))
+
+                        # Construir lista de obstáculos: todos los robots excepto yo
+                        obs_dicts = [r for r in self._all_robot_data if r['id'] != player_id]
+                        obstacles = [
+                            [r['x'], r['y'], PATH_PLANNING_ROBOT_OBSTACLE_RADIUS]
+                            for r in obs_dicts
+                        ]
+
+                        # 1. Consumir path nuevo si llegó del planner
+                        try:
+                            result   = self._path_queues[player_id].get_nowait()
+                            new_path = result.get('path', [])
+                            if new_path and result.get('goal') == goal:
+                                wp_idx = path_closest_waypoint_idx(new_path, player.x, player.y)
+                                self._current_paths[player_id]  = new_path
+                                self._current_wp_idx[player_id] = wp_idx
+                                self.controllers[player_id]._pid_state.pop(player_id, None)
+                                log.info("R%d: path adoptado %d wp (desde idx %d)",
+                                         player_id, len(new_path), wp_idx)
+                        except Exception:
+                            pass
+
+                        # 2. Decidir si hay que pedir replan
+                        last_goal = self._last_sent_goal.get(player_id)
+                        last_pos  = self._last_sent_pos.get(player_id)
+                        need_replan = False
+                        if last_goal != goal:
+                            need_replan = True   # goal cambió
+                        elif (last_pos is None or
+                              math.hypot(cur_pos[0] - last_pos[0],
+                                         cur_pos[1] - last_pos[1]) > RRT_REPLAN_POSITION_PX):
+                            if now - self._last_replan_t.get(player_id, 0) >= RRT_REPLAN_COOLDOWN_S:
+                                need_replan = True   # robot se alejó del punto enviado
+                        elif obstacles_moved(self._last_obs_pos.get(player_id, {}),
+                                             obs_dicts, player_id, RRT_OBSTACLE_MOVE_PX):
+                            need_replan = True   # un obstáculo se movió
+
+                        if need_replan:
+                            pipe = self._plan_pipes[player_id]
+                            try:
+                                while pipe.poll():
+                                    pipe.recv()
+                                pipe.send({
+                                    'robot_pos': cur_pos,
+                                    'goal_pos':  goal,
+                                    'obstacles': obstacles,
+                                })
+                                self._last_sent_pos[player_id]  = cur_pos
+                                self._last_sent_goal[player_id] = goal
+                                self._last_replan_t[player_id]  = now
+                                self._last_obs_pos[player_id]   = {
+                                    r['id']: (r['x'], r['y']) for r in obs_dicts
+                                }
+                                log.debug("R%d: replan solicitado → %s", player_id, goal)
+                            except Exception as e:
+                                log.warning("R%d: error enviando replan: %s", player_id, e)
+
+                        # 3. Ejecutar movimiento
+                        path   = self._current_paths.get(player_id, [])
+                        wp_idx = self._current_wp_idx.get(player_id, 0)
+
+                        if path and wp_idx < len(path):
+                            # Seguir waypoint activo del path planificado
+                            wp      = path[wp_idx]
+                            is_last = (wp_idx == len(path) - 1)
+                            arrived = self.controllers[player_id].move_to_position(
+                                player, wp, target_angle
+                            )
+                            # Umbral relajado en waypoints intermedios
+                            if not is_last:
+                                dist = math.hypot(player.x - wp[0], player.y - wp[1])
+                                if dist < RRT_WAYPOINT_ARRIVAL_PX:
+                                    arrived = True
+                            if arrived:
+                                if is_last:
+                                    del self.actions_in_progress[player_id]
+                                    self._current_paths.pop(player_id, None)
+                                    self._current_wp_idx.pop(player_id, None)
+                                    log.info("R%d: llegó al objetivo (último wp)", player_id)
+                                else:
+                                    self._current_wp_idx[player_id] = wp_idx + 1
+                                    self.controllers[player_id]._pid_state.pop(player_id, None)
+                                    log.debug("R%d: wp %d/%d alcanzado",
+                                              player_id, wp_idx + 1, len(path))
+                        else:
+                            # Fallback: PID directo mientras llega el primer path
+                            is_completed = self.controllers[player_id].move_to_position(
+                                player, target_pos, target_angle
+                            )
+                            if is_completed:
+                                del self.actions_in_progress[player_id]
+                                log.info("Robot %i: Completado movimiento a %s (directo)",
+                                         player_id, target_pos)
+
+                    else:
+                        # Sin planner configurado: comportamiento original
+                        is_completed = self.controllers[player.id].move_to_position(
+                            player,
+                            action['target_pos'],
+                            action.get('target_angle')
+                        )
+                        if is_completed:
+                            del self.actions_in_progress[player.id]
+                            log.info("Robot %i: Completado movimiento a %s",
+                                     player.id, action['target_pos'])
 
                 elif action['type'] == 'rotate':
                     # Rotación a un ángulo
@@ -229,6 +368,11 @@ class RobotCommandManager:
                 log.debug("[Guard:move] Robot %i: comando ignorado (mismo target, delta=%.1fpx)", player_id, delta)
                 return  # Mismo destino, dejar que el PID continúe
         log.debug("[Guard:move] Robot %i: nuevo target aceptado → %s", player_id, target_pos)
+
+        # Nuevo target → invalidar path anterior para forzar replanificación
+        self._current_paths.pop(player_id, None)
+        self._current_wp_idx.pop(player_id, None)
+        self._last_sent_goal.pop(player_id, None)
 
         self.actions_in_progress[player_id] = {
             'type': 'move',

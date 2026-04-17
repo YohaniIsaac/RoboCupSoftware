@@ -22,6 +22,8 @@ from robot_soccer.entities.player import Player
 from robot_soccer.entities.ball import Ball
 from robot_soccer.ai.behavior_tree.manager import BehaviorManager
 from robot_soccer.utils.robot_logger import robot_status_logger
+from multiprocessing import Process, Pipe, Queue as MPQueue
+from robot_soccer.core.process.planning_worker import planning_worker
 from robot_soccer.config import (
     ROL_ATACANTE,
     ROL_DEFENSIVO,
@@ -30,6 +32,7 @@ from robot_soccer.config import (
     DRIBBLER_HOLD_POWER,
     DRIBBLER_PULSE_ON_MS,
     DRIBBLER_PULSE_OFF_MS,
+    PATH_PLANNING_OBSTACLE_CLEARANCE,
 )
 
 log = logging.getLogger(__name__)
@@ -92,6 +95,28 @@ def decision_process(
     except Exception as e:
         log.error("Error inicializando BehaviorManager: %s", e)
         return
+
+    # --- Inicializar planners RRT* (un subprocess por robot) ---
+    _plan_pipes    = {}   # player_id → pipe padre
+    _path_queues   = {}   # player_id → Queue con el último path calculado
+    _planner_procs = {}   # player_id → Process
+
+    for pid in robot_ids:
+        parent_conn, child_conn = Pipe()
+        pq = MPQueue(maxsize=1)
+        proc = Process(
+            target=planning_worker,
+            args=(child_conn, pq, PATH_PLANNING_OBSTACLE_CLEARANCE),
+            daemon=True,
+            name=f"Planner-R{pid}",
+        )
+        proc.start()
+        _plan_pipes[pid]    = parent_conn
+        _path_queues[pid]   = pq
+        _planner_procs[pid] = proc
+        log.info("Planner RRT* iniciado para robot %d (PID=%d)", pid, proc.pid)
+
+    behavior_manager.command_manager.set_planning_channels(_plan_pipes, _path_queues)
 
     players_initialized = set()   # IDs de robots detectados al menos una vez
     ball_initialized = False
@@ -281,6 +306,14 @@ def decision_process(
             for p in players:
                 prev_has_ball[p.id] = p._has_ball
 
+            # --- Actualizar posiciones de todos los robots para el planner ---
+            _all_robot_data = [
+                {'id': p.id, 'x': p.x, 'y': p.y}
+                for p in players
+                if p.id in players_initialized
+            ]
+            behavior_manager.command_manager.update_robot_data(_all_robot_data)
+
             # --- Ejecutar árbol de comportamiento ---
             # Requiere que TODOS los robots hayan sido detectados al menos una vez
             all_initialized = players_initialized.issuperset(set(robot_ids))
@@ -420,6 +453,9 @@ def decision_process(
             time.sleep(0.01)  # ~100 Hz
 
     finally:
+        for proc in _planner_procs.values():
+            proc.terminate()
+            proc.join(timeout=1.0)
         try:
             behavior_manager.shutdown()
         except Exception:

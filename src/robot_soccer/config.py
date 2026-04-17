@@ -204,6 +204,10 @@ RRT_SEARCH_RADIUS = 5       # Radio de búsqueda
 RRT_ITER_MAX = 10000        # Número máximo de iteraciones
 PATH_PLANNING_OBSTACLE_CLEARANCE = 45    # Margen de seguridad (px) añadido a cada obstáculo
 PATH_PLANNING_ROBOT_OBSTACLE_RADIUS = 45 # Radio (px) con que se modela cada robot como obstáculo
+RRT_WAYPOINT_ARRIVAL_PX  = 20    # px — umbral de llegada a waypoints intermedios
+RRT_REPLAN_POSITION_PX   = 80    # px — trigger replan si robot se aleja >N px del punto enviado
+RRT_REPLAN_COOLDOWN_S    = 2.0   # s  — tiempo mínimo entre replans por posición
+RRT_OBSTACLE_MOVE_PX     = 40    # px — trigger replan si un obstáculo se mueve >N px
 
 # ==========================================
 # Configuración de la simulación
