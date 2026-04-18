@@ -57,7 +57,9 @@ SHM_NAME = "robot_chase_ball"
 # =============================================================================
 
 def perception_process(control_pipe, viz_pipe, robot_id, camera_id,
-                       shm_name, frame_counter):
+                       shm_name, frame_counter,
+                       total_frames_val=None, robot_detections_val=None,
+                       ball_detections_val=None):
     """Detecta robot (ArUco) y pelota (HSV) en cada frame."""
     import cv2
     import numpy as np
@@ -115,6 +117,9 @@ def perception_process(control_pipe, viz_pipe, robot_id, camera_id,
                 frame = raw_frame
 
             frame_count += 1
+            if total_frames_val is not None:
+                with total_frames_val.get_lock():
+                    total_frames_val.value += 1
 
             # --- Detectar robot (ArUco) ---
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -134,6 +139,9 @@ def perception_process(control_pipe, viz_pipe, robot_id, camera_id,
                         robot_data = {'x': cx, 'y': cy, 'angulo': angle}
                         robot_detected = True
                         detect_count += 1
+                        if robot_detections_val is not None:
+                            with robot_detections_val.get_lock():
+                                robot_detections_val.value += 1
                         break
 
             # --- Detectar pelota (HSV) ---
@@ -157,6 +165,9 @@ def perception_process(control_pipe, viz_pipe, robot_id, camera_id,
                         ball_pos = (int(bx), int(by))
                         ball_detected = True
                         ball_detect_count += 1
+                        if ball_detections_val is not None:
+                            with ball_detections_val.get_lock():
+                                ball_detections_val.value += 1
 
             # --- Escribir frame a shared memory ---
             np.copyto(shared_array, frame)
@@ -211,7 +222,7 @@ def perception_process(control_pipe, viz_pipe, robot_id, camera_id,
 # =============================================================================
 
 def control_process(perception_pipe, viz_state_pipe, keyboard_pipe,
-                    robot_id, serial_port):
+                    robot_id, serial_port, rf_available_val=None):
     """Recibe posiciones, ejecuta PID, envia comandos RF."""
     from robot_soccer.controllers.differential_drive import DifferentialDriveController
     from robot_soccer.communication.rf_controller import RFController
@@ -228,6 +239,8 @@ def control_process(perception_pipe, viz_state_pipe, keyboard_pipe,
             connections = rf_controller.test_connections()
             robot_key = f'robot_{robot_id + 1}'
             robot_available = connections.get(robot_key, False)
+            if rf_available_val is not None:
+                rf_available_val.value = int(robot_available)
             if robot_available:
                 log.info("Robot %d disponible via RF", robot_id)
             else:
@@ -563,6 +576,13 @@ def main():
     shm = shared_memory.SharedMemory(create=True, name=shm_name, size=frame_size)
     frame_counter = Value('i', 0)
 
+    # Contadores de métricas compartidos entre procesos
+    total_frames_val = Value('i', 0)
+    robot_detections_val = Value('i', 0)
+    ball_detections_val = Value('i', 0)
+    rf_available_val = Value('i', 0)
+    t_start = time.time()
+
     # Pipes
     perc_to_ctrl_s, perc_to_ctrl_r = multiprocessing.Pipe()
     perc_to_viz_s, perc_to_viz_r = multiprocessing.Pipe()
@@ -582,7 +602,8 @@ def main():
     p1 = multiprocessing.Process(
         target=perception_process,
         args=(perc_to_ctrl_s, perc_to_viz_s, robot_id, camera_id,
-              shm_name, frame_counter),
+              shm_name, frame_counter,
+              total_frames_val, robot_detections_val, ball_detections_val),
         name="Perception"
     )
     processes.append(p1)
@@ -590,7 +611,7 @@ def main():
     p2 = multiprocessing.Process(
         target=control_process,
         args=(perc_to_ctrl_r, ctrl_to_viz_s, viz_to_ctrl_r,
-              robot_id, args.serial_port),
+              robot_id, args.serial_port, rf_available_val),
         name="Control"
     )
     processes.append(p2)
@@ -627,6 +648,31 @@ def main():
             shm.unlink()
         except Exception:
             pass
+
+        # Guardar métricas en LOG/
+        elapsed = time.time() - t_start
+        fc = total_frames_val.value
+        rc = robot_detections_val.value
+        bc = ball_detections_val.value
+        metrics = {
+            "duration_s": round(elapsed, 2),
+            "total_frames": fc,
+            "fps_avg": round(fc / elapsed, 2) if elapsed > 0 else 0,
+            "robot_detection_count": rc,
+            "robot_detection_rate_pct": round(rc / fc * 100, 2) if fc > 0 else 0,
+            "ball_detection_count": bc,
+            "ball_detection_rate_pct": round(bc / fc * 100, 2) if fc > 0 else 0,
+            "robot_id": robot_id,
+            "rf_available": bool(rf_available_val.value),
+            "camera_id": camera_id,
+            "serial_port": args.serial_port,
+        }
+        try:
+            out = save_metrics("test_chase_ball", metrics)
+            log.info("Metricas guardadas en %s", out)
+        except Exception as e:
+            log.warning("No se pudieron guardar metricas: %s", e)
+
         log.info("Test finalizado")
 
 
