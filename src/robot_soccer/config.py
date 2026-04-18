@@ -440,7 +440,7 @@ CAPTURE_CONFIRM_DISTANCE_PX = 35  # px — confirmar pelota en dribbler
 # Debe superar MOTOR_DEAD_ZONE_PWM (30) para garantizar movimiento.
 # A mayor valor: más rápido pero más riesgo de empujar la pelota.
 # Calibrar con scripts/calibrate_behavior_thresholds.py (teclas N/M)
-CAPTURE_CREEP_SPEED_PWM = 18  # PWM — velocidad máxima lineal durante PID de avance al contacto
+CAPTURE_CREEP_SPEED_PWM = 20  # PWM — velocidad máxima lineal durante PID de avance al contacto
                               # Se aplica como max_linear_pwm_override: capea v pero permite
                               # corrección angular completa. Calibrar con teclas N/M.
                               # Intencionalmente por debajo de pwm_min del JSON: en creep mode
