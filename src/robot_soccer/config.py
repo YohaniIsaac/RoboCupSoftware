@@ -440,9 +440,11 @@ CAPTURE_CONFIRM_DISTANCE_PX = 35  # px — confirmar pelota en dribbler
 # Debe superar MOTOR_DEAD_ZONE_PWM (30) para garantizar movimiento.
 # A mayor valor: más rápido pero más riesgo de empujar la pelota.
 # Calibrar con scripts/calibrate_behavior_thresholds.py (teclas N/M)
-CAPTURE_CREEP_SPEED_PWM = 18  # PWM — velocidad máxima lineal durante PID de avance al contacto
+CAPTURE_CREEP_SPEED_PWM = 40  # PWM — velocidad máxima lineal durante PID de avance al contacto
                               # Se aplica como max_linear_pwm_override: capea v pero permite
                               # corrección angular completa. Calibrar con teclas N/M.
+                              # Mínimo viable: v - MAX_ANGULAR_CORRECTION_PWM(10) >= MOTOR_DEAD_ZONE_PWM(30)
+                              # → v >= 40 para que ambos motores giren incluso con corrección angular.
 
 # Tiempo de espera (segundos) tras confirmar contacto con la pelota.
 # Permite que la pelota se acomode contra el robot antes de disparar.
@@ -456,7 +458,7 @@ POST_KICK_COOLDOWN_S   = 0.8  # s — cooldown tras patear antes de poder detect
 # Durante asentamiento: dist > CAPTURE_CONFIRM_DISTANCE_PX * SETTLE_ESCAPE_FACTOR → abortar
 ADVANCE_ESCAPE_FACTOR  = 1.5   # factor — margen de escape durante avance al contacto
 SETTLE_ESCAPE_FACTOR   = 2.0   # factor — margen de escape durante asentamiento
-ADVANCE_MAX_TIME_S     = 3.5   # s  — timeout en acercamiento sin lograr contacto
+ADVANCE_MAX_TIME_S     = 5.0   # s  — timeout en acercamiento sin lograr contacto
 ADVANCE_BALL_DRIFT_DEG = 50.0  # °  — deriva máx. del ángulo a pelota desde inicio del avance
 
 # Factor multiplicador de PWM cuando el robot tiene posesión de la pelota.
@@ -501,9 +503,9 @@ PUSH_BURST_PWM = 70                # PWM — pulso anti-stiction al iniciar avan
 # Si el robot no avanza más de STUCK_MOVEMENT_THRESHOLD_PX píxeles dentro de una
 # ventana de STUCK_DETECTION_WINDOW_S segundos, se suma STUCK_BOOST_INCREMENT PWM
 # adicional por cada ventana consecutiva (máx STUCK_BOOST_MAX). Al moverse, decae.
-STUCK_MOVEMENT_THRESHOLD_PX = 3  # px — desplazamiento mínimo para "no estar atascado"
+STUCK_MOVEMENT_THRESHOLD_PX = 5  # px — desplazamiento mínimo para "no estar atascado"
 STUCK_DETECTION_WINDOW_S = 0.8  # s  — ventana de tiempo (~30 frames @ 25 FPS)
-STUCK_BOOST_INCREMENT = 1  # PWM — boost adicional por ventana sin movimiento
+STUCK_BOOST_INCREMENT = 3  # PWM — boost adicional por ventana sin movimiento
 STUCK_BOOST_MAX = 12  # PWM — boost máximo acumulado (hard cap)
 STUCK_BOOST_DECAY = 5             # PWM — reducción por ventana con movimiento
 STUCK_AUTO_KICK = True  # Si True, dispara kick al llegar a STUCK_BOOST_MAX
