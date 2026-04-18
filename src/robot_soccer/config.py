@@ -234,10 +234,10 @@ CAMERA_PERSPECTIVE_ENABLED = True  # Habilitar/deshabilitar transformacion de pe
 # Puntos de origen (esquinas de la cancha en la imagen de la cámara)
 # Ajusta estos valores usando el script scripts/calibrate_perspective.py
 CAMERA_PERSPECTIVE_SRC_POINTS = [
-    (32, 36),      # Top-left (esquina superior izquierda)
-    (631, 45),     # Top-right (esquina superior derecha)
-    (634, 404),    # Bottom-right (esquina inferior derecha)
-    (18, 394)       # Bottom-left (esquina inferior izquierda)
+    (53, 32),      # Top-left (esquina superior izquierda)
+    (621, 42),     # Top-right (esquina superior derecha)
+    (615, 369),    # Bottom-right (esquina inferior derecha)
+    (46, 357)       # Bottom-left (esquina inferior izquierda)
 ]
 
 # Dimensiones de la imagen de salida (rectángulo destino)
@@ -248,12 +248,12 @@ CAMERA_PERSPECTIVE_HEIGHT = 480  # Alto de la imagen transformada
 FIELD_CAM = FieldGeometry(
     width=CAMERA_PERSPECTIVE_WIDTH,
     height=CAMERA_PERSPECTIVE_HEIGHT,
-    goal_left_x=27,
-    goal_left_top_y=196,
-    goal_left_bottom_y=295,
-    goal_right_x=616,
-    goal_right_top_y=193,
-    goal_right_bottom_y=294,
+    goal_left_x=3,
+    goal_left_top_y=184,
+    goal_left_bottom_y=298,
+    goal_right_x=635,
+    goal_right_top_y=185,
+    goal_right_bottom_y=297,
     margin=15,
 )
 
@@ -440,11 +440,11 @@ CAPTURE_CONFIRM_DISTANCE_PX = 35  # px — confirmar pelota en dribbler
 # Debe superar MOTOR_DEAD_ZONE_PWM (30) para garantizar movimiento.
 # A mayor valor: más rápido pero más riesgo de empujar la pelota.
 # Calibrar con scripts/calibrate_behavior_thresholds.py (teclas N/M)
-CAPTURE_CREEP_SPEED_PWM = 40  # PWM — velocidad máxima lineal durante PID de avance al contacto
+CAPTURE_CREEP_SPEED_PWM = 18  # PWM — velocidad máxima lineal durante PID de avance al contacto
                               # Se aplica como max_linear_pwm_override: capea v pero permite
                               # corrección angular completa. Calibrar con teclas N/M.
-                              # Mínimo viable: v - MAX_ANGULAR_CORRECTION_PWM(10) >= MOTOR_DEAD_ZONE_PWM(30)
-                              # → v >= 40 para que ambos motores giren incluso con corrección angular.
+                              # Intencionalmente por debajo de pwm_min del JSON: en creep mode
+                              # el piso es 0 (no pwm_min), lo que permite avance ultra-lento.
 
 # Tiempo de espera (segundos) tras confirmar contacto con la pelota.
 # Permite que la pelota se acomode contra el robot antes de disparar.
