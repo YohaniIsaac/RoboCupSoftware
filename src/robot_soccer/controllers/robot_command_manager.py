@@ -61,7 +61,7 @@ class RobotCommandManager:
     """
 
     def __init__(self, team_players, ball, use_real_robots=False, port='/dev/ttyUSB0',
-                 field=None):
+                 field=None, rf_controller=None):
         """Inicializa el gestor de comandos para robots.
 
         Args:
@@ -72,6 +72,8 @@ class RobotCommandManager:
             port (str, optional): Puerto serial para comunicación con Arduino.
                 Defaults to '/dev/ttyUSB0'.
             field: FieldGeometry con geometría del campo. Defaults to FIELD_SIM.
+            rf_controller: RFController externo compartido. Si se pasa, se usa
+                directamente sin abrir un nuevo puerto serial.
 
         Note:
             Si falla la inicialización del controlador RF, automáticamente
@@ -83,9 +85,13 @@ class RobotCommandManager:
         self.use_real_robots = use_real_robots
         self.field = field if field is not None else FIELD_SIM
 
-        # Inicializar controlador RF si se utilizan robots reales
+        # Inicializar controlador RF
         self.rf_controller = None
-        if use_real_robots:
+        if rf_controller is not None:
+            # RFController compartido externamente (ej. decisión 2v2)
+            self.rf_controller = rf_controller
+            self.use_real_robots = True
+        elif use_real_robots:
             self.rf_controller = RFController(port=port)
             success = self.rf_controller.initialize()
             if not success:

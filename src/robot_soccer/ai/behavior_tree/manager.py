@@ -27,7 +27,7 @@ class BehaviorManager:
 
     def __init__(
             self, players, ball, team='red', use_real_robots=False, serial_port='/dev/ttyUSB0',
-            field=None
+            field=None, rf_controller=None
     ):
         """Inicializa el gestor de equipos de forma dinámica.
 
@@ -38,6 +38,7 @@ class BehaviorManager:
             use_real_robots: Si True, utiliza comunicación real con robots
             serial_port: Puerto serial para comunicación con Arduino
             field: FieldGeometry con geometría del campo. Defaults to FIELD_SIM.
+            rf_controller: RFController externo compartido para modo 2v2.
         """
         self.team = team
         self.field = field if field is not None else FIELD_SIM
@@ -50,7 +51,8 @@ class BehaviorManager:
             self.team_players,
             self.ball,
             use_real_robots=use_real_robots,
-            port=serial_port
+            port=serial_port,
+            rf_controller=rf_controller,
         )
 
         self.blackboards = {}

@@ -60,6 +60,11 @@ def _fmt_stuck(v: Optional[int]) -> str:
     return f"{v:3d}" if v is not None else "---"
 
 
+def _fmt_count(v: Optional[int]) -> str:
+    """Contador genérico, 3 chars. Ej: '  7', '  0' o '---'."""
+    return f"{v:3d}" if v is not None else "---"
+
+
 def _fmt_state(v: Optional[str]) -> str:
     """Estado alineado a la izquierda, 22 chars."""
     return f"{(v or '---'):<22s}"
@@ -92,6 +97,8 @@ FIELD_DEFS: list[FieldDef] = [
     FieldDef("stuck_boost", "sb=",  _fmt_stuck, enabled=True),
     FieldDef("left_pwm",  "L=",      _fmt_pwm,   enabled=True),
     FieldDef("right_pwm", "R=",      _fmt_pwm,   enabled=True),
+    FieldDef("rrt_len",   "rrt=",    _fmt_count, enabled=True),
+    FieldDef("n_obs",     "obs=",    _fmt_count, enabled=True),
 ]
 
 
@@ -112,6 +119,8 @@ class RobotStatus:
     stuck_boost: Optional[int]  = None  # boost anti-atasco activo (0=libre, max=kick)
     left_pwm:  Optional[int]   = None  # PWM motor izquierdo (-255..255)
     right_pwm: Optional[int]   = None  # PWM motor derecho (-255..255)
+    rrt_len:   Optional[int]   = None  # waypoints restantes en path actual (0=PID directo)
+    n_obs:     Optional[int]   = None  # obstáculos que ve el planner de este robot
 
 
 # ─── Logger central ───────────────────────────────────────────────────────────
