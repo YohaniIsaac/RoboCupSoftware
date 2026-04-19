@@ -1583,6 +1583,21 @@ def _advance_to_contact_running(blackboard):
     # FASE 1: Acercamiento (PID con velocidad limitada)
     # ──────────────────────────────
     if not contact_made:
+        # Rival ya en zona de contacto y más cerca que yo → ceder (estilo SSL: gana el más cercano)
+        for opp in blackboard.opponents:
+            opp_pos      = np.array(opp.get_position(), dtype=float)
+            opp_dist_ball = float(np.linalg.norm(opp_pos - ball_pos))
+            if opp_dist_ball < CAPTURE_ACTIVATE_DISTANCE_PX:
+                yield_on_tie = (abs(opp_dist_ball - dist) < 5 and opp.id < player_id)
+                if opp_dist_ball < dist or yield_on_tie:
+                    _clear_advance_state(blackboard, player_id)
+                    robot_status_logger.emit_event(
+                        player_id,
+                        f"advance_contact RIVAL EN CONTACTO: R{opp.id}={opp_dist_ball:.0f}px "
+                        f"< yo={dist:.0f}px -> FAILURE"
+                    )
+                    return NodeStatus.FAILURE
+
         # Pelota empujada demasiado lejos
         if dist > BEHIND_BALL_APPROACH_PX * ADVANCE_ESCAPE_FACTOR:
             _clear_advance_state(blackboard, player_id)

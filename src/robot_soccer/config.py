@@ -223,7 +223,8 @@ RRT_STEP_LEN = 50          # Longitud del paso
 RRT_GOAL_SAMPLE_RATE = 0.5  # Tasa de muestreo del objetivo
 RRT_SEARCH_RADIUS = 5       # Radio de búsqueda
 RRT_ITER_MAX = 10000        # Número máximo de iteraciones
-PATH_PLANNING_OBSTACLE_CLEARANCE = 45    # Margen de seguridad (px) añadido a cada obstáculo
+PATH_PLANNING_OBSTACLE_CLEARANCE = 60    # Margen de seguridad (px) añadido a cada obstáculo
+                                         # (subido de 45→60: rutas más separadas de los robots)
 PATH_PLANNING_ROBOT_OBSTACLE_RADIUS = 45 # Radio (px) con que se modela cada robot como obstáculo
 PATH_PLANNING_BALL_OBSTACLE_RADIUS  = 10 # Radio (px) con que se modela la pelota como obstáculo
                                          # Zona exclusión = 10 + clearance(45) = 55px < BEHIND_BALL(60px)

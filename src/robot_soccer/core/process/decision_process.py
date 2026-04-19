@@ -743,8 +743,13 @@ def decision_process_2v2(
                 except Exception:
                     pass
 
-            # --- has_ball (todos los robots) ---
+            # --- has_ball: solo el robot más cercano puede tener la pelota (estilo SSL) ---
+            # Si dos robots están dentro del umbral, solo el MÁS CERCANO recibe has_ball=True.
+            # Evita deadlock donde ambos atacantes de equipos opuestos "tienen" la pelota
+            # y tratan de disparar en direcciones contrarias simultáneamente.
             if ball_initialized:
+                best_pid  = None
+                best_dist = float('inf')
                 for p in all_players:
                     if p.id not in players_initialized:
                         continue
@@ -752,8 +757,17 @@ def decision_process_2v2(
                     if dist < CAPTURE_CONFIRM_DISTANCE_PX:
                         ang = math.degrees(math.atan2(ball.y - p.y, ball.x - p.x))
                         err = abs((ang - p.angle + 180) % 360 - 180)
-                        if err < 30:
-                            p._has_ball = True
+                        if err < 30 and dist < best_dist:
+                            best_dist = dist
+                            best_pid  = p.id
+                for p in all_players:
+                    if p.id not in players_initialized:
+                        continue
+                    dist = float(p.distance_to_ball(ball))
+                    if p.id == best_pid:
+                        p._has_ball = True
+                    elif dist < CAPTURE_CONFIRM_DISTANCE_PX:
+                        p._has_ball = False   # en rango pero no el más cercano → cede
                     elif dist > CAPTURE_CONFIRM_DISTANCE_PX * 2:
                         p._has_ball = False
 
