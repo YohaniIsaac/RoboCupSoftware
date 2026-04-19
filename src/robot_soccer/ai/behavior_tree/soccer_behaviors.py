@@ -100,10 +100,6 @@ class Blackboard:
         self.neutral_zone_center = None
         self.offensive_zone_center = None
 
-        # Variables de posicion
-        self.defensive_positions = None
-        self.offensive_positions = None
-
         # Posiciones estratégicas
         self.update_strategic_positions()
 
@@ -138,17 +134,6 @@ class Blackboard:
             self.neutral_zone_center = [f.zone_x(0.5), f.zone_y(0.5)]
             self.offensive_zone_center = [f.zone_x(0.2), f.zone_y(0.5)]
 
-        # Posiciones estratégicas defensivas
-        self.defensive_positions = [
-            [self.defensive_zone_center[0], f.zone_y(0.3)],  # Defensa arriba
-            [self.defensive_zone_center[0], f.zone_y(0.7)],  # Defensa abajo
-        ]
-
-        # Posiciones estratégicas ofensivas
-        self.offensive_positions = [
-            [self.offensive_zone_center[0], f.zone_y(0.3)],  # Ataque arriba
-            [self.offensive_zone_center[0], f.zone_y(0.7)],  # Ataque abajo
-        ]
 
 
 # CONDICIONES ESPECÍFICAS PARA FÚTBOL
