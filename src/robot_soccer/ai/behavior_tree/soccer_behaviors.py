@@ -17,7 +17,8 @@ from robot_soccer.config import (
     BT_SHOT_DISTANCE_RATIO, BT_PASS_MIN_RATIO, BT_PASS_MAX_RATIO,
     BT_CAPTURE_RANGE_RATIO, BT_APPROACH_RATIO, BT_CAPTURE_ACTIVATE_RATIO,
     BT_CAPTURE_CONFIRM_RATIO, BT_INTERCEPT_RATIO, BT_SUPPORT_DISTANCE_RATIO,
-    BT_DEFENDER_WAIT_RATIO, BT_DRIBBLE_GOAL_RATIO, BT_DRIBBLE_SPACING_RATIO,
+    BT_DEFENDER_WAIT_RATIO, BT_DEFENDER_STAND_DIST_RATIO,
+    BT_DRIBBLE_GOAL_RATIO, BT_DRIBBLE_SPACING_RATIO,
     BT_DEFENSIVE_ARRIVAL_RATIO, BT_ATTACKER_PRIORITY_MARGIN_RATIO,
     ROBOT_POSITION_THRESHOLD,
     CAPTURE_ACTIVATE_DISTANCE_PX,
@@ -36,6 +37,8 @@ from robot_soccer.config import (
     ADVANCE_BALL_DRIFT_DEG,
     DEFENDER_WAIT_MAX_S,
     POST_KICK_COOLDOWN_S,
+    PATH_PLANNING_ROBOT_OBSTACLE_RADIUS,
+    PATH_PLANNING_OBSTACLE_CLEARANCE,
 )
 
 from .base import (
@@ -1057,20 +1060,52 @@ def move_to_defensive_position(blackboard):
     else:
         blackboard._defender_wait_start = None  # atacante lejos: resetear timer
 
-    # PRIORIDAD 2: Si el atacante NO está activo, elegir posición defensiva
-    # Elegir la posición defensiva MÁS CERCANA a la posición ACTUAL del defensor
-    # (NO a la pelota, para minimizar movimiento)
-    defensive_pos = None
-    min_distance = float("inf")
+    # PRIORIDAD 2: Posición defensiva dinámica (patrón sweeper).
+    # El defensor se posiciona en la línea arco-propio → pelota,
+    # a BT_DEFENDER_STAND_DIST_RATIO del arco, bloqueando el ángulo de tiro.
+    # Si el punto calculado está dentro del radio de obstáculo de algún robot,
+    # se desplaza lateralmente hasta encontrar un punto libre.
+    _goal = np.array(blackboard.own_goal_pos, dtype=float)
+    _ball = np.array(ball_pos, dtype=float)
+    _goal_to_ball = _ball - _goal
+    _dist_gb = float(np.linalg.norm(_goal_to_ball))
+    if _dist_gb > 1.0:
+        _unit_gb = _goal_to_ball / _dist_gb
+    else:
+        _unit_gb = np.array([1.0 if blackboard.team == 'red' else -1.0, 0.0])
 
-    for pos in blackboard.defensive_positions:
-        distance = np.linalg.norm(np.array(pos) - np.array(player_pos))
-        if distance < min_distance:
-            min_distance = distance
-            defensive_pos = pos
+    _stand_dist = min(
+        blackboard.field.ratio_to_px(BT_DEFENDER_STAND_DIST_RATIO),
+        max(_dist_gb * 0.55, 30.0),
+    )
+    _def_pos = _goal + _unit_gb * _stand_dist
+    _def_pos = np.array(blackboard.field.clamp(_def_pos.astype(int)), dtype=float)
 
-    if not defensive_pos:
-        defensive_pos = blackboard.defensive_positions[0]
+    # Desplazar lateralmente si el punto está bloqueado por algún robot
+    _obs_min = float(PATH_PLANNING_ROBOT_OBSTACLE_RADIUS + PATH_PLANNING_OBSTACLE_CLEARANCE + 5)
+    _perp = np.array([-_unit_gb[1], _unit_gb[0]], dtype=float)
+    _obstacles = (
+        [r for r in blackboard.opponents] +
+        [t for t in blackboard.team_players if t.id != blackboard.player.id]
+    )
+    for _ in range(4):
+        _blocker = None
+        for _rob in _obstacles:
+            _rp = np.array(_rob.get_position(), dtype=float)
+            if _rp[0] == 0 and _rp[1] == 0:
+                continue
+            if float(np.linalg.norm(_def_pos - _rp)) < _obs_min:
+                _blocker = _rp
+                break
+        if _blocker is None:
+            break
+        _side = float(np.sign(np.dot(np.array(player_pos, dtype=float) - _blocker, _perp)))
+        if _side == 0.0:
+            _side = 1.0
+        _def_pos = _def_pos + _perp * _side * (_obs_min * 0.65)
+        _def_pos = np.array(blackboard.field.clamp(_def_pos.astype(int)), dtype=float)
+
+    defensive_pos = tuple(int(x) for x in _def_pos)
 
     # Verificar llegada ANTES de ordenar movimiento.
     # Si ya estamos en posición, no re-ordenar: evita que el PID mande (0,0)

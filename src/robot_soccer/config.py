@@ -170,6 +170,7 @@ BT_CAPTURE_CONFIRM_RATIO = 0.023
 BT_INTERCEPT_RATIO = 0.033
 BT_SUPPORT_DISTANCE_RATIO = 0.133
 BT_DEFENDER_WAIT_RATIO = 0.20
+BT_DEFENDER_STAND_DIST_RATIO = 0.20  # distancia del sweeper desde el arco propio (fracción del ancho del campo)
 DEFENDER_WAIT_MAX_S = 5.0  # s — timeout máximo de espera del defensor
 BT_DRIBBLE_SPACING_RATIO = 0.08
 BT_DRIBBLE_GOAL_RATIO = 0.133
