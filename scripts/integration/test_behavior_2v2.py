@@ -46,6 +46,8 @@ from robot_soccer.config import (
     CAMERA_PERSPECTIVE_ENABLED, CAMERA_PERSPECTIVE_SRC_POINTS,
     RANGO_COLOR_NARANJO,
     FIELD_CAM,
+    BALL_OUT_MARGIN_PX,
+    RESET_POS,
 )
 from robot_soccer.utils.camera_utils import get_camera_index
 from robot_soccer.core.process.decision_process import decision_process_2v2
@@ -60,7 +62,6 @@ log = logging.getLogger(__name__)
 SHM_NAME       = "robot_soccer_2v2"
 BALL_RADIUS_PX = 15
 GOAL_COOLDOWN_S  = 5.0
-POST_GOAL_PAUSE_S = 3.0
 
 # Robots por equipo
 TEAM_RED_IDS  = [0, 1]
@@ -187,6 +188,20 @@ def perception_process_2v2(control_pipe, viz_pipe, camera_id, shm_name, frame_co
                         last_goal_time = now
                         log.info("GOL equipo AZUL en (%d, %d)", bx, by)
 
+            # Pelota fuera de límites (excluye zonas de arco)
+            ball_out = False
+            if ball_detected and ball_pos is not None:
+                bx, by = ball_pos
+                m = BALL_OUT_MARGIN_PX
+                if by < m or by > CAMERA_PERSPECTIVE_HEIGHT - m:
+                    ball_out = True
+                elif (bx < m and
+                      not (FIELD_CAM.goal_left_top_y <= by <= FIELD_CAM.goal_left_bottom_y)):
+                    ball_out = True
+                elif (bx > CAMERA_PERSPECTIVE_WIDTH - m and
+                      not (FIELD_CAM.goal_right_top_y <= by <= FIELD_CAM.goal_right_bottom_y)):
+                    ball_out = True
+
             # Shared memory
             np.copyto(shared_array, frame)
             with frame_counter.get_lock():
@@ -196,6 +211,7 @@ def perception_process_2v2(control_pipe, viz_pipe, camera_id, shm_name, frame_co
                 'robots': robots_data,
                 'ball_detected': ball_detected,
                 'ball_pos': ball_pos,
+                'ball_out': ball_out,
                 'goal_event': goal_event,
                 'timestamp': time.time(),
             }
@@ -251,10 +267,10 @@ def visualization_process_2v2(perception_pipe, decision_pipe, keyboard_pipe,
     robot_available = False
     prev_robot_available = False
 
-    score              = {'red': 0, 'blue': 0}
-    goal_display_until = 0.0
-    last_goal_team     = None
-    goal_resume_sent   = False
+    score          = {'red': 0, 'blue': 0}
+    last_goal_team = None
+    goal_reset_viz = False   # True → esperando SPACE tras gol
+    ball_out_viz   = False   # True → pelota fuera de límites
 
     window_name = 'Partido 2v2 — RoboCup'
     cv2.namedWindow(window_name)
@@ -262,17 +278,6 @@ def visualization_process_2v2(perception_pipe, decision_pipe, keyboard_pipe,
     try:
         while True:
             now = time.time()
-
-            # Auto-reanuda tras pausa por gol
-            if (goal_display_until > 0
-                    and now > goal_display_until
-                    and not goal_resume_sent):
-                try:
-                    keyboard_pipe.send({'command': 'toggle'})
-                except Exception:
-                    pass
-                goal_resume_sent = True
-                log.info("BT reanudado tras gol")
 
             # Frame
             current = frame_counter.value
@@ -289,12 +294,11 @@ def visualization_process_2v2(perception_pipe, decision_pipe, keyboard_pipe,
                     goal_event    = data.get('goal_event')
                     if goal_event in ('red', 'blue'):
                         score[goal_event] += 1
-                        last_goal_team     = goal_event
-                        goal_display_until = now + POST_GOAL_PAUSE_S
-                        goal_resume_sent   = False
+                        last_goal_team = goal_event
+                        goal_reset_viz = True
                         tablero_cmd = 2 if goal_event == 'red' else 3
                         try:
-                            keyboard_pipe.send({'command': 'toggle'})
+                            keyboard_pipe.send({'command': 'goal_scored', 'team': goal_event})
                             keyboard_pipe.send({'command': 'tablero', 'cmd': tablero_cmd})
                         except Exception:
                             pass
@@ -312,6 +316,9 @@ def visualization_process_2v2(perception_pipe, decision_pipe, keyboard_pipe,
                     active_red      = data.get('active_red', False)
                     active_blue     = data.get('active_blue', False)
                     robot_available = data.get('robot_available', False)
+                    ball_out_viz    = data.get('ball_out', False)
+                    if not data.get('goal_reset', False):
+                        goal_reset_viz = False   # decision confirmó salida del reset
                     if robot_available and not prev_robot_available:
                         try:
                             keyboard_pipe.send({'command': 'tablero', 'cmd': 4})
@@ -436,8 +443,8 @@ def visualization_process_2v2(perception_pipe, decision_pipe, keyboard_pipe,
                 cv2.putText(frame, "ESPACIO=Ambos  R=Rojo  B=Azul  ESC=Salir",
                             (10, h - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (180, 180, 180), 1)
 
-                # Overlay GOOOL!
-                if now < goal_display_until and last_goal_team is not None:
+                # Overlay GOOOL! + PRESS SPACE + marcadores reset
+                if goal_reset_viz and last_goal_team is not None:
                     overlay     = frame.copy()
                     banner_y1   = h // 3
                     banner_y2   = 2 * h // 3
@@ -453,6 +460,27 @@ def visualization_process_2v2(perception_pipe, decision_pipe, keyboard_pipe,
                     gy = (banner_y1 + banner_y2 + gh) // 2
                     cv2.putText(frame, goal_label, ((w - gw) // 2, gy),
                                 cv2.FONT_HERSHEY_SIMPLEX, 2.0, text_col, 4, cv2.LINE_AA)
+                    sub_text = "Presiona ESPACIO para continuar"
+                    (sw, _), _ = cv2.getTextSize(sub_text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 1)
+                    cv2.putText(frame, sub_text, ((w - sw) // 2, banner_y2 + 24),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (220, 220, 220), 1, cv2.LINE_AA)
+                    # Marcadores X en posiciones de reset
+                    for rid, rpos in RESET_POS.items():
+                        rc  = TEAM_COLOR['red'] if rid in TEAM_RED_IDS else TEAM_COLOR['blue']
+                        rx, ry = rpos
+                        arm = 10
+                        cv2.line(frame, (rx-arm, ry-arm), (rx+arm, ry+arm), rc, 2, cv2.LINE_AA)
+                        cv2.line(frame, (rx+arm, ry-arm), (rx-arm, ry+arm), rc, 2, cv2.LINE_AA)
+                        cv2.circle(frame, rpos, arm + 2, rc, 1, cv2.LINE_AA)
+
+                # Overlay PELOTA FUERA
+                if ball_out_viz:
+                    hc = h // 2
+                    cv2.rectangle(frame, (0, hc - 28), (w, hc + 28), (20, 20, 20), -1)
+                    out_text = "PELOTA FUERA"
+                    (tw_o, _), _ = cv2.getTextSize(out_text, cv2.FONT_HERSHEY_SIMPLEX, 1.0, 2)
+                    cv2.putText(frame, out_text, ((w - tw_o) // 2, hc + 10),
+                                cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 165, 255), 2, cv2.LINE_AA)
 
                 cv2.imshow(window_name, frame)
             else:
@@ -471,9 +499,11 @@ def visualization_process_2v2(perception_pipe, decision_pipe, keyboard_pipe,
                     pass
                 break
             elif key == ord(' '):
+                goal_reset_viz = False
                 try:
                     keyboard_pipe.send({'command': 'toggle'})
-                    keyboard_pipe.send({'command': 'tablero', 'cmd': 1})
+                    if not goal_reset_viz:
+                        keyboard_pipe.send({'command': 'tablero', 'cmd': 1})
                 except Exception:
                     pass
             elif key in (ord('r'), ord('R')):

@@ -33,6 +33,7 @@ from robot_soccer.config import (
     DRIBBLER_PULSE_ON_MS,
     DRIBBLER_PULSE_OFF_MS,
     PATH_PLANNING_OBSTACLE_CLEARANCE,
+    RESET_POS,
 )
 
 log = logging.getLogger(__name__)
@@ -607,6 +608,9 @@ def decision_process_2v2(
     active_red          = False
     active_blue         = False
     running             = True
+    ball_out_active     = False   # pelota fuera — robots congelados, BT pausado
+    goal_reset_active   = False   # pausa post-gol — robots navegan a reset positions
+    reset_cmds_issued   = False   # True cuando ya se emitieron comandos de reset
 
     VIZ_INTERVAL    = 0.04
     BT_TICK_INTERVAL = 0.1
@@ -649,6 +653,20 @@ def decision_process_2v2(
                         if not ball_initialized:
                             log.info("Pelota detectada en (%d, %d)", bx, by)
                         ball_initialized = True
+
+                    # Pelota fuera: congelar robots cuando sale de límites
+                    ball_out_new = data.get('ball_out', False)
+                    if ball_out_new and not ball_out_active and not goal_reset_active:
+                        ball_out_active = True
+                        log.info("PELOTA FUERA: robots congelados")
+                        for fid in [p.id + 1 for p in all_players]:
+                            rf.set_motors(fid, 0, 0)
+                        for bm in (bm_red, bm_blue):
+                            for p in bm.team_players:
+                                bm.command_manager.actions_in_progress.pop(p.id, None)
+                    elif not ball_out_new and ball_out_active:
+                        ball_out_active = False
+                        log.info("PELOTA EN JUEGO: reanudando")
                 except Exception:
                     pass
 
@@ -659,20 +677,40 @@ def decision_process_2v2(
                     command = cmd.get('command', '')
                     if command == 'exit':
                         running = False
+                    elif command == 'goal_scored':
+                        goal_reset_active = True
+                        reset_cmds_issued  = False
+                        active_red = active_blue = False
+                        for bm in (bm_red, bm_blue):
+                            for p in bm.team_players:
+                                rf.set_motors(p.id + 1, 0, 0)
+                                rf.set_dribbler(p.id + 1, 0)
+                                p._has_ball = False
+                                ctrl = bm.command_manager.controllers.get(p.id)
+                                if ctrl:
+                                    ctrl.max_linear_pwm_override = None
+                                bm.command_manager.actions_in_progress.pop(p.id, None)
+                        log.info("GOL: iniciando reset a posiciones iniciales")
                     elif command == 'toggle':
-                        new_state = not (active_red or active_blue)
-                        active_red = active_blue = new_state
-                        log.info("Ambos equipos: %s", "ACTIVOS" if new_state else "PAUSADOS")
-                        if not new_state:
-                            for bm in (bm_red, bm_blue):
-                                for p in bm.team_players:
-                                    rf.set_motors(p.id + 1, 0, 0)
-                                    rf.set_dribbler(p.id + 1, 0)
-                                    p._has_ball = False
-                                    ctrl = bm.command_manager.controllers.get(p.id)
-                                    if ctrl:
-                                        ctrl.max_linear_pwm_override = None
-                                    bm.command_manager.actions_in_progress.pop(p.id, None)
+                        if goal_reset_active:
+                            goal_reset_active = False
+                            reset_cmds_issued  = False
+                            active_red = active_blue = True
+                            log.info("Reanudando partido tras gol")
+                        else:
+                            new_state = not (active_red or active_blue)
+                            active_red = active_blue = new_state
+                            log.info("Ambos equipos: %s", "ACTIVOS" if new_state else "PAUSADOS")
+                            if not new_state:
+                                for bm in (bm_red, bm_blue):
+                                    for p in bm.team_players:
+                                        rf.set_motors(p.id + 1, 0, 0)
+                                        rf.set_dribbler(p.id + 1, 0)
+                                        p._has_ball = False
+                                        ctrl = bm.command_manager.controllers.get(p.id)
+                                        if ctrl:
+                                            ctrl.max_linear_pwm_override = None
+                                        bm.command_manager.actions_in_progress.pop(p.id, None)
                     elif command == 'toggle_red':
                         active_red = not active_red
                         log.info("Equipo rojo: %s", "ACTIVO" if active_red else "PAUSADO")
@@ -770,8 +808,29 @@ def decision_process_2v2(
 
             all_initialized = players_initialized.issuperset(set(all_ids))
 
-            # --- BT tick y execute_commands ---
-            if all_initialized and ball_initialized:
+            # --- Reset post-gol: robots navegan a posiciones iniciales con RRT* ---
+            if goal_reset_active and all_initialized:
+                if not reset_cmds_issued:
+                    reset_cmds_issued = True
+                    for bm in (bm_red, bm_blue):
+                        for p in bm.team_players:
+                            rpos = RESET_POS.get(p.id)
+                            if rpos:
+                                bm.command_manager.move_robot_to(p.id, rpos)
+                    log.info("Reset: comandos de posición iniciales emitidos (RRT* activo)")
+                for bm in (bm_red, bm_blue):
+                    angle_degs = {p.id: p.angle for p in bm.team_players}
+                    for p in bm.team_players:
+                        p.angle = math.radians(p.angle)
+                    try:
+                        bm.command_manager.execute_commands()
+                    except Exception as e:
+                        log.error("reset execute_commands [%s]: %s", bm.team, e)
+                    for p in bm.team_players:
+                        p.angle = angle_degs[p.id]
+
+            # --- BT tick y execute_commands (solo cuando el juego está activo) ---
+            if all_initialized and ball_initialized and not ball_out_active and not goal_reset_active:
                 if now - last_bt_tick >= BT_TICK_INTERVAL:
                     if active_red:
                         bm_red.update()
@@ -867,6 +926,8 @@ def decision_process_2v2(
                         'active_red': active_red,
                         'active_blue': active_blue,
                         'robot_available': robot_available,
+                        'ball_out': ball_out_active,
+                        'goal_reset': goal_reset_active,
                         'timestamp': now,
                     })
                     last_viz_time = now

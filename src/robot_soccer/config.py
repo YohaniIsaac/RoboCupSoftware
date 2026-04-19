@@ -183,6 +183,21 @@ BT_ROLE_COMMITMENT_RATIO   = 0.23  # ratio → ~147px: si atacante está a <N px
 BT_ROLE_SWITCH_COOLDOWN_S  = 3.0   # s — tiempo mínimo entre cambios de rol
 
 # ==========================================
+# Reglas de partido
+# ==========================================
+BALL_OUT_MARGIN_PX = 30   # pelota fuera si ≤30px de cualquier borde (excluye zona de arcos)
+
+# Posiciones de reset tras gol (px en FIELD_CAM 640×480)
+# Estilo SSL simplificado: robots en su propia mitad, lejos del centro.
+# RRT* con evasión de obstáculos se usa automáticamente al navegar a estas posiciones.
+RESET_POS = {
+    0: (200, 150),   # R0 rojo — zona media-izquierda, arriba
+    1: (120, 330),   # R1 rojo — zona defensiva izquierda, abajo
+    2: (440, 150),   # R2 azul — zona media-derecha, arriba
+    3: (520, 330),   # R3 azul — zona defensiva derecha, abajo
+}
+
+# ==========================================
 # Configuración de los robots
 # ==========================================
 # Dimensiones físicas de los robots
