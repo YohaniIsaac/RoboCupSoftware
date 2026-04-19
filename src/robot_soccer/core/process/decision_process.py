@@ -34,6 +34,7 @@ from robot_soccer.config import (
     DRIBBLER_PULSE_OFF_MS,
     PATH_PLANNING_OBSTACLE_CLEARANCE,
     RESET_POS,
+    RESET_MOVE_PWM,
 )
 
 log = logging.getLogger(__name__)
@@ -696,6 +697,12 @@ def decision_process_2v2(
                             goal_reset_active = False
                             reset_cmds_issued  = False
                             active_red = active_blue = True
+                            for bm in (bm_red, bm_blue):
+                                for p in bm.team_players:
+                                    ctrl = bm.command_manager.controllers.get(p.id)
+                                    if ctrl:
+                                        ctrl.max_linear_pwm_override = None
+                                    bm.command_manager.actions_in_progress.pop(p.id, None)
                             log.info("Reanudando partido tras gol")
                         else:
                             new_state = not (active_red or active_blue)
@@ -816,8 +823,11 @@ def decision_process_2v2(
                         for p in bm.team_players:
                             rpos = RESET_POS.get(p.id)
                             if rpos:
+                                ctrl = bm.command_manager.controllers.get(p.id)
+                                if ctrl:
+                                    ctrl.max_linear_pwm_override = RESET_MOVE_PWM
                                 bm.command_manager.move_robot_to(p.id, rpos)
-                    log.info("Reset: comandos de posición iniciales emitidos (RRT* activo)")
+                    log.info("Reset: comandos emitidos a %d PWM (RRT* activo)", RESET_MOVE_PWM)
                 for bm in (bm_red, bm_blue):
                     angle_degs = {p.id: p.angle for p in bm.team_players}
                     for p in bm.team_players:

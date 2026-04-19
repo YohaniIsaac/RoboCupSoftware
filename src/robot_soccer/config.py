@@ -229,8 +229,13 @@ PATH_PLANNING_BALL_OBSTACLE_RADIUS  = 10 # Radio (px) con que se modela la pelot
                                          # Zona exclusión = 10 + clearance(45) = 55px < BEHIND_BALL(60px)
 RRT_WAYPOINT_ARRIVAL_PX  = 20    # px — umbral de llegada a waypoints intermedios
 RRT_REPLAN_POSITION_PX   = 80    # px — trigger replan si robot se aleja >N px del punto enviado
-RRT_REPLAN_COOLDOWN_S    = 2.0   # s  — tiempo mínimo entre replans por posición
-RRT_OBSTACLE_MOVE_PX     = 40    # px — trigger replan si un obstáculo se mueve >N px
+RRT_REPLAN_COOLDOWN_S    = 0.5   # s  — tiempo mínimo entre replans por posición/obstáculo
+                                  # (bajado de 2.0→0.5: con cooldown 2s y robots a ~80px/s,
+                                  #  los obstáculos se movían ~160px antes del replan → colisión)
+RRT_OBSTACLE_MOVE_PX     = 25    # px — trigger replan si un obstáculo se mueve >N px
+                                  # (bajado de 40→25: detectar movimiento antes de que el path quede inválido)
+
+RESET_MOVE_PWM = 25              # PWM lineal máximo durante movimiento a posiciones de reset post-gol
 
 # ==========================================
 # Configuración de la simulación
