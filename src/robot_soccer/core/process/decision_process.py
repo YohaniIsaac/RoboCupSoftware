@@ -657,9 +657,12 @@ def decision_process_2v2(
                             log.info("Pelota detectada en (%d, %d)", bx, by)
                         ball_initialized = True
 
-                    # Pelota fuera: congelar robots cuando sale de límites
+                    # Pelota fuera: congelar robots cuando sale de límites.
+                    # Durante init_phase o goal_reset_active el juego no está RUNNING:
+                    # ignorar ball_out igual que en SSL (árbitro maneja la pelota).
                     ball_out_new = data.get('ball_out', False)
-                    if ball_out_new and not ball_out_active and not goal_reset_active:
+                    game_running = not init_phase and not goal_reset_active
+                    if ball_out_new and not ball_out_active and game_running:
                         ball_out_active = True
                         log.info("PELOTA FUERA: robots congelados")
                         for fid in [p.id + 1 for p in all_players]:
@@ -670,6 +673,9 @@ def decision_process_2v2(
                     elif not ball_out_new and ball_out_active:
                         ball_out_active = False
                         log.info("PELOTA EN JUEGO: reanudando")
+                    elif ball_out_active and not game_running:
+                        # Transición a init/reset mientras ball_out estaba activo → limpiar
+                        ball_out_active = False
                 except Exception:
                     pass
 
