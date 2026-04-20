@@ -236,7 +236,8 @@ RRT_REPLAN_COOLDOWN_S    = 0.5   # s  — tiempo mínimo entre replans por posic
 RRT_OBSTACLE_MOVE_PX     = 25    # px — trigger replan si un obstáculo se mueve >N px
                                   # (bajado de 40→25: detectar movimiento antes de que el path quede inválido)
 
-RESET_MOVE_PWM = 25              # PWM lineal máximo durante movimiento a posiciones de reset post-gol
+RESET_MOVE_PWM  = 25             # PWM lineal máximo durante movimiento a posiciones de reset post-gol
+RESET_ANGLE     = {'red': 0.0, 'blue': 180.0}  # ángulo canónico de orientación (dirección de ataque)
 
 # ==========================================
 # Configuración de la simulación
