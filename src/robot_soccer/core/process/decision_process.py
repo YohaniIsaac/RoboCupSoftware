@@ -34,7 +34,7 @@ from robot_soccer.config import (
     DRIBBLER_PULSE_OFF_MS,
     PATH_PLANNING_OBSTACLE_CLEARANCE,
     RESET_POS,
-    RESET_MOVE_PWM,
+    RESET_MOVE_FACTOR,
     RESET_ANGLE,
 )
 
@@ -901,7 +901,7 @@ def decision_process_2v2(
                                 if rpos:
                                     ctrl = bm.command_manager.controllers.get(p.id)
                                     if ctrl:
-                                        ctrl.max_linear_pwm_override = RESET_MOVE_PWM
+                                        ctrl.max_linear_pwm_override = ctrl.compute_reset_pwm(p.id, RESET_MOVE_FACTOR)
                                     bm.command_manager.move_robot_to(p.id, rpos)
                         log.info("Fase inicial: orientación lista → moviendo a posiciones de inicio (RRT*)")
 
@@ -944,9 +944,10 @@ def decision_process_2v2(
                                 if rpos:
                                     ctrl = bm.command_manager.controllers.get(p.id)
                                     if ctrl:
-                                        ctrl.max_linear_pwm_override = RESET_MOVE_PWM
+                                        ctrl.max_linear_pwm_override = ctrl.compute_reset_pwm(p.id, RESET_MOVE_FACTOR)
                                     bm.command_manager.move_robot_to(p.id, rpos)
-                        log.info("Reset: orientación lista → moviendo a %d PWM (RRT* activo)", RESET_MOVE_PWM)
+                        log.info("Reset: orientación lista → moviendo (%.0f%% pwm_max por robot, RRT* activo)",
+                                 RESET_MOVE_FACTOR * 100)
 
                 # Ejecutar la subfase activa (rotación o movimiento)
                 for bm in (bm_red, bm_blue):

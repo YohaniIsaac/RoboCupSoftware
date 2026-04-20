@@ -193,6 +193,15 @@ class DifferentialDriveController:
             self._robot_speed_limits[robot_id] = (pwm_min, pwm_max)
         return self._robot_speed_limits[robot_id]
 
+    def compute_reset_pwm(self, robot_id, factor):
+        """Calcula el PWM de reset para un robot respetando su mínimo calibrado.
+
+        Retorna max(pwm_min, round(pwm_max * factor)), garantizando que el
+        robot pueda arrancar y que la velocidad esté por debajo de su máximo.
+        """
+        pwm_min, pwm_max = self._get_robot_speed_limits(robot_id)
+        return max(pwm_min, round(pwm_max * factor))
+
     def _get_pid_state(self, robot_id):
         """Retorna el estado PID para un robot específico, creándolo si no existe.
 
