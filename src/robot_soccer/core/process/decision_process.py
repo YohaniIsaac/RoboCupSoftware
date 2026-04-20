@@ -612,6 +612,8 @@ def decision_process_2v2(
     ball_out_active     = False   # pelota fuera — robots congelados, BT pausado
     goal_reset_active   = False   # pausa post-gol — robots navegan a reset positions
     reset_cmds_issued   = False   # True cuando ya se emitieron comandos de reset
+    init_phase          = True    # pre-juego: robots se ordenan antes del primer saque
+    init_cmds_issued    = False   # True cuando ya se emitieron comandos de posición inicial
 
     VIZ_INTERVAL    = 0.04
     BT_TICK_INTERVAL = 0.1
@@ -693,7 +695,18 @@ def decision_process_2v2(
                                 bm.command_manager.actions_in_progress.pop(p.id, None)
                         log.info("GOL: iniciando reset a posiciones iniciales")
                     elif command == 'toggle':
-                        if goal_reset_active:
+                        if init_phase:
+                            init_phase = False
+                            init_cmds_issued = False
+                            active_red = active_blue = True
+                            for bm in (bm_red, bm_blue):
+                                for p in bm.team_players:
+                                    ctrl = bm.command_manager.controllers.get(p.id)
+                                    if ctrl:
+                                        ctrl.max_linear_pwm_override = None
+                                    bm.command_manager.actions_in_progress.pop(p.id, None)
+                            log.info("PARTIDO INICIADO desde posiciones de inicio")
+                        elif goal_reset_active:
                             goal_reset_active = False
                             reset_cmds_issued  = False
                             active_red = active_blue = True
@@ -829,6 +842,30 @@ def decision_process_2v2(
 
             all_initialized = players_initialized.issuperset(set(all_ids))
 
+            # --- Fase inicial: ordenar robots a posiciones de inicio antes del primer saque ---
+            if init_phase and all_initialized:
+                if not init_cmds_issued:
+                    init_cmds_issued = True
+                    for bm in (bm_red, bm_blue):
+                        for p in bm.team_players:
+                            rpos = RESET_POS.get(p.id)
+                            if rpos:
+                                ctrl = bm.command_manager.controllers.get(p.id)
+                                if ctrl:
+                                    ctrl.max_linear_pwm_override = RESET_MOVE_PWM
+                                bm.command_manager.move_robot_to(p.id, rpos)
+                    log.info("Fase inicial: robots moviéndose a posiciones de inicio (RRT*)")
+                for bm in (bm_red, bm_blue):
+                    angle_degs = {p.id: p.angle for p in bm.team_players}
+                    for p in bm.team_players:
+                        p.angle = math.radians(p.angle)
+                    try:
+                        bm.command_manager.execute_commands()
+                    except Exception as e:
+                        log.error("init execute_commands [%s]: %s", bm.team, e)
+                    for p in bm.team_players:
+                        p.angle = angle_degs[p.id]
+
             # --- Reset post-gol: robots navegan a posiciones iniciales con RRT* ---
             if goal_reset_active and all_initialized:
                 if not reset_cmds_issued:
@@ -854,7 +891,7 @@ def decision_process_2v2(
                         p.angle = angle_degs[p.id]
 
             # --- BT tick y execute_commands (solo cuando el juego está activo) ---
-            if all_initialized and ball_initialized and not ball_out_active and not goal_reset_active:
+            if all_initialized and ball_initialized and not ball_out_active and not goal_reset_active and not init_phase:
                 if now - last_bt_tick >= BT_TICK_INTERVAL:
                     if active_red:
                         bm_red.update()
@@ -952,6 +989,7 @@ def decision_process_2v2(
                         'robot_available': robot_available,
                         'ball_out': ball_out_active,
                         'goal_reset': goal_reset_active,
+                        'init_phase': init_phase,
                         'timestamp': now,
                     })
                     last_viz_time = now

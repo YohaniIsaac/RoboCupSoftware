@@ -271,6 +271,7 @@ def visualization_process_2v2(perception_pipe, decision_pipe, keyboard_pipe,
     last_goal_team = None
     goal_reset_viz = False   # True → esperando SPACE tras gol
     ball_out_viz   = False   # True → pelota fuera de límites
+    init_phase_viz = True    # True → fase pre-juego, robots ordenándose
 
     window_name = 'Partido 2v2 — RoboCup'
     cv2.namedWindow(window_name)
@@ -317,6 +318,7 @@ def visualization_process_2v2(perception_pipe, decision_pipe, keyboard_pipe,
                     active_blue     = data.get('active_blue', False)
                     robot_available = data.get('robot_available', False)
                     ball_out_viz    = data.get('ball_out', False)
+                    init_phase_viz  = data.get('init_phase', False)
                     if not data.get('goal_reset', False):
                         goal_reset_viz = False   # decision confirmó salida del reset
                     if robot_available and not prev_robot_available:
@@ -443,6 +445,38 @@ def visualization_process_2v2(perception_pipe, decision_pipe, keyboard_pipe,
                 cv2.putText(frame, "ESPACIO=Ambos  R=Rojo  B=Azul  ESC=Salir",
                             (10, h - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (180, 180, 180), 1)
 
+                # Overlay fase inicial: robots ordenándose antes del primer saque
+                if init_phase_viz:
+                    robots_seen = sum(
+                        1 for rid in ALL_IDS
+                        if players_state.get(rid, {}).get('pos') is not None
+                    )
+                    overlay = frame.copy()
+                    cv2.rectangle(overlay, (0, h // 3), (w, 2 * h // 3), (15, 40, 15), -1)
+                    cv2.addWeighted(overlay, 0.6, frame, 0.4, 0, frame)
+                    if robots_seen == len(ALL_IDS):
+                        main_txt = "ORDENANDO ROBOTS..."
+                        sub_txt  = "Presiona ESPACIO para comenzar el partido"
+                    else:
+                        main_txt = f"Detectando robots... ({robots_seen}/{len(ALL_IDS)})"
+                        sub_txt  = "Posiciona los robots en el campo"
+                    (tw_m, th_m), _ = cv2.getTextSize(main_txt, cv2.FONT_HERSHEY_SIMPLEX, 1.0, 2)
+                    cv2.putText(frame, main_txt,
+                                ((w - tw_m) // 2, h // 2 - 8),
+                                cv2.FONT_HERSHEY_SIMPLEX, 1.0, (80, 220, 80), 2, cv2.LINE_AA)
+                    (tw_s, _), _ = cv2.getTextSize(sub_txt, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 1)
+                    cv2.putText(frame, sub_txt,
+                                ((w - tw_s) // 2, h // 2 + th_m + 8),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (180, 180, 180), 1, cv2.LINE_AA)
+                    # Marcadores X en posiciones de inicio
+                    for rid, rpos in RESET_POS.items():
+                        rc  = TEAM_COLOR['red'] if rid in TEAM_RED_IDS else TEAM_COLOR['blue']
+                        rx, ry = rpos
+                        arm = 12
+                        cv2.line(frame, (rx-arm, ry-arm), (rx+arm, ry+arm), rc, 2, cv2.LINE_AA)
+                        cv2.line(frame, (rx+arm, ry-arm), (rx-arm, ry+arm), rc, 2, cv2.LINE_AA)
+                        cv2.circle(frame, rpos, arm + 3, rc, 1, cv2.LINE_AA)
+
                 # Overlay GOOOL! + PRESS SPACE + marcadores reset
                 if goal_reset_viz and last_goal_team is not None:
                     overlay     = frame.copy()
@@ -499,10 +533,12 @@ def visualization_process_2v2(perception_pipe, decision_pipe, keyboard_pipe,
                     pass
                 break
             elif key == ord(' '):
+                was_init = init_phase_viz
+                init_phase_viz = False
                 goal_reset_viz = False
                 try:
                     keyboard_pipe.send({'command': 'toggle'})
-                    if not goal_reset_viz:
+                    if not was_init:
                         keyboard_pipe.send({'command': 'tablero', 'cmd': 1})
                 except Exception:
                     pass
