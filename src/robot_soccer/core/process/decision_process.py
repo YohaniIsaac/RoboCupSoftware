@@ -504,6 +504,29 @@ def decision_process(
         log.info("Decision finalizada")
 
 
+def _assign_reset(team_players, pos_dict):
+    """Asigna posiciones de reset minimizando distancia total de viaje (2! permutaciones).
+
+    Evita el escenario donde un robot apunta a una posición ocupada por su compañero,
+    que hace que RRT* falle y el robot caiga a PID directo sin evasión de obstáculos.
+    """
+    from itertools import permutations as _perms
+    ids = [p.id for p in team_players]
+    positions = [pos_dict[pid] for pid in ids]
+    best = {pid: pos for pid, pos in zip(ids, positions)}
+    best_cost = float('inf')
+    for perm in _perms(range(len(ids))):
+        cost = sum(
+            math.hypot(team_players[i].x - positions[perm[i]][0],
+                       team_players[i].y - positions[perm[i]][1])
+            for i in range(len(ids))
+        )
+        if cost < best_cost:
+            best_cost = cost
+            best = {ids[i]: positions[perm[i]] for i in range(len(ids))}
+    return best
+
+
 def decision_process_2v2(
     perception_pipe,
     viz_state_pipe,
@@ -853,8 +876,9 @@ def decision_process_2v2(
                 if not init_cmds_issued:
                     init_cmds_issued = True
                     for bm in (bm_red, bm_blue):
+                        assignment = _assign_reset(bm.team_players, RESET_POS)
                         for p in bm.team_players:
-                            rpos = RESET_POS.get(p.id)
+                            rpos = assignment.get(p.id)
                             if rpos:
                                 ctrl = bm.command_manager.controllers.get(p.id)
                                 if ctrl:
@@ -877,8 +901,9 @@ def decision_process_2v2(
                 if not reset_cmds_issued:
                     reset_cmds_issued = True
                     for bm in (bm_red, bm_blue):
+                        assignment = _assign_reset(bm.team_players, RESET_POS)
                         for p in bm.team_players:
-                            rpos = RESET_POS.get(p.id)
+                            rpos = assignment.get(p.id)
                             if rpos:
                                 ctrl = bm.command_manager.controllers.get(p.id)
                                 if ctrl:
