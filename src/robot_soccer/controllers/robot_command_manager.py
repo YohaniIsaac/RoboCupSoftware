@@ -124,6 +124,7 @@ class RobotCommandManager:
         self._last_obs_pos:   dict = {}  # player_id → {robot_id: (x,y)}
         self._all_robot_data: list = []  # [{id,x,y}, ...] actualizado cada frame
         self._ball_pos: tuple | None = None  # (x, y) de la pelota, actualizado cada frame
+        self.replan_cooldown_s_override: float | None = None  # None = usar RRT_REPLAN_COOLDOWN_S
 
     def shutdown(self):
         """Cierra las conexiones y detiene todos los robots.
@@ -243,8 +244,11 @@ class RobotCommandManager:
                             pass
 
                         # 2. Decidir si hay que pedir replan
-                        last_goal = self._last_sent_goal.get(player_id)
-                        last_pos  = self._last_sent_pos.get(player_id)
+                        last_goal   = self._last_sent_goal.get(player_id)
+                        last_pos    = self._last_sent_pos.get(player_id)
+                        _replan_cd  = (self.replan_cooldown_s_override
+                                       if self.replan_cooldown_s_override is not None
+                                       else RRT_REPLAN_COOLDOWN_S)
                         need_replan = False
                         # Bug 2b: comparación por distancia en vez de igualdad exacta.
                         # Evita replans continuos por jitter mínimo del goal (pelota que tiembla <20px).
@@ -255,12 +259,12 @@ class RobotCommandManager:
                         elif (last_pos is None or
                               math.hypot(cur_pos[0] - last_pos[0],
                                          cur_pos[1] - last_pos[1]) > RRT_REPLAN_POSITION_PX):
-                            if now - self._last_replan_t.get(player_id, 0) >= RRT_REPLAN_COOLDOWN_S:
+                            if now - self._last_replan_t.get(player_id, 0) >= _replan_cd:
                                 need_replan = True   # robot se alejó del punto enviado
                         # Bug 5: cooldown también para obstacles_moved (antes no lo tenía).
                         elif obstacles_moved(self._last_obs_pos.get(player_id, {}),
                                              obs_dicts, player_id, RRT_OBSTACLE_MOVE_PX):
-                            if now - self._last_replan_t.get(player_id, 0) >= RRT_REPLAN_COOLDOWN_S:
+                            if now - self._last_replan_t.get(player_id, 0) >= _replan_cd:
                                 need_replan = True   # un obstáculo robot se movió
                         # Bug 4: pelota no estaba en obs_dicts → no se detectaba su movimiento.
                         elif self._ball_pos is not None:
@@ -268,7 +272,7 @@ class RobotCommandManager:
                             if last_ball is not None and math.hypot(
                                     self._ball_pos[0] - last_ball[0],
                                     self._ball_pos[1] - last_ball[1]) > RRT_OBSTACLE_MOVE_PX:
-                                if now - self._last_replan_t.get(player_id, 0) >= RRT_REPLAN_COOLDOWN_S:
+                                if now - self._last_replan_t.get(player_id, 0) >= _replan_cd:
                                     need_replan = True   # pelota se movió significativamente
 
                         if need_replan:

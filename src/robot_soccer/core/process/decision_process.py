@@ -638,7 +638,9 @@ def decision_process_2v2(
     goal_reset_active   = False   # pausa post-gol — robots navegan a reset positions
     reset_orient_issued = False   # orientación inicial emitida (fase 1 del reset post-gol)
     reset_orient_done   = False   # orientación completada → emitir movimiento (fase 2)
-    init_phase          = True    # pre-juego: robots se ordenan antes del primer saque
+    pre_init            = True    # esperando ESPACIO1: robots quietos, aún no organizan
+    init_phase          = False   # True desde ESPACIO1: robots organizándose
+    init_ready          = False   # True cuando robots llegaron y están orientados
     init_orient_issued  = False   # orientación emitida (fase 1)
     init_orient_done    = False   # orientación completada → emitir movimiento (fase 2)
     init_move_done      = False   # robots en posición → re-orientar hacia la pelota (fase 3)
@@ -738,17 +740,30 @@ def decision_process_2v2(
                                 bm.command_manager.actions_in_progress.pop(p.id, None)
                         log.info("GOL: iniciando reset a posiciones iniciales")
                     elif command == 'toggle':
-                        if init_phase:
-                            init_phase = False
-                            init_orient_issued = init_orient_done = init_move_done = False
-                            active_red = active_blue = True
+                        if pre_init:
+                            pre_init = False
+                            init_phase = True
                             for bm in (bm_red, bm_blue):
-                                for p in bm.team_players:
-                                    ctrl = bm.command_manager.controllers.get(p.id)
-                                    if ctrl:
-                                        ctrl.max_linear_pwm_override = None
-                                    bm.command_manager.actions_in_progress.pop(p.id, None)
-                            log.info("PARTIDO INICIADO desde posiciones de inicio")
+                                bm.command_manager.replan_cooldown_s_override = 2.0
+                            log.info("Iniciando organización — orientando y moviendo robots a posiciones de inicio")
+                        elif init_phase and not init_ready:
+                            log.info("Robots aún organizándose, espera que lleguen a sus posiciones...")
+                        elif init_phase and init_ready:
+                            if not ball_initialized:
+                                log.info("Partido no puede iniciar: pelota no detectada — coloca la pelota en el campo")
+                            else:
+                                init_phase  = False
+                                init_ready  = False
+                                init_orient_issued = init_orient_done = init_move_done = False
+                                active_red  = active_blue = True
+                                for bm in (bm_red, bm_blue):
+                                    for p in bm.team_players:
+                                        ctrl = bm.command_manager.controllers.get(p.id)
+                                        if ctrl:
+                                            ctrl.max_linear_pwm_override = None
+                                        bm.command_manager.actions_in_progress.pop(p.id, None)
+                                    bm.command_manager.replan_cooldown_s_override = None
+                                log.info("PARTIDO INICIADO desde posiciones de inicio")
                         elif goal_reset_active:
                             goal_reset_active = False
                             active_red = active_blue = True
@@ -932,6 +947,16 @@ def decision_process_2v2(
                                 bm.command_manager.rotate_robot_to(p.id, angle)
                         log.info("Fase inicial: en posición → orientando robots hacia la pelota")
 
+                # Subfase 4: orientación final completada → robots listos para iniciar
+                if init_move_done and not init_ready:
+                    final_orient_pending = any(
+                        bm.command_manager.actions_in_progress.get(p.id, {}).get('type') == 'rotate'
+                        for bm in (bm_red, bm_blue) for p in bm.team_players
+                    )
+                    if not final_orient_pending:
+                        init_ready = True
+                        log.info("Robots listos en posiciones de inicio. Presiona ESPACIO para comenzar el partido.")
+
                 # Ejecutar la subfase activa (rotación o movimiento)
                 for bm in (bm_red, bm_blue):
                     angle_degs = {p.id: p.angle for p in bm.team_players}
@@ -1088,6 +1113,9 @@ def decision_process_2v2(
                         'ball_out': ball_out_active,
                         'goal_reset': goal_reset_active,
                         'init_phase': init_phase,
+                        'pre_init': pre_init,
+                        'init_ready': init_ready,
+                        'ball_detected': ball_initialized,
                         'timestamp': now,
                     })
                     last_viz_time = now

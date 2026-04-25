@@ -271,7 +271,10 @@ def visualization_process_2v2(perception_pipe, decision_pipe, keyboard_pipe,
     last_goal_team = None
     goal_reset_viz = False   # True → esperando SPACE tras gol
     ball_out_viz   = False   # True → pelota fuera de límites
-    init_phase_viz = True    # True → fase pre-juego, robots ordenándose
+    pre_init_viz   = True    # True → robots quietos, esperando ESPACIO1
+    init_phase_viz = False   # True → robots organizándose (entre ESPACIO1 y ESPACIO2)
+    init_ready_viz = False   # True → robots listos, esperando ESPACIO2 para iniciar
+    ball_detected_viz = False
 
     window_name = 'Partido 2v2 — RoboCup'
     cv2.namedWindow(window_name)
@@ -318,7 +321,10 @@ def visualization_process_2v2(perception_pipe, decision_pipe, keyboard_pipe,
                     active_blue     = data.get('active_blue', False)
                     robot_available = data.get('robot_available', False)
                     ball_out_viz    = data.get('ball_out', False)
-                    init_phase_viz  = data.get('init_phase', False)
+                    pre_init_viz      = data.get('pre_init', False)
+                    init_phase_viz    = data.get('init_phase', False)
+                    init_ready_viz    = data.get('init_ready', False)
+                    ball_detected_viz = data.get('ball_detected', False)
                     if not data.get('goal_reset', False):
                         goal_reset_viz = False   # decision confirmó salida del reset
                     if robot_available and not prev_robot_available:
@@ -445,8 +451,8 @@ def visualization_process_2v2(perception_pipe, decision_pipe, keyboard_pipe,
                 cv2.putText(frame, "ESPACIO=Ambos  R=Rojo  B=Azul  ESC=Salir",
                             (10, h - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (180, 180, 180), 1)
 
-                # Overlay fase inicial: robots ordenándose antes del primer saque
-                if init_phase_viz:
+                # Overlay pre-juego: pre_init (quieto) / init_phase (organizando) / init_ready (listo)
+                if pre_init_viz or init_phase_viz:
                     robots_seen = sum(
                         1 for rid in ALL_IDS
                         if players_state.get(rid, {}).get('pos') is not None
@@ -454,20 +460,49 @@ def visualization_process_2v2(perception_pipe, decision_pipe, keyboard_pipe,
                     overlay = frame.copy()
                     cv2.rectangle(overlay, (0, h // 3), (w, 2 * h // 3), (15, 40, 15), -1)
                     cv2.addWeighted(overlay, 0.6, frame, 0.4, 0, frame)
-                    if robots_seen == len(ALL_IDS):
-                        main_txt = "ORDENANDO ROBOTS..."
-                        sub_txt  = "Presiona ESPACIO para comenzar el partido"
+
+                    if pre_init_viz:
+                        if robots_seen == len(ALL_IDS):
+                            main_txt = "ROBOTS DETECTADOS"
+                            sub_txt  = "Presiona ESPACIO para organizar"
+                            txt_col  = (80, 220, 80)
+                        else:
+                            main_txt = f"Detectando robots... ({robots_seen}/{len(ALL_IDS)})"
+                            sub_txt  = "Posiciona todos los robots en el campo"
+                            txt_col  = (80, 160, 220)
+                    elif init_ready_viz:
+                        ball_ok   = ball_detected_viz
+                        main_txt  = "ROBOTS LISTOS"
+                        sub_txt   = ("Presiona ESPACIO para iniciar el partido"
+                                     if ball_ok else
+                                     "Coloca la pelota en el campo y presiona ESPACIO")
+                        txt_col   = (60, 220, 60) if ball_ok else (30, 160, 220)
                     else:
-                        main_txt = f"Detectando robots... ({robots_seen}/{len(ALL_IDS)})"
-                        sub_txt  = "Posiciona los robots en el campo"
+                        main_txt = "ORGANIZANDO ROBOTS..."
+                        sub_txt  = "Espera que los robots lleguen a sus posiciones"
+                        txt_col  = (80, 220, 80)
+
                     (tw_m, th_m), _ = cv2.getTextSize(main_txt, cv2.FONT_HERSHEY_SIMPLEX, 1.0, 2)
                     cv2.putText(frame, main_txt,
                                 ((w - tw_m) // 2, h // 2 - 8),
-                                cv2.FONT_HERSHEY_SIMPLEX, 1.0, (80, 220, 80), 2, cv2.LINE_AA)
+                                cv2.FONT_HERSHEY_SIMPLEX, 1.0, txt_col, 2, cv2.LINE_AA)
                     (tw_s, _), _ = cv2.getTextSize(sub_txt, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 1)
                     cv2.putText(frame, sub_txt,
                                 ((w - tw_s) // 2, h // 2 + th_m + 8),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.55, (180, 180, 180), 1, cv2.LINE_AA)
+
+                    # Hint de posición de pelota (centro del campo)
+                    bx, by = w // 2, h // 2
+                    hint_col = (40, 200, 40) if ball_detected_viz else (40, 140, 255)
+                    cv2.circle(frame, (bx, by), 38, hint_col, 2, cv2.LINE_AA)
+                    cv2.circle(frame, (bx, by), 10, hint_col, -1, cv2.LINE_AA)
+                    cv2.line(frame, (bx - 14, by), (bx + 14, by), (0, 0, 0), 1, cv2.LINE_AA)
+                    cv2.line(frame, (bx, by - 14), (bx, by + 14), (0, 0, 0), 1, cv2.LINE_AA)
+                    pelota_lbl = "PELOTA OK" if ball_detected_viz else "PELOTA AQUI"
+                    cv2.putText(frame, pelota_lbl,
+                                (bx - 38, by + 54),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.42, hint_col, 1, cv2.LINE_AA)
+
                     # Marcadores X en posiciones de inicio
                     for rid, rpos in RESET_POS.items():
                         rc  = TEAM_COLOR['red'] if rid in TEAM_RED_IDS else TEAM_COLOR['blue']
@@ -533,12 +568,12 @@ def visualization_process_2v2(perception_pipe, decision_pipe, keyboard_pipe,
                     pass
                 break
             elif key == ord(' '):
-                was_init = init_phase_viz
-                init_phase_viz = False
                 goal_reset_viz = False
                 try:
                     keyboard_pipe.send({'command': 'toggle'})
-                    if not was_init:
+                    # Enviar señal tablero sólo cuando el partido arranca de verdad
+                    # (desde init_ready) o cuando se toggle durante juego activo
+                    if init_ready_viz or (not pre_init_viz and not init_phase_viz):
                         keyboard_pipe.send({'command': 'tablero', 'cmd': 1})
                 except Exception:
                     pass
@@ -607,11 +642,13 @@ def main():
     log.info("Cámara       : /dev/video%d", camera_id)
     log.info("Campo        : FIELD_CAM %dx%d", CAMERA_PERSPECTIVE_WIDTH, CAMERA_PERSPECTIVE_HEIGHT)
     log.info("=" * 65)
-    log.info("Secuencia de validacion:")
-    log.info("  1. Verificar que los 4 robots aparecen en la visualizacion (sin activar BT)")
-    log.info("  2. Presionar R: solo rojo se mueve")
-    log.info("  3. Presionar B: solo azul se mueve")
-    log.info("  4. Presionar ESPACIO: partido completo")
+    log.info("Secuencia de inicio:")
+    log.info("  1. Verificar que los 4 robots aparecen en la visualizacion")
+    log.info("  2. Colocar la pelota en el centro del campo (indicador naranja)")
+    log.info("  3. Presionar ESPACIO: robots se organizan en posiciones de inicio")
+    log.info("  4. Esperar a que el indicador diga ROBOTS LISTOS")
+    log.info("  5. Presionar ESPACIO: partido inicia (solo si robots y pelota OK)")
+    log.info("  (R / B: activar solo rojo / azul para pruebas)")
     log.info("=" * 65)
 
     p1 = multiprocessing.Process(
@@ -637,7 +674,7 @@ def main():
             proc.start()
             log.info("  %s iniciado (PID: %d)", proc.name, proc.pid)
         log.info("")
-        log.info("Sistema corriendo. Presiona ESPACIO en la ventana para iniciar el partido.")
+        log.info("Sistema corriendo. Presiona ESPACIO para organizar robots, luego ESPACIO de nuevo para iniciar.")
         for proc in processes:
             proc.join()
     except KeyboardInterrupt:
