@@ -39,6 +39,11 @@ from robot_soccer.config import (
     POST_KICK_COOLDOWN_S,
     PATH_PLANNING_ROBOT_OBSTACLE_RADIUS,
     PATH_PLANNING_OBSTACLE_CLEARANCE,
+    RIVAL_HOLD_YIELD_S,
+    RIVAL_PRESS_MARGIN_PX,
+    BALL_INTERCEPT_MIN_SPEED_PX_PER_TICK,
+    BALL_INTERCEPT_LOOKAHEAD_TICKS,
+    BALL_INTERCEPT_MAX_PX,
 )
 
 from .base import (
@@ -1334,23 +1339,37 @@ def _move_behind_ball_start(blackboard):
             )
             return NodeStatus.SUCCESS
 
+    # Intercepción: si la pelota se mueve (tras un kick), apuntar a posición futura.
+    # Usa posición predicha para el target pero posición real para el trigger de
+    # recalculación y los checks de obstáculos (pelota física sigue siendo el obstáculo).
+    prev_pos = getattr(blackboard, '_ball_prev_pos', None)
+    blackboard._ball_prev_pos = ball_pos.copy()
+    ball_pos_target = ball_pos.copy()
+    if prev_pos is not None:
+        vel   = ball_pos - prev_pos
+        speed = float(np.linalg.norm(vel))
+        if speed > BALL_INTERCEPT_MIN_SPEED_PX_PER_TICK:
+            lookahead      = min(speed * BALL_INTERCEPT_LOOKAHEAD_TICKS, BALL_INTERCEPT_MAX_PX)
+            ball_pos_target = ball_pos + (vel / speed) * lookahead
+
     # Vector del arco hacia la pelota (dirección "detrás de la pelota")
-    goal_to_ball = ball_pos - goal_pos
+    goal_to_ball = ball_pos_target - goal_pos
     dist_gtb = np.linalg.norm(goal_to_ball)
     if dist_gtb < 1.0:
         return NodeStatus.FAILURE
 
     unit_behind = goal_to_ball / dist_gtb  # apunta desde arco → pelota (y más allá)
 
-    # Posición ideal: BEHIND_BALL_APPROACH_PX más allá de la pelota, lejos del arco
-    behind_pos = ball_pos + unit_behind * BEHIND_BALL_APPROACH_PX
+    # Posición ideal: BEHIND_BALL_APPROACH_PX más allá de la pelota (predicha), lejos del arco
+    behind_pos = ball_pos_target + unit_behind * BEHIND_BALL_APPROACH_PX
     behind_pos = np.array(blackboard.field.clamp(behind_pos.astype(int)), dtype=float)
 
     # Guardar estado para on_running
+    # _behind_ball_ref usa posición REAL: trigger de recalculación compara posiciones reales
     blackboard._behind_ball_pos = behind_pos.copy()
     blackboard._behind_ball_ref = ball_pos.copy()
 
-    # ¿El camino directo choca con la pelota?
+    # ¿El camino directo choca con la pelota? (usa posición real como obstáculo físico)
     if _path_near_ball(player_pos, behind_pos, ball_pos):
         # Calcular desvío lateral: perpendicular al eje arco-pelota
         ball_to_goal_unit = -unit_behind  # apunta de pelota → arco
@@ -1397,6 +1416,9 @@ def _move_behind_ball_running(blackboard):
     player_pos = np.array(blackboard.player.get_position(), dtype=float)
     ball_pos   = np.array(blackboard.ball.get_position(), dtype=float)
     phase      = getattr(blackboard, '_behind_ball_phase', 'direct')
+
+    # Actualizar posición anterior de la pelota cada tick para la predicción de intercepción
+    blackboard._ball_prev_pos = ball_pos.copy()
 
     # Fase RETROCESO: retrocede hasta que la pelota esté a distancia segura para rotar
     if phase == 'retreat':
@@ -1506,6 +1528,7 @@ def _advance_to_contact_start(blackboard):
     # Reiniciar estado de contacto
     blackboard._contact_made         = False
     blackboard._contact_settle_start = None
+    blackboard._rival_contact_start  = None
 
     # Guardar timestamp y ángulo inicial para timeout y detección de deriva
     blackboard._advance_start_time      = time.time()
@@ -1583,20 +1606,56 @@ def _advance_to_contact_running(blackboard):
     # FASE 1: Acercamiento (PID con velocidad limitada)
     # ──────────────────────────────
     if not contact_made:
-        # Rival ya en zona de contacto y más cerca que yo → ceder (estilo SSL: gana el más cercano)
+        # Rival ya en zona de contacto y más cerca que yo → ceder
+        # Tie-break por error angular (mérito): cede el robot peor apuntado, no el de mayor ID.
+        my_to_ball_deg = float(np.degrees(np.arctan2(
+            ball_pos[1] - player_pos[1], ball_pos[0] - player_pos[0]
+        )))
+        my_head_err = abs((my_to_ball_deg - float(blackboard.player.angle) + 180) % 360 - 180)
+
+        rival_closer   = False
+        rival_id_log   = None
+        rival_dist_log = float('inf')
+
         for opp in blackboard.opponents:
-            opp_pos      = np.array(opp.get_position(), dtype=float)
+            opp_pos       = np.array(opp.get_position(), dtype=float)
             opp_dist_ball = float(np.linalg.norm(opp_pos - ball_pos))
             if opp_dist_ball < CAPTURE_ACTIVATE_DISTANCE_PX:
-                yield_on_tie = (abs(opp_dist_ball - dist) < 5 and opp.id < player_id)
+                opp_to_ball_deg = float(np.degrees(np.arctan2(
+                    ball_pos[1] - opp_pos[1], ball_pos[0] - opp_pos[0]
+                )))
+                opp_head_err  = abs((opp_to_ball_deg - float(opp.angle) + 180) % 360 - 180)
+                yield_on_tie  = abs(opp_dist_ball - dist) < 5 and opp_head_err <= my_head_err
                 if opp_dist_ball < dist or yield_on_tie:
-                    _clear_advance_state(blackboard, player_id)
-                    robot_status_logger.emit_event(
-                        player_id,
-                        f"advance_contact RIVAL EN CONTACTO: R{opp.id}={opp_dist_ball:.0f}px "
-                        f"< yo={dist:.0f}px -> FAILURE"
-                    )
-                    return NodeStatus.FAILURE
+                    rival_closer   = True
+                    rival_id_log   = opp.id
+                    rival_dist_log = opp_dist_ball
+                    break
+
+        if rival_closer:
+            now = time.time()
+            if getattr(blackboard, '_rival_contact_start', None) is None:
+                blackboard._rival_contact_start = now
+                robot_status_logger.emit_event(
+                    player_id,
+                    f"advance_contact RIVAL EN CONTACTO: R{rival_id_log}={rival_dist_log:.0f}px"
+                    f" < yo={dist:.0f}px -> cediendo"
+                )
+            elapsed = now - blackboard._rival_contact_start
+            if elapsed >= RIVAL_HOLD_YIELD_S:
+                blackboard._rival_contact_start = None
+                _clear_advance_state(blackboard, player_id)
+                robot_status_logger.emit_event(player_id, "advance_contact YIELD timeout -> FAILURE")
+                return NodeStatus.FAILURE
+            # Press position: retroceder justo fuera de zona del rival
+            away = player_pos - ball_pos
+            norm = float(np.linalg.norm(away))
+            unit = away / norm if norm > 1 else np.array([0.0, 1.0])
+            press = ball_pos + unit * (CAPTURE_ACTIVATE_DISTANCE_PX + RIVAL_PRESS_MARGIN_PX)
+            blackboard.command_manager.move_robot_to(player_id, (int(press[0]), int(press[1])))
+            return NodeStatus.RUNNING
+        else:
+            blackboard._rival_contact_start = None
 
         # Pelota empujada demasiado lejos
         if dist > BEHIND_BALL_APPROACH_PX * ADVANCE_ESCAPE_FACTOR:

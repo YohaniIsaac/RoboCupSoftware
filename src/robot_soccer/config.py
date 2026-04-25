@@ -484,6 +484,24 @@ SETTLE_ESCAPE_FACTOR   = 2.0   # factor — margen de escape durante asentamient
 ADVANCE_MAX_TIME_S     = 5.0   # s  — timeout en acercamiento sin lograr contacto
 ADVANCE_BALL_DRIFT_DEG = 50.0  # °  — deriva máx. del ángulo a pelota desde inicio del avance
 
+# Parámetros del yield cuando el rival tiene la pelota.
+# RIVAL_HOLD_YIELD_S: cuánto tiempo el atacante cedente mantiene posición de press
+#   antes de reintentar captura. Evita el busy-loop pero no bloquea indefinidamente.
+# RIVAL_PRESS_MARGIN_PX: margen extra sobre CAPTURE_ACTIVATE_DISTANCE para el press,
+#   manteniendo al robot justo fuera de la zona del rival.
+RIVAL_HOLD_YIELD_S    = 1.5   # s  — tiempo cediendo posesión antes de reintentar captura
+RIVAL_PRESS_MARGIN_PX = 15    # px — margen sobre CAPTURE_ACTIVATE_DISTANCE en posición press
+
+# Parámetros de intercepción de pelota en movimiento.
+# Cuando la pelota se desplaza rápido (tras un kick), los robots calculan el punto
+# de llegada en vez de perseguir la posición actual → anticipan en lugar de perseguir.
+# MIN_SPEED: umbral para ignorar ruido estático de cámara (~3-5 px/tick).
+# LOOKAHEAD: ticks hacia adelante a predecir (tick ≈ 0.1s; 3 ticks = ~0.3s).
+# MAX_PX: límite de desplazamiento de predicción para evitar overshoots agresivos.
+BALL_INTERCEPT_MIN_SPEED_PX_PER_TICK = 8    # px/tick — velocidad mínima para activar predicción
+BALL_INTERCEPT_LOOKAHEAD_TICKS       = 3    # ticks   — adelanto de predicción (~0.3s)
+BALL_INTERCEPT_MAX_PX                = 60   # px      — desplazamiento máximo de predicción
+
 # Factor multiplicador de PWM cuando el robot tiene posesión de la pelota.
 # El dribbler genera fricción que frena la rotación/movimiento. Este factor
 # compensa esa resistencia amplificando los PWM enviados a los motores.
