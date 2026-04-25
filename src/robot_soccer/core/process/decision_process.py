@@ -641,6 +641,7 @@ def decision_process_2v2(
     init_phase          = True    # pre-juego: robots se ordenan antes del primer saque
     init_orient_issued  = False   # orientación emitida (fase 1)
     init_orient_done    = False   # orientación completada → emitir movimiento (fase 2)
+    init_move_done      = False   # robots en posición → re-orientar hacia la pelota (fase 3)
 
     VIZ_INTERVAL    = 0.04
     BT_TICK_INTERVAL = 0.1
@@ -739,7 +740,7 @@ def decision_process_2v2(
                     elif command == 'toggle':
                         if init_phase:
                             init_phase = False
-                            init_orient_issued = init_orient_done = False
+                            init_orient_issued = init_orient_done = init_move_done = False
                             active_red = active_blue = True
                             for bm in (bm_red, bm_blue):
                                 for p in bm.team_players:
@@ -913,6 +914,23 @@ def decision_process_2v2(
                                         ctrl.max_linear_pwm_override = ctrl.compute_reset_pwm(p.id, RESET_MOVE_FACTOR)
                                     bm.command_manager.move_robot_to(p.id, rpos)
                         log.info("Fase inicial: orientación lista → moviendo a posiciones de inicio (RRT*)")
+
+                # Subfase 3: cuando todos llegaron a posición → re-orientar hacia la pelota
+                if init_orient_done and not init_move_done:
+                    move_pending = any(
+                        bm.command_manager.actions_in_progress.get(p.id)
+                        for bm in (bm_red, bm_blue) for p in bm.team_players
+                    )
+                    if not move_pending:
+                        init_move_done = True
+                        for bm in (bm_red, bm_blue):
+                            for p in bm.team_players:
+                                if ball_initialized:
+                                    angle = math.degrees(math.atan2(ball.y - p.y, ball.x - p.x))
+                                else:
+                                    angle = RESET_ANGLE[bm.team]
+                                bm.command_manager.rotate_robot_to(p.id, angle)
+                        log.info("Fase inicial: en posición → orientando robots hacia la pelota")
 
                 # Ejecutar la subfase activa (rotación o movimiento)
                 for bm in (bm_red, bm_blue):
