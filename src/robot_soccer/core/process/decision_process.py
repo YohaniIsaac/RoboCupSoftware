@@ -745,7 +745,9 @@ def decision_process_2v2(
                             init_phase = True
                             for bm in (bm_red, bm_blue):
                                 bm.command_manager.replan_cooldown_s_override = 2.0
-                            log.info("Iniciando organización — orientando y moviendo robots a posiciones de inicio")
+                            log.info("┌─────────────────────────────────────────────────────┐")
+                            log.info("│ ► INICIANDO ORGANIZACIÓN DE ROBOTS                   │")
+                            log.info("└─────────────────────────────────────────────────────┘")
                         elif init_phase and not init_ready:
                             log.info("Robots aún organizándose, espera que lleguen a sus posiciones...")
                         elif init_phase and init_ready:
@@ -763,7 +765,9 @@ def decision_process_2v2(
                                             ctrl.max_linear_pwm_override = None
                                         bm.command_manager.actions_in_progress.pop(p.id, None)
                                     bm.command_manager.replan_cooldown_s_override = None
-                                log.info("PARTIDO INICIADO desde posiciones de inicio")
+                                log.info("┌─────────────────────────────────────────────────────┐")
+                                log.info("│ ► COMIENZA PARTIDO (robots en posición)              │")
+                                log.info("└─────────────────────────────────────────────────────┘")
                         elif goal_reset_active:
                             goal_reset_active = False
                             active_red = active_blue = True
