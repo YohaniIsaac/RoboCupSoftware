@@ -44,6 +44,7 @@ from robot_soccer.config import (
     BALL_INTERCEPT_MIN_SPEED_PX_PER_TICK,
     BALL_INTERCEPT_LOOKAHEAD_TICKS,
     BALL_INTERCEPT_MAX_PX,
+    BEHIND_BALL_RECALC_MIN_S,
 )
 
 from .base import (
@@ -1430,10 +1431,16 @@ def _move_behind_ball_running(blackboard):
         blackboard.last_action = "retreating_from_ball"
         return NodeStatus.RUNNING
 
-    # Recalcular si la pelota se movió demasiado
+    # Recalcular si la pelota se movió demasiado.
+    # Cooldown: limita recalculaciones a ~3Hz para no inundar el planner RRT*
+    # cuando la pelota vuela rápido tras un kick.
     if np.linalg.norm(ball_pos - blackboard._behind_ball_ref) > 60:
-        robot_status_logger.emit_event(player_id, "behind_ball PELOTA MOVIDA: recalculando")
-        return _move_behind_ball_start(blackboard)
+        now = time.time()
+        last_recalc = getattr(blackboard, '_behind_ball_recalc_t', 0.0)
+        if now - last_recalc >= BEHIND_BALL_RECALC_MIN_S:
+            blackboard._behind_ball_recalc_t = now
+            robot_status_logger.emit_event(player_id, "behind_ball PELOTA MOVIDA: recalculando")
+            return _move_behind_ball_start(blackboard)
 
     in_progress = player_id in blackboard.command_manager.actions_in_progress
 

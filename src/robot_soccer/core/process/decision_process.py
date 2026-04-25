@@ -634,6 +634,7 @@ def decision_process_2v2(
     active_blue         = False
     running             = True
     ball_out_active     = False   # pelota fuera — robots congelados, BT pausado
+    ball_out_frames     = 0       # frames consecutivos con pelota fuera (histéresis)
     goal_reset_active   = False   # pausa post-gol — robots navegan a reset positions
     reset_orient_issued = False   # orientación inicial emitida (fase 1 del reset post-gol)
     reset_orient_done   = False   # orientación completada → emitir movimiento (fase 2)
@@ -688,7 +689,13 @@ def decision_process_2v2(
                     # ignorar ball_out igual que en SSL (árbitro maneja la pelota).
                     ball_out_new = data.get('ball_out', False)
                     game_running = not init_phase and not goal_reset_active
-                    if ball_out_new and not ball_out_active and game_running:
+                    # Histéresis: requerir 3 frames consecutivos para activar ball_out.
+                    # Previene oscilaciones cuando la pelota roza el borde o parpadea.
+                    if ball_out_new and game_running:
+                        ball_out_frames += 1
+                    else:
+                        ball_out_frames = 0
+                    if ball_out_frames >= 3 and not ball_out_active and game_running:
                         ball_out_active = True
                         log.info("PELOTA FUERA: robots congelados")
                         for fid in [p.id + 1 for p in all_players]:
@@ -697,10 +704,12 @@ def decision_process_2v2(
                             for p in bm.team_players:
                                 bm.command_manager.actions_in_progress.pop(p.id, None)
                     elif not ball_out_new and ball_out_active:
+                        ball_out_frames = 0
                         ball_out_active = False
                         log.info("PELOTA EN JUEGO: reanudando")
                     elif ball_out_active and not game_running:
                         # Transición a init/reset mientras ball_out estaba activo → limpiar
+                        ball_out_frames = 0
                         ball_out_active = False
                 except Exception:
                     pass

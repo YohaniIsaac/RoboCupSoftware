@@ -74,7 +74,10 @@ def planning_worker(ctrl_pipe, path_queue, clearance=None):
                     path_queue.get_nowait()   # descartar path obsoleto si la cola estaba llena
                 except Exception:
                     pass
-                path_queue.put_nowait({'path': path, 'goal': goal_pos})
+                try:
+                    path_queue.put_nowait({'path': path, 'goal': goal_pos})
+                except Exception:
+                    pass  # cola llena por race condition — el proceso no debe morir
             else:
                 log.warning("RRT* no encontro ruta en %.2fs", elapsed)
 

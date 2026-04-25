@@ -489,6 +489,8 @@ ADVANCE_BALL_DRIFT_DEG = 50.0  # °  — deriva máx. del ángulo a pelota desde
 #   antes de reintentar captura. Evita el busy-loop pero no bloquea indefinidamente.
 # RIVAL_PRESS_MARGIN_PX: margen extra sobre CAPTURE_ACTIVATE_DISTANCE para el press,
 #   manteniendo al robot justo fuera de la zona del rival.
+BEHIND_BALL_RECALC_MIN_S  = 0.30  # s  — intervalo mínimo entre recalculaciones por pelota movida
+                                   #      limita inundación del planner tras un kick (~3Hz máx)
 RIVAL_HOLD_YIELD_S    = 1.5   # s  — tiempo cediendo posesión antes de reintentar captura
 RIVAL_PRESS_MARGIN_PX = 15    # px — margen sobre CAPTURE_ACTIVATE_DISTANCE en posición press
 
