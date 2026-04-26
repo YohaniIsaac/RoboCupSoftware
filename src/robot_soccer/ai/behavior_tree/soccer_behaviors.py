@@ -25,6 +25,7 @@ from robot_soccer.config import (
     CAPTURE_OVERSHOOT_PX,
     CAPTURE_CONFIRM_DISTANCE_PX,
     CAPTURE_CREEP_SPEED_PWM,
+    CORRIDOR_CLEARANCE_PX,
     DRIBBLER_HOLD_POWER,
     BEHIND_BALL_APPROACH_PX,
     BEHIND_BALL_LATERAL_OFFSET_PX,
@@ -1571,6 +1572,31 @@ def _advance_to_contact_start(blackboard):
     # Calcular target de overshoot (más allá de la pelota hacia el arco)
     overshoot = _compute_overshoot_target(ball_pos, goal_pos, CAPTURE_OVERSHOOT_PX)
     target = (int(overshoot[0]), int(overshoot[1]))
+
+    # Verificar corredor libre: ningún otro robot debe estar perpendicularmente
+    # dentro del segmento robot→overshoot. La creep mode avanza en línea recta
+    # sin RRT*, por lo que sin este check colisionaría. Si está bloqueado, FAILURE
+    # → behind_ball reposiciona por flanco lateral.
+    seg = np.array([target[0] - player_pos[0], target[1] - player_pos[1]], dtype=float)
+    seg_l2 = float(np.dot(seg, seg))
+    if seg_l2 > 1.0:
+        for other in list(blackboard.team_players) + list(blackboard.opponents):
+            if other.id == player_id:
+                continue
+            other_pos = np.array(other.get_position(), dtype=float)
+            t = float(np.dot(other_pos - player_pos, seg) / seg_l2)
+            if t <= 0.0 or t >= 1.0:
+                continue   # proyección fuera del segmento (en los extremos)
+            proj = player_pos + t * seg
+            perp = float(np.linalg.norm(other_pos - proj))
+            if perp < CORRIDOR_CLEARANCE_PX:
+                _clear_advance_state(blackboard, player_id)
+                robot_status_logger.emit_event(
+                    player_id,
+                    f"advance_contact CORREDOR BLOQUEADO por R{other.id} "
+                    f"(perp={perp:.0f}px < {CORRIDOR_CLEARANCE_PX}px) -> FAILURE"
+                )
+                return NodeStatus.FAILURE
 
     # Activar PID con velocidad lineal limitada (creep mode con steering)
     controller = blackboard.command_manager.controllers.get(player_id)

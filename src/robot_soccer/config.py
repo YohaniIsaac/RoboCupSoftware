@@ -257,10 +257,10 @@ CAMERA_PERSPECTIVE_ENABLED = True  # Habilitar/deshabilitar transformacion de pe
 # Puntos de origen (esquinas de la cancha en la imagen de la cámara)
 # Ajusta estos valores usando el script scripts/calibrate_perspective.py
 CAMERA_PERSPECTIVE_SRC_POINTS = [
-    (53, 32),      # Top-left (esquina superior izquierda)
-    (621, 42),     # Top-right (esquina superior derecha)
-    (615, 369),    # Bottom-right (esquina inferior derecha)
-    (46, 357)       # Bottom-left (esquina inferior izquierda)
+    (44, 17),      # Top-left (esquina superior izquierda)
+    (629, 11),     # Top-right (esquina superior derecha)
+    (631, 353),    # Bottom-right (esquina inferior derecha)
+    (40, 356)       # Bottom-left (esquina inferior izquierda)
 ]
 
 # Dimensiones de la imagen de salida (rectángulo destino)
@@ -271,11 +271,11 @@ CAMERA_PERSPECTIVE_HEIGHT = 480  # Alto de la imagen transformada
 FIELD_CAM = FieldGeometry(
     width=CAMERA_PERSPECTIVE_WIDTH,
     height=CAMERA_PERSPECTIVE_HEIGHT,
-    goal_left_x=3,
-    goal_left_top_y=184,
-    goal_left_bottom_y=298,
-    goal_right_x=635,
-    goal_right_top_y=185,
+    goal_left_x=10,
+    goal_left_top_y=190,
+    goal_left_bottom_y=294,
+    goal_right_x=622,
+    goal_right_top_y=191,
     goal_right_bottom_y=297,
     margin=15,
 )
@@ -468,6 +468,13 @@ CAPTURE_CREEP_SPEED_PWM = 20  # PWM — velocidad máxima lineal durante PID de 
                               # corrección angular completa. Calibrar con teclas N/M.
                               # Intencionalmente por debajo de pwm_min del JSON: en creep mode
                               # el piso es 0 (no pwm_min), lo que permite avance ultra-lento.
+
+# Distancia perpendicular (px) bajo la cual se considera que otro robot bloquea
+# el corredor del creep robot→overshoot. Si la proyección de un robot sobre el
+# segmento cae estrictamente dentro de él Y la distancia perpendicular es menor
+# a este valor, advancing_to_contact retorna FAILURE y el atacante reposiciona
+# por flanco lateral via PosicionarDetrásPelota.
+CORRIDOR_CLEARANCE_PX = 40
 
 # Tiempo de espera (segundos) tras confirmar contacto con la pelota.
 # Permite que la pelota se acomode contra el robot antes de disparar.
