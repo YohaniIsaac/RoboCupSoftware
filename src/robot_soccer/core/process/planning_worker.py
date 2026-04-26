@@ -5,6 +5,7 @@ Recibe requests (robot_pos, goal_pos, obstacles) por pipe y devuelve
 paths via queue. El goal es dinámico: se incluye en cada request.
 """
 import logging
+import math
 import time
 
 from robot_soccer.ai.path_planning.rrt_star_smart import RrtStarSmart
@@ -15,6 +16,7 @@ from robot_soccer.config import (
     RRT_ITER_MAX,
     RRT_SEARCH_RADIUS,
     RRT_STEP_LEN,
+    RRT_WAYPOINT_ARRIVAL_PX,
 )
 
 log = logging.getLogger(__name__)
@@ -69,6 +71,18 @@ def planning_worker(ctrl_pipe, path_queue, clearance=None):
             if path and len(path) > 0:
                 path = list(reversed(path))
                 path = [(int(p[0]), int(p[1])) for p in path]
+                # Sanity check: el último waypoint debe estar cerca del goal
+                # solicitado. Si no, el RRT* SMART produjo un path inválido (e.g.
+                # x_goal sin parent → path = [start] solamente, o smoothing
+                # erróneo que sustituyó el último wp). Descartar para evitar
+                # que el robot navegue hacia un punto sin relación con el goal.
+                last_wp_to_goal = math.hypot(path[-1][0] - goal_pos[0],
+                                             path[-1][1] - goal_pos[1])
+                if last_wp_to_goal > RRT_WAYPOINT_ARRIVAL_PX:
+                    log.warning("Path RRT* descartado: ultimo wp %s a %.0fpx "
+                                "del goal %s (>%dpx)", path[-1], last_wp_to_goal,
+                                goal_pos, RRT_WAYPOINT_ARRIVAL_PX)
+                    continue
                 log.info("Path encontrado: %d wp en %.2fs", len(path), elapsed)
                 try:
                     path_queue.get_nowait()   # descartar path obsoleto si la cola estaba llena
