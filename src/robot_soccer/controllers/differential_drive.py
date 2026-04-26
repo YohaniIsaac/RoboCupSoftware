@@ -235,6 +235,11 @@ class DifferentialDriveController:
                 'stuck_ref_y': None,
                 'stuck_window_start': 0.0, # timestamp de inicio de la ventana actual
                 'stuck_auto_kicked': False, # True cuando auto-kick fue disparado en esta ventana
+                # Histéresis de llegada: una vez declarado arrived, no reactivar movimiento
+                # mientras dist < 2× position_threshold. Evita ping-pong por overshoot
+                # inercial cuando la calibración del robot tiene rango PWM estrecho.
+                'arrived': False,
+                'last_target_pos': None,
             }
         return self._pid_state[robot_id]
 
@@ -323,18 +328,33 @@ class DifferentialDriveController:
         dy = target_pos[1] - robot.y
         distance = math.sqrt(dx**2 + dy**2)
 
-        if not hasattr(self, '_last_target') or self._last_target != target_pos:
+        state = self._get_pid_state(robot.id)
+        robot_min_speed, robot_max_speed = self._get_robot_speed_limits(robot.id)
+
+        # Detección por-robot de target nuevo: resetea histéresis de llegada para
+        # que un re-comando al mismo punto no quede atrapado en estado arrived.
+        if state['last_target_pos'] != target_pos:
             robot_status_logger.emit_event(
                 robot.id,
                 f"NUEVO TARGET: ({int(target_pos[0])},{int(target_pos[1])}) "
                 f"desde ({int(robot.x)},{int(robot.y)}) d={distance:.0f}px"
             )
-            self._last_target = target_pos
-
-        state = self._get_pid_state(robot.id)
-        robot_min_speed, robot_max_speed = self._get_robot_speed_limits(robot.id)
+            state['last_target_pos'] = target_pos
+            state['arrived']         = False
 
         # === 2. VERIFICACIÓN DE LLEGADA ===
+        # Histéresis: si ya declaramos arrived, no reactivamos motores mientras
+        # dist < 2× threshold. Evita ping-pong por overshoot inercial (R1 con
+        # rango PWM estrecho oscilaba entre 2-7px del waypoint).
+        if state['arrived']:
+            if distance < 2.0 * self.position_threshold:
+                if target_angle is not None:
+                    return self.rotate_to_angle(robot, target_angle)
+                self._send_motor_commands(robot, 0, 0)
+                return True
+            # Salimos del rango de histéresis: liberar y reactivar movimiento.
+            state['arrived'] = False
+
         latency_s = self.LATENCY_COMPENSATION_MS / 1000.0
         speed_norm = abs(state['last_linear_speed']) / 255.0
         predicted_dist = distance - speed_norm * 200.0 * latency_s
@@ -345,6 +365,7 @@ class DifferentialDriveController:
                 f"STOP PREDICTIVO: dist={distance:.1f}px pred={predicted_dist:.1f}px"
             )
             state['last_linear_speed'] = 0
+            state['arrived']           = True
             if target_angle is not None:
                 # No enviar STOP: rotate_to_angle gestiona los motores directamente
                 return self.rotate_to_angle(robot, target_angle)
@@ -357,6 +378,7 @@ class DifferentialDriveController:
                 f"WAYPOINT ALCANZADO: dist={distance:.1f}px"
             )
             state['last_linear_speed'] = 0
+            state['arrived']           = True
             if target_angle is not None:
                 # No enviar STOP: rotate_to_angle gestiona los motores directamente
                 return self.rotate_to_angle(robot, target_angle)
