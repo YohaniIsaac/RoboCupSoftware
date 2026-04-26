@@ -639,14 +639,13 @@ def decision_process_2v2(
     ball_out_active     = False   # pelota fuera — robots congelados, BT pausado
     ball_out_frames     = 0       # frames consecutivos con pelota fuera (histéresis)
     goal_reset_active   = False   # pausa post-gol — robots navegan a reset positions
-    reset_orient_issued = False   # orientación inicial emitida (fase 1 del reset post-gol)
-    reset_orient_done   = False   # orientación completada → emitir movimiento (fase 2)
+    reset_move_issued   = False   # move emitido (reset post-gol)
+    reset_robot_phase   = {}      # id → 'moving' | 'orienting' | 'done'
     pre_init            = True    # esperando ESPACIO1: robots quietos, aún no organizan
     init_phase          = False   # True desde ESPACIO1: robots organizándose
     init_ready          = False   # True cuando robots llegaron y están orientados
-    init_orient_issued  = False   # orientación emitida (fase 1)
-    init_orient_done    = False   # orientación completada → emitir movimiento (fase 2)
-    init_move_done      = False   # robots en posición → re-orientar hacia la pelota (fase 3)
+    init_move_issued    = False   # move emitido (fase inicial)
+    init_robot_phase    = {}      # id → 'moving' | 'orienting' | 'done'
 
     VIZ_INTERVAL    = 0.04
     BT_TICK_INTERVAL = 0.1
@@ -729,8 +728,8 @@ def decision_process_2v2(
                         running = False
                     elif command == 'goal_scored':
                         goal_reset_active   = True
-                        reset_orient_issued = False
-                        reset_orient_done   = False
+                        reset_move_issued   = False
+                        reset_robot_phase   = {}
                         active_red = active_blue = False
                         for bm in (bm_red, bm_blue):
                             for p in bm.team_players:
@@ -759,7 +758,8 @@ def decision_process_2v2(
                             else:
                                 init_phase  = False
                                 init_ready  = False
-                                init_orient_issued = init_orient_done = init_move_done = False
+                                init_move_issued = False
+                                init_robot_phase = {}
                                 active_red  = active_blue = True
                                 for bm in (bm_red, bm_blue):
                                     for p in bm.team_players:
@@ -906,65 +906,54 @@ def decision_process_2v2(
 
             all_initialized = players_initialized.issuperset(set(all_ids))
 
-            # --- Fase inicial: orientar → mover a posiciones de inicio ---
+            # --- Fase inicial: mover directo a posiciones, orientar por robot al llegar ---
             if init_phase and all_initialized:
-                # Subfase 1: todos giran al ángulo de ataque canónico
-                if not init_orient_issued:
-                    init_orient_issued = True
+                # Paso 1: emitir movimiento inmediatamente (sin pre-orientación)
+                if not init_move_issued:
+                    init_move_issued = True
+                    init_robot_phase = {
+                        p.id: 'moving'
+                        for bm in (bm_red, bm_blue) for p in bm.team_players
+                    }
                     for bm in (bm_red, bm_blue):
-                        ang = RESET_ANGLE[bm.team]
+                        assignment = _assign_reset(bm.team_players, RESET_POS)
                         for p in bm.team_players:
-                            bm.command_manager.rotate_robot_to(p.id, ang)
-                    log.info("Fase inicial: orientando robots (rojo→%.0f°, azul→%.0f°)",
-                             RESET_ANGLE['red'], RESET_ANGLE['blue'])
+                            rpos = assignment.get(p.id)
+                            if rpos:
+                                ctrl = bm.command_manager.controllers.get(p.id)
+                                if ctrl:
+                                    ctrl.max_linear_pwm_override = ctrl.compute_reset_pwm(p.id, RESET_MOVE_FACTOR)
+                                bm.command_manager.move_robot_to(p.id, rpos)
+                    log.info("Fase inicial: moviendo robots a posiciones de inicio (RRT*)")
 
-                # Subfase 2: cuando todos terminaron de girar → emitir movimiento
-                if init_orient_issued and not init_orient_done:
-                    orient_pending = any(
-                        bm.command_manager.actions_in_progress.get(p.id, {}).get('type') == 'rotate'
-                        for bm in (bm_red, bm_blue) for p in bm.team_players
-                    )
-                    if not orient_pending:
-                        init_orient_done = True
-                        for bm in (bm_red, bm_blue):
-                            assignment = _assign_reset(bm.team_players, RESET_POS)
-                            for p in bm.team_players:
-                                rpos = assignment.get(p.id)
-                                if rpos:
-                                    ctrl = bm.command_manager.controllers.get(p.id)
-                                    if ctrl:
-                                        ctrl.max_linear_pwm_override = ctrl.compute_reset_pwm(p.id, RESET_MOVE_FACTOR)
-                                    bm.command_manager.move_robot_to(p.id, rpos)
-                        log.info("Fase inicial: orientación lista → moviendo a posiciones de inicio (RRT*)")
-
-                # Subfase 3: cuando todos llegaron a posición → re-orientar hacia la pelota
-                if init_orient_done and not init_move_done:
-                    move_pending = any(
-                        bm.command_manager.actions_in_progress.get(p.id)
-                        for bm in (bm_red, bm_blue) for p in bm.team_players
-                    )
-                    if not move_pending:
-                        init_move_done = True
-                        for bm in (bm_red, bm_blue):
-                            for p in bm.team_players:
-                                if ball_initialized:
-                                    angle = math.degrees(math.atan2(ball.y - p.y, ball.x - p.x))
-                                else:
-                                    angle = RESET_ANGLE[bm.team]
+                # Paso 2: por robot — cuando llega, orientar hacia la pelota; cuando orienta, marcar listo
+                if init_move_issued:
+                    for bm in (bm_red, bm_blue):
+                        for p in bm.team_players:
+                            phase = init_robot_phase.get(p.id)
+                            action = bm.command_manager.actions_in_progress.get(p.id)
+                            if phase == 'moving' and action is None:
+                                angle = (
+                                    math.degrees(math.atan2(ball.y - p.y, ball.x - p.x))
+                                    if ball_initialized else RESET_ANGLE[bm.team]
+                                )
                                 bm.command_manager.rotate_robot_to(p.id, angle)
-                        log.info("Fase inicial: en posición → orientando robots hacia la pelota")
+                                init_robot_phase[p.id] = 'orienting'
+                                log.info("Robot %d en posición → orientando a pelota (%.1f°)", p.id, angle)
+                            elif phase == 'orienting' and action is None:
+                                init_robot_phase[p.id] = 'done'
+                                log.info("Robot %d listo", p.id)
 
-                # Subfase 4: orientación final completada → robots listos para iniciar
-                if init_move_done and not init_ready:
-                    final_orient_pending = any(
-                        bm.command_manager.actions_in_progress.get(p.id, {}).get('type') == 'rotate'
+                # Paso 3: todos listos → init_ready
+                if init_move_issued and not init_ready:
+                    if all(
+                        init_robot_phase.get(p.id) == 'done'
                         for bm in (bm_red, bm_blue) for p in bm.team_players
-                    )
-                    if not final_orient_pending:
+                    ):
                         init_ready = True
                         log.info("Robots listos en posiciones de inicio. Presiona ESPACIO para comenzar el partido.")
 
-                # Ejecutar la subfase activa (rotación o movimiento)
+                # Ejecutar subfase activa
                 for bm in (bm_red, bm_blue):
                     angle_degs = {p.id: p.angle for p in bm.team_players}
                     for p in bm.team_players:
@@ -976,39 +965,45 @@ def decision_process_2v2(
                     for p in bm.team_players:
                         p.angle = angle_degs[p.id]
 
-            # --- Reset post-gol: orientar → mover a posiciones iniciales ---
+            # --- Reset post-gol: mover directo a posiciones, orientar por robot al llegar ---
             if goal_reset_active and all_initialized:
-                # Subfase 1: todos giran al ángulo de ataque canónico
-                if not reset_orient_issued:
-                    reset_orient_issued = True
-                    for bm in (bm_red, bm_blue):
-                        ang = RESET_ANGLE[bm.team]
-                        for p in bm.team_players:
-                            bm.command_manager.rotate_robot_to(p.id, ang)
-                    log.info("Reset: orientando robots (rojo→%.0f°, azul→%.0f°)",
-                             RESET_ANGLE['red'], RESET_ANGLE['blue'])
-
-                # Subfase 2: cuando todos terminaron de girar → emitir movimiento
-                if reset_orient_issued and not reset_orient_done:
-                    orient_pending = any(
-                        bm.command_manager.actions_in_progress.get(p.id, {}).get('type') == 'rotate'
+                # Paso 1: emitir movimiento inmediatamente (sin pre-orientación)
+                if not reset_move_issued:
+                    reset_move_issued = True
+                    reset_robot_phase = {
+                        p.id: 'moving'
                         for bm in (bm_red, bm_blue) for p in bm.team_players
-                    )
-                    if not orient_pending:
-                        reset_orient_done = True
-                        for bm in (bm_red, bm_blue):
-                            assignment = _assign_reset(bm.team_players, RESET_POS)
-                            for p in bm.team_players:
-                                rpos = assignment.get(p.id)
-                                if rpos:
-                                    ctrl = bm.command_manager.controllers.get(p.id)
-                                    if ctrl:
-                                        ctrl.max_linear_pwm_override = ctrl.compute_reset_pwm(p.id, RESET_MOVE_FACTOR)
-                                    bm.command_manager.move_robot_to(p.id, rpos)
-                        log.info("Reset: orientación lista → moviendo (%.0f%% pwm_max por robot, RRT* activo)",
-                                 RESET_MOVE_FACTOR * 100)
+                    }
+                    for bm in (bm_red, bm_blue):
+                        assignment = _assign_reset(bm.team_players, RESET_POS)
+                        for p in bm.team_players:
+                            rpos = assignment.get(p.id)
+                            if rpos:
+                                ctrl = bm.command_manager.controllers.get(p.id)
+                                if ctrl:
+                                    ctrl.max_linear_pwm_override = ctrl.compute_reset_pwm(p.id, RESET_MOVE_FACTOR)
+                                bm.command_manager.move_robot_to(p.id, rpos)
+                    log.info("Reset: moviendo robots a posiciones iniciales (%.0f%% pwm_max, RRT*)",
+                             RESET_MOVE_FACTOR * 100)
 
-                # Ejecutar la subfase activa (rotación o movimiento)
+                # Paso 2: por robot — cuando llega, orientar hacia la pelota
+                if reset_move_issued:
+                    for bm in (bm_red, bm_blue):
+                        for p in bm.team_players:
+                            phase = reset_robot_phase.get(p.id)
+                            action = bm.command_manager.actions_in_progress.get(p.id)
+                            if phase == 'moving' and action is None:
+                                angle = (
+                                    math.degrees(math.atan2(ball.y - p.y, ball.x - p.x))
+                                    if ball_initialized else RESET_ANGLE[bm.team]
+                                )
+                                bm.command_manager.rotate_robot_to(p.id, angle)
+                                reset_robot_phase[p.id] = 'orienting'
+                                log.info("Reset robot %d en posición → orientando (%.1f°)", p.id, angle)
+                            elif phase == 'orienting' and action is None:
+                                reset_robot_phase[p.id] = 'done'
+
+                # Ejecutar subfase activa
                 for bm in (bm_red, bm_blue):
                     angle_degs = {p.id: p.angle for p in bm.team_players}
                     for p in bm.team_players:
