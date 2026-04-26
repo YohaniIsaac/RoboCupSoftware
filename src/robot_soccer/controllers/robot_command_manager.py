@@ -126,6 +126,18 @@ class RobotCommandManager:
         self._ball_pos: tuple | None = None  # (x, y) de la pelota, actualizado cada frame
         self.replan_cooldown_s_override: float | None = None  # None = usar RRT_REPLAN_COOLDOWN_S
 
+    def get_path_state(self, player_id):
+        """Retorna (path, wp_idx_activo) para visualización.
+
+        Returns:
+            tuple: (list[(x,y), ...], int) — lista vacía y -1 si el robot no
+            tiene path activo en este momento.
+        """
+        return (
+            list(self._current_paths.get(player_id, [])),
+            self._current_wp_idx.get(player_id, -1),
+        )
+
     def shutdown(self):
         """Cierra las conexiones y detiene todos los robots.
 

@@ -444,6 +444,7 @@ def decision_process(
                                     current_target_p = (int(tp[0]), int(tp[1]))
                                 except Exception:
                                     pass
+                        path_p, wp_idx_p = behavior_manager.command_manager.get_path_state(p.id)
                         players_viz[p.id] = {
                             'pos': (p.x, p.y) if p.id in players_initialized else None,
                             'angle_deg': p.angle if p.id in players_initialized else None,
@@ -451,6 +452,8 @@ def decision_process(
                             'has_ball': p.has_ball(),
                             'last_action': str(last_action_p) if last_action_p else None,
                             'target': current_target_p,
+                            'path': path_p,
+                            'wp_idx': wp_idx_p,
                             'action_type': action_type_p,
                         }
 
@@ -1099,6 +1102,7 @@ def decision_process_2v2(
                                     current_target = (int(tp[0]), int(tp[1]))
                                 except Exception:
                                     pass
+                            path, wp_idx = bm.command_manager.get_path_state(p.id)
                             players_viz[p.id] = {
                                 'pos': (p.x, p.y) if p.id in players_initialized else None,
                                 'angle_deg': p.angle if p.id in players_initialized else None,
@@ -1106,6 +1110,8 @@ def decision_process_2v2(
                                 'has_ball': p.has_ball(),
                                 'last_action': str(last_action) if last_action else None,
                                 'target': current_target,
+                                'path': path,
+                                'wp_idx': wp_idx,
                                 'team': p.team,
                             }
                     viz_state_pipe.send({

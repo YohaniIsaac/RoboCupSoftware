@@ -380,6 +380,21 @@ def visualization_process_2v2(perception_pipe, decision_pipe, keyboard_pipe,
                     base_color   = ROBOT_COLORS.get(rid, (180, 180, 180))
                     robot_color  = (0, 255, 255) if has_ball else base_color
 
+                    # Path RRT* del robot: segmentos entre waypoints + círculos
+                    # en cada uno. El waypoint activo se destaca con relleno.
+                    path = pstate.get('path') or []
+                    wp_idx = pstate.get('wp_idx', -1)
+                    if len(path) >= 1 and pos is not None:
+                        prev = pos
+                        for i, wp in enumerate(path):
+                            cv2.line(frame, prev, wp, base_color, 1, cv2.LINE_AA)
+                            prev = wp
+                        for i, wp in enumerate(path):
+                            r = 4 if i == wp_idx else 3
+                            cv2.circle(frame, wp, r,
+                                       base_color, -1 if i == wp_idx else 1,
+                                       cv2.LINE_AA)
+
                     if target:
                         tx, ty = target
                         arm = 8
@@ -388,7 +403,7 @@ def visualization_process_2v2(perception_pipe, decision_pipe, keyboard_pipe,
 
                     if pos:
                         rx, ry = pos
-                        if target and rol == 'atacante':
+                        if target and rol == 'atacante' and not path:
                             cv2.line(frame, (rx, ry), target, (200, 0, 200), 1, cv2.LINE_AA)
                         cv2.circle(frame, (rx, ry), 16, robot_color, 2, cv2.LINE_AA)
                         if angle_deg is not None:
