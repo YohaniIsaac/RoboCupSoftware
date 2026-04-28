@@ -15,6 +15,7 @@ from robot_soccer.config import (
     RRT_REPLAN_POSITION_PX,
     RRT_REPLAN_COOLDOWN_S,
     RRT_OBSTACLE_MOVE_PX,
+    ROTATE_RECOMMAND_MIN_DEG,
 )
 from robot_soccer.ai.path_planning.tools_for_path_planing import (
     path_closest_waypoint_idx,
@@ -485,17 +486,20 @@ class RobotCommandManager:
         Note:
             El ángulo se normaliza automáticamente al rango -180 a 180.
             La rotación se ejecuta de forma asíncrona.
-            Si ya hay una rotación en curso hacia el mismo ángulo (< 5°),
-            el comando se ignora para no interrumpir al PID.
+            Si ya hay una rotación en curso hacia un ángulo similar
+            (< ROTATE_RECOMMAND_MIN_DEG), el comando se ignora para no
+            interrumpir al PID con jitter de detección.
 
         Example:
             >>> manager.rotate_robot_to(1, 90)  # Girar hacia arriba
         """
-        # Guard: no sobreescribir rotación en curso si el ángulo es similar
+        # Guard: no sobreescribir rotación en curso si el ángulo es similar.
+        # El umbral está calibrado para absorber el jitter de la detección de
+        # pelota (4-8°/frame) sin perder responsividad ante cambios reales.
         existing = self.actions_in_progress.get(player_id)
         if existing and existing['type'] == 'rotate':
             angle_diff = abs((target_angle - existing['target_angle'] + 180) % 360 - 180)
-            if angle_diff < 5:
+            if angle_diff < ROTATE_RECOMMAND_MIN_DEG:
                 return  # Misma rotación, dejar que el PID continúe
 
         self.actions_in_progress[player_id] = {
