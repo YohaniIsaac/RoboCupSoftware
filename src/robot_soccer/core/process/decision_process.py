@@ -36,6 +36,8 @@ from robot_soccer.config import (
     RESET_POS,
     RESET_MOVE_FACTOR,
     RESET_ANGLE,
+    BALL_FRESHNESS_TIMEOUT_S,
+    BALL_OUT_DEBOUNCE_FRAMES,
 )
 
 log = logging.getLogger(__name__)
@@ -633,11 +635,13 @@ def decision_process_2v2(
     # --- Estado ---
     players_initialized = set()
     ball_initialized    = False
+    ball_last_seen_t    = 0.0     # timestamp de la última detección de pelota
     active_red          = False
     active_blue         = False
     running             = True
     ball_out_active     = False   # pelota fuera — robots congelados, BT pausado
     ball_out_frames     = 0       # frames consecutivos con pelota fuera (histéresis)
+    ball_in_frames      = 0       # frames consecutivos con pelota en juego (debounce)
     goal_reset_active   = False   # pausa post-gol — robots navegan a reset positions
     reset_move_issued   = False   # move emitido (reset post-gol)
     reset_robot_phase   = {}      # id → 'moving' | 'orienting' | 'done'
@@ -688,19 +692,29 @@ def decision_process_2v2(
                         if not ball_initialized:
                             log.info("Pelota detectada en (%d, %d)", bx, by)
                         ball_initialized = True
+                        ball_last_seen_t = time.time()
 
                     # Pelota fuera: congelar robots cuando sale de límites.
                     # Durante init_phase o goal_reset_active el juego no está RUNNING:
                     # ignorar ball_out igual que en SSL (árbitro maneja la pelota).
                     ball_out_new = data.get('ball_out', False)
                     game_running = not init_phase and not goal_reset_active
-                    # Histéresis: requerir 3 frames consecutivos para activar ball_out.
-                    # Previene oscilaciones cuando la pelota roza el borde o parpadea.
-                    if ball_out_new and game_running:
-                        ball_out_frames += 1
+                    # Histéresis simétrica: BALL_OUT_DEBOUNCE_FRAMES en ambos
+                    # sentidos. Antes la activación tenía 3 frames pero la
+                    # desactivación era instantánea → flicker constante con
+                    # detección al 30%.
+                    if game_running:
+                        if ball_out_new:
+                            ball_out_frames += 1
+                            ball_in_frames   = 0
+                        else:
+                            ball_in_frames += 1
+                            ball_out_frames  = 0
                     else:
-                        ball_out_frames = 0
-                    if ball_out_frames >= 3 and not ball_out_active and game_running:
+                        ball_out_frames = ball_in_frames = 0
+
+                    if (ball_out_frames >= BALL_OUT_DEBOUNCE_FRAMES
+                            and not ball_out_active and game_running):
                         ball_out_active = True
                         log.info("PELOTA FUERA: robots congelados")
                         for fid in [p.id + 1 for p in all_players]:
@@ -708,13 +722,12 @@ def decision_process_2v2(
                         for bm in (bm_red, bm_blue):
                             for p in bm.team_players:
                                 bm.command_manager.actions_in_progress.pop(p.id, None)
-                    elif not ball_out_new and ball_out_active:
-                        ball_out_frames = 0
+                    elif (ball_in_frames >= BALL_OUT_DEBOUNCE_FRAMES
+                          and ball_out_active):
                         ball_out_active = False
                         log.info("PELOTA EN JUEGO: reanudando")
                     elif ball_out_active and not game_running:
                         # Transición a init/reset mientras ball_out estaba activo → limpiar
-                        ball_out_frames = 0
                         ball_out_active = False
                 except Exception:
                     pass
@@ -928,18 +941,26 @@ def decision_process_2v2(
 
                 # Paso 2: por robot — cuando llega, orientar hacia la pelota; cuando orienta, marcar listo
                 if init_move_issued:
+                    ball_fresh = (ball_initialized
+                                  and time.time() - ball_last_seen_t < BALL_FRESHNESS_TIMEOUT_S)
                     for bm in (bm_red, bm_blue):
                         for p in bm.team_players:
                             phase = init_robot_phase.get(p.id)
                             action = bm.command_manager.actions_in_progress.get(p.id)
                             if phase == 'moving' and action is None:
-                                angle = (
-                                    math.degrees(math.atan2(ball.y - p.y, ball.x - p.x))
-                                    if ball_initialized else RESET_ANGLE[bm.team]
-                                )
+                                # Sólo apuntamos a la pelota si la detección es
+                                # fresca; con detección stale (e.g. 7%) la
+                                # posición puede ser de varios segundos atrás.
+                                if ball_fresh:
+                                    angle = math.degrees(math.atan2(ball.y - p.y, ball.x - p.x))
+                                    src = "pelota"
+                                else:
+                                    angle = RESET_ANGLE[bm.team]
+                                    src = "canónico (pelota stale)"
                                 bm.command_manager.rotate_robot_to(p.id, angle)
                                 init_robot_phase[p.id] = 'orienting'
-                                log.info("Robot %d en posición → orientando a pelota (%.1f°)", p.id, angle)
+                                log.info("Robot %d en posición → orientando a %s (%.1f°)",
+                                         p.id, src, angle)
                             elif phase == 'orienting' and action is None:
                                 init_robot_phase[p.id] = 'done'
                                 log.info("Robot %d listo", p.id)
@@ -988,15 +1009,17 @@ def decision_process_2v2(
 
                 # Paso 2: por robot — cuando llega, orientar hacia la pelota
                 if reset_move_issued:
+                    ball_fresh_reset = (ball_initialized
+                                        and time.time() - ball_last_seen_t < BALL_FRESHNESS_TIMEOUT_S)
                     for bm in (bm_red, bm_blue):
                         for p in bm.team_players:
                             phase = reset_robot_phase.get(p.id)
                             action = bm.command_manager.actions_in_progress.get(p.id)
                             if phase == 'moving' and action is None:
-                                angle = (
-                                    math.degrees(math.atan2(ball.y - p.y, ball.x - p.x))
-                                    if ball_initialized else RESET_ANGLE[bm.team]
-                                )
+                                if ball_fresh_reset:
+                                    angle = math.degrees(math.atan2(ball.y - p.y, ball.x - p.x))
+                                else:
+                                    angle = RESET_ANGLE[bm.team]
                                 bm.command_manager.rotate_robot_to(p.id, angle)
                                 reset_robot_phase[p.id] = 'orienting'
                                 log.info("Reset robot %d en posición → orientando (%.1f°)", p.id, angle)

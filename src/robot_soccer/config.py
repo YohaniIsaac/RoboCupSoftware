@@ -476,6 +476,29 @@ CAPTURE_CREEP_SPEED_PWM = 20  # PWM — velocidad máxima lineal durante PID de 
 # por flanco lateral via PosicionarDetrásPelota.
 CORRIDOR_CLEARANCE_PX = 40
 
+# --- Filtros temporales contra detección ruidosa de la pelota ---
+# La detección puede caer al 7-30% en condiciones de luz adversas. Estos
+# filtros evitan que cada frame con pelota stale o flicker dispare un cambio
+# de comportamiento.
+
+# Edad máxima (s) de la última detección de pelota para que se considere
+# fresca. Usada en sub-fase 3 (pre-partido): si la pelota no fue vista
+# recientemente, los robots se orientan al ángulo canónico del equipo en
+# lugar de a una posición stale.
+BALL_FRESHNESS_TIMEOUT_S = 0.5
+
+# Frames consecutivos requeridos para activar/desactivar ball_out_active.
+# Antes era hardcoded a 3 solo para activación; la desactivación era
+# instantánea, lo que causaba flicker entre PELOTA FUERA y EN JUEGO. Ahora
+# es simétrico: 5 frames (~250ms a 20fps) en ambas direcciones.
+BALL_OUT_DEBOUNCE_FRAMES = 5
+
+# Diferencia angular (grados) bajo la cual una orden de rotate_robot_to
+# repetida se ignora si ya hay una rotación en curso. Antes hardcoded a 5°,
+# pero el target angle saltaba 4-8° por frame por jitter de detección de
+# pelota, generando cadenas de "Robot N: Ordenado giro a X grados".
+ROTATE_RECOMMAND_MIN_DEG = 8.0
+
 # Tiempo de espera (segundos) tras confirmar contacto con la pelota.
 # Permite que la pelota se acomode contra el robot antes de disparar.
 # Si la pelota escapa durante este tiempo, el ciclo se reinicia.
