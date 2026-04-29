@@ -182,6 +182,14 @@ BT_ROLE_SWITCH_HYSTERESIS  = 1.3   # El rival debe ser ×1.3 más cercano para r
 BT_ROLE_COMMITMENT_RATIO   = 0.23  # ratio → ~147px: si atacante está a <N px no se cambia rol
 BT_ROLE_SWITCH_COOLDOWN_S  = 3.0   # s — tiempo mínimo entre cambios de rol
 
+# Cesión inter-equipo en 2v2: el atacante deja de ir a la pelota y se posiciona
+# como interceptor cuando el rival tiene ventaja clara para llegar primero.
+# Score por jugador = dist_to_ball + K_ANGLE_PX_PER_DEG * |heading_error_deg|.
+BT_INTERCEPT_ENTER_RATIO    = 1.20  # rival_score * 1.20 < my_score → entrar a ceder
+BT_INTERCEPT_EXIT_RATIO     = 1.10  # my_score * 1.10 < rival_score → salir de ceder
+BT_INTERCEPT_K_ANGLE_PX_DEG = 1.5   # peso del error angular en el score (px/grado)
+BT_INTERCEPT_DEPTH_RATIO    = 0.40  # fracción del camino mi_arco → pelota
+
 # ==========================================
 # Reglas de partido
 # ==========================================

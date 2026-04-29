@@ -46,6 +46,10 @@ from robot_soccer.config import (
     BALL_INTERCEPT_LOOKAHEAD_TICKS,
     BALL_INTERCEPT_MAX_PX,
     BEHIND_BALL_RECALC_MIN_S,
+    BT_INTERCEPT_ENTER_RATIO,
+    BT_INTERCEPT_EXIT_RATIO,
+    BT_INTERCEPT_K_ANGLE_PX_DEG,
+    BT_INTERCEPT_DEPTH_RATIO,
 )
 
 from .base import (
@@ -1415,6 +1419,18 @@ def _move_behind_ball_running(blackboard):
     Recalcula si la pelota se movió > 60 px del punto de referencia.
     """
     player_id  = blackboard.player.id
+
+    # Preempción inter-equipo: si el rival tomó ventaja clara mientras venimos
+    # acercándonos, abortar para que el Selector reevalúe y entremos al modo
+    # interceptor en el próximo tick.
+    if should_yield_to_rival(blackboard):
+        blackboard.command_manager.actions_in_progress.pop(player_id, None)
+        robot_status_logger.emit_event(
+            player_id,
+            "behind_ball PREEMPCION: rival gana carrera -> ceder"
+        )
+        return NodeStatus.FAILURE
+
     player_pos = np.array(blackboard.player.get_position(), dtype=float)
     ball_pos   = np.array(blackboard.ball.get_position(), dtype=float)
     phase      = getattr(blackboard, '_behind_ball_phase', 'direct')
@@ -1823,6 +1839,153 @@ def kick_immediately(blackboard):
     return NodeStatus.SUCCESS
 
 
+def should_yield_to_rival(blackboard) -> bool:
+    """Devuelve True cuando un rival tiene ventaja clara para llegar primero a la pelota.
+
+    Score por jugador: dist_to_ball + K * |heading_error_deg|. Compara mi score
+    con el menor score de los rivales detectados. Histéresis simétrica vía
+    blackboard._yielding_to_rival evita oscilación.
+
+    Bypass: si ya estoy a < CAPTURE_ACTIVATE_DISTANCE_PX de la pelota, no ceder.
+    Ya estoy comprometido y advance_contact tiene su propia lógica reactiva de
+    yield a esa distancia.
+    """
+    if not getattr(blackboard, 'opponents', None):
+        return False
+
+    ball_pos = np.array(blackboard.ball.get_position(), dtype=float)
+    my_pos   = np.array(blackboard.player.get_position(), dtype=float)
+    if (ball_pos[0] == 0 and ball_pos[1] == 0) or (my_pos[0] == 0 and my_pos[1] == 0):
+        return False
+
+    my_dist = float(np.linalg.norm(ball_pos - my_pos))
+
+    # Bypass: comprometido en contacto → la lógica reactiva de advance_contact decide
+    if my_dist < CAPTURE_ACTIVATE_DISTANCE_PX:
+        blackboard._yielding_to_rival = False
+        return False
+
+    def _score(pos: np.ndarray, angle_deg: float) -> float:
+        d = float(np.linalg.norm(ball_pos - pos))
+        ang_to_ball = float(np.degrees(np.arctan2(
+            ball_pos[1] - pos[1], ball_pos[0] - pos[0]
+        )))
+        err = abs((ang_to_ball - angle_deg + 180) % 360 - 180)
+        return d + BT_INTERCEPT_K_ANGLE_PX_DEG * err
+
+    my_score = _score(my_pos, float(blackboard.player.angle))
+
+    best_opp_score = float('inf')
+    for opp in blackboard.opponents:
+        opp_pos = np.array(opp.get_position(), dtype=float)
+        if opp_pos[0] == 0 and opp_pos[1] == 0:
+            continue
+        s = _score(opp_pos, float(opp.angle))
+        if s < best_opp_score:
+            best_opp_score = s
+
+    if best_opp_score == float('inf'):
+        return False
+
+    yielding = getattr(blackboard, '_yielding_to_rival', False)
+    if yielding:
+        if my_score * BT_INTERCEPT_EXIT_RATIO < best_opp_score:
+            blackboard._yielding_to_rival = False
+            robot_status_logger.emit_event(
+                blackboard.player.id,
+                f"intercept SALIDA: my={my_score:.0f} opp={best_opp_score:.0f}"
+            )
+            return False
+        return True
+
+    if best_opp_score * BT_INTERCEPT_ENTER_RATIO < my_score:
+        blackboard._yielding_to_rival = True
+        robot_status_logger.emit_event(
+            blackboard.player.id,
+            f"intercept ENTRADA: my={my_score:.0f} opp={best_opp_score:.0f}"
+        )
+        return True
+    return False
+
+
+def hold_intercept_position(blackboard):
+    """Posiciona al atacante como interceptor en la línea mi_arco → pelota.
+
+    Reutiliza el patrón de move_to_defensive_position pero a una distancia
+    BT_INTERCEPT_DEPTH_RATIO del camino arco→pelota (más adelantada que el
+    defensor). Devuelve SUCCESS cada tick para que el Selector reevalúe el
+    guard should_yield_to_rival en el próximo tick.
+    """
+    if not hasattr(blackboard, "command_manager"):
+        return NodeStatus.FAILURE
+
+    ball_pos   = blackboard.ball.get_position()
+    player_pos = blackboard.player.get_position()
+
+    _goal = np.array(blackboard.own_goal_pos, dtype=float)
+    _ball = np.array(ball_pos, dtype=float)
+    _goal_to_ball = _ball - _goal
+    _dist_gb = float(np.linalg.norm(_goal_to_ball))
+    if _dist_gb > 1.0:
+        _unit_gb = _goal_to_ball / _dist_gb
+    else:
+        _unit_gb = np.array([1.0 if blackboard.team == 'red' else -1.0, 0.0])
+
+    intercept_dist = _dist_gb * BT_INTERCEPT_DEPTH_RATIO
+    _icp_pos = _goal + _unit_gb * intercept_dist
+    _icp_pos = np.array(blackboard.field.clamp(_icp_pos.astype(int)), dtype=float)
+
+    # Desplazar lateralmente si el punto está bloqueado por algún robot
+    _obs_min = float(PATH_PLANNING_ROBOT_OBSTACLE_RADIUS + PATH_PLANNING_OBSTACLE_CLEARANCE + 5)
+    _perp = np.array([-_unit_gb[1], _unit_gb[0]], dtype=float)
+    _obstacles = (
+        [r for r in blackboard.opponents] +
+        [t for t in blackboard.team_players if t.id != blackboard.player.id]
+    )
+    for _ in range(4):
+        _blocker = None
+        for _rob in _obstacles:
+            _rp = np.array(_rob.get_position(), dtype=float)
+            if _rp[0] == 0 and _rp[1] == 0:
+                continue
+            if float(np.linalg.norm(_icp_pos - _rp)) < _obs_min:
+                _blocker = _rp
+                break
+        if _blocker is None:
+            break
+        _side = float(np.sign(np.dot(np.array(player_pos, dtype=float) - _blocker, _perp)))
+        if _side == 0.0:
+            _side = 1.0
+        _icp_pos = _icp_pos + _perp * _side * (_obs_min * 0.65)
+        _icp_pos = np.array(blackboard.field.clamp(_icp_pos.astype(int)), dtype=float)
+
+    intercept_pos = tuple(int(x) for x in _icp_pos)
+
+    def _angle_to_ball_deg():
+        return np.degrees(np.arctan2(
+            ball_pos[1] - player_pos[1],
+            ball_pos[0] - player_pos[0]
+        ))
+
+    def _heading_error_to_ball():
+        return abs((_angle_to_ball_deg() - blackboard.player.angle + 180) % 360 - 180)
+
+    distance = float(np.linalg.norm(np.array(player_pos) - np.array(intercept_pos)))
+    if distance < blackboard.field.ratio_to_px(BT_DEFENSIVE_ARRIVAL_RATIO):
+        if _heading_error_to_ball() > BEHIND_BALL_ALIGN_TOLERANCE_DEG:
+            blackboard.command_manager.rotate_robot_to(
+                blackboard.player.id, _angle_to_ball_deg()
+            )
+            blackboard.last_action = "intercept_orienting"
+        else:
+            blackboard.last_action = "intercept_hold"
+        return NodeStatus.SUCCESS
+
+    blackboard.command_manager.move_robot_to(blackboard.player.id, intercept_pos)
+    blackboard.last_action = "move_to_intercept"
+    return NodeStatus.SUCCESS
+
+
 # CREACIÓN DE ÁRBOLES DE COMPORTAMIENTO COMPLETOS
 
 
@@ -1839,6 +2002,14 @@ def create_attacker_tree():
     Returns:
         SelectorNode: Árbol de comportamiento del atacante.
     """
+    # Cesión inter-equipo: si el rival tiene ventaja clara para llegar primero,
+    # el atacante se posiciona como interceptor en lugar de ir a la pelota.
+    yield_branch = SequenceNode("CederSiRivalGana")
+    yield_branch.add_children(
+        ConditionNode(should_yield_to_rival, "RivalGanaCarrera"),
+        ActionNode(hold_intercept_position, "Interceptar"),
+    )
+
     # Ciclo de ataque directo: posicionar → contactar → disparar
     attack_cycle = SequenceNode("CicloAtaqueDirecto")
     attack_cycle.add_children(
@@ -1848,7 +2019,7 @@ def create_attacker_tree():
     )
 
     attacker_tree = SelectorNode("ComportamientoAtacante")
-    attacker_tree.add_children(attack_cycle)
+    attacker_tree.add_children(yield_branch, attack_cycle)
 
     return attacker_tree
 
