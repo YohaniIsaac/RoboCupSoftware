@@ -30,6 +30,10 @@ from robot_soccer.config import (
     BEHIND_BALL_APPROACH_PX,
     BEHIND_BALL_LATERAL_OFFSET_PX,
     BEHIND_BALL_ALIGN_TOLERANCE_DEG,
+    CIRCLE_BALL_ACTIVATE_DISTANCE_PX,
+    CIRCLE_BALL_RADIUS_PX,
+    CIRCLE_BALL_STEP_ANGLE_DEG,
+    CIRCLE_BALL_EXIT_TOLERANCE_DEG,
     PUSH_BURST_PWM,
     CONTACT_SETTLE_TIME_S,
     ADVANCE_ESCAPE_FACTOR,
@@ -1289,6 +1293,46 @@ def _clear_advance_state(blackboard, player_id):
         rf.set_motors(player_id + 1, 0, 0)
 
 
+def _compute_circle_ball_lookahead(robot_pos, ball_pos, behind_pos):
+    """Calcula el siguiente waypoint sobre el círculo alrededor de la pelota.
+
+    Genera una trayectoria geométrica (no requiere RRT*): el robot avanza
+    angularmente CIRCLE_BALL_STEP_ANGLE_DEG por tick sobre un círculo de radio
+    CIRCLE_BALL_RADIUS_PX centrado en la pelota, hacia el ángulo de behind_pos.
+
+    Args:
+        robot_pos: posición actual del robot, np.ndarray[2] o tupla.
+        ball_pos:  posición actual de la pelota, np.ndarray[2] o tupla.
+        behind_pos: posición ideal detrás de la pelota (target final del arco).
+
+    Returns:
+        tuple: (lookahead_pt: np.ndarray[2], angular_error_deg: float)
+            - lookahead_pt: punto a CIRCLE_BALL_RADIUS_PX de la pelota,
+              CIRCLE_BALL_STEP_ANGLE_DEG más cerca del ángulo objetivo.
+            - angular_error_deg: |delta| en grados entre el ángulo del robot
+              y el del objetivo (medidos desde la pelota). Si está bajo
+              CIRCLE_BALL_EXIT_TOLERANCE_DEG, conviene salir del estado 'circle'.
+    """
+    theta_robot  = np.arctan2(robot_pos[1]  - ball_pos[1], robot_pos[0]  - ball_pos[0])
+    theta_target = np.arctan2(behind_pos[1] - ball_pos[1], behind_pos[0] - ball_pos[0])
+
+    # Diferencia angular signada en [-pi, pi] (manejo robusto del wrap)
+    delta = np.arctan2(np.sin(theta_target - theta_robot),
+                       np.cos(theta_target - theta_robot))
+
+    step = np.radians(CIRCLE_BALL_STEP_ANGLE_DEG)
+    if abs(delta) <= step:
+        # Cerca del objetivo: ir directo al ángulo final sin overshoot
+        theta_lookahead = theta_target
+    else:
+        theta_lookahead = theta_robot + np.copysign(step, delta)
+
+    lookahead = np.asarray(ball_pos, dtype=float) + CIRCLE_BALL_RADIUS_PX * np.array(
+        [np.cos(theta_lookahead), np.sin(theta_lookahead)]
+    )
+    return lookahead, float(abs(np.degrees(delta)))
+
+
 def _move_behind_ball_start(blackboard):
     """on_start: calcula la posición detrás de la pelota y emite el movimiento.
 
@@ -1375,6 +1419,29 @@ def _move_behind_ball_start(blackboard):
     blackboard._behind_ball_pos = behind_pos.copy()
     blackboard._behind_ball_ref = ball_pos.copy()
 
+    # Skill geométrica 'circle': si el robot está cerca de la pelota Y mal alineado
+    # angularmente, describir un arco a radio fijo (sin RRT*) hasta alinearse.
+    # Evita el loop replanificación↔contacto que ocurre cuando el lateral detour
+    # delega al planner con la pelota como obstáculo.
+    dist_to_ball = float(np.linalg.norm(ball_pos - player_pos))
+    if dist_to_ball < CIRCLE_BALL_ACTIVATE_DISTANCE_PX:
+        lookahead, ang_err = _compute_circle_ball_lookahead(
+            player_pos, ball_pos, behind_pos
+        )
+        if ang_err > CIRCLE_BALL_EXIT_TOLERANCE_DEG:
+            blackboard._behind_ball_detour = None
+            blackboard._behind_ball_phase  = 'circle'
+            lookahead = np.array(blackboard.field.clamp(lookahead.astype(int)), dtype=float)
+            target = (int(lookahead[0]), int(lookahead[1]))
+            robot_status_logger.emit_event(
+                blackboard.player.id,
+                f"behind_ball CIRCLE INICIO: dist={dist_to_ball:.0f}px "
+                f"err_ang={ang_err:.0f}° -> ({target[0]},{target[1]})"
+            )
+            blackboard.command_manager.move_robot_to(blackboard.player.id, target)
+            blackboard.last_action = "circle_ball"
+            return NodeStatus.RUNNING
+
     # ¿El camino directo choca con la pelota? (usa posición real como obstáculo físico)
     if _path_near_ball(player_pos, behind_pos, ball_pos):
         # Calcular desvío lateral: perpendicular al eje arco-pelota
@@ -1460,6 +1527,33 @@ def _move_behind_ball_running(blackboard):
             return _move_behind_ball_start(blackboard)
 
     in_progress = player_id in blackboard.command_manager.actions_in_progress
+
+    # Fase CIRCLE: arco geométrico alrededor de la pelota a radio fijo, sin RRT*.
+    # Cada tick recalcula el lookahead respecto a la pelota actual: si la pelota
+    # se mueve, el arco se reorienta solo. Sale cuando el robot está alineado
+    # angularmente con behind_pos (transición a 'direct' = approach final recto).
+    if phase == 'circle':
+        behind_pos = blackboard._behind_ball_pos
+        lookahead, ang_err = _compute_circle_ball_lookahead(
+            player_pos, ball_pos, behind_pos
+        )
+
+        if ang_err <= CIRCLE_BALL_EXIT_TOLERANCE_DEG:
+            blackboard._behind_ball_phase = 'direct'
+            target = (int(behind_pos[0]), int(behind_pos[1]))
+            blackboard.command_manager.move_robot_to(player_id, target)
+            robot_status_logger.emit_event(
+                player_id,
+                f"behind_ball CIRCLE OK: ang_err={ang_err:.0f}° "
+                f"-> direct ({target[0]},{target[1]})"
+            )
+            return NodeStatus.RUNNING
+
+        lookahead = np.array(blackboard.field.clamp(lookahead.astype(int)), dtype=float)
+        target = (int(lookahead[0]), int(lookahead[1]))
+        blackboard.command_manager.move_robot_to(player_id, target)
+        blackboard.last_action = "circle_ball"
+        return NodeStatus.RUNNING
 
     if phase == 'detour':
         detour = blackboard._behind_ball_detour
