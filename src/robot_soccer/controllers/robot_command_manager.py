@@ -204,6 +204,17 @@ class RobotCommandManager:
                 controller = self.controllers[player.id]
                 controller.dribble_pwm_factor = DRIBBLE_PWM_FACTOR if player.has_ball() else 1.0
 
+            # Gate del AUTO-KICK por stuck: solo válido cuando el robot está empujando la pelota
+            # (move_with_ball). Evita kicks falsos durante circle_ball, move_to_intercept, etc.
+            if player.id in self.controllers:
+                _action_type = (
+                    self.actions_in_progress[player.id].get('type')
+                    if player.id in self.actions_in_progress else None
+                )
+                self.controllers[player.id].auto_kick_enabled = (
+                    _action_type == 'move_with_ball'
+                )
+
             if player.id in self.actions_in_progress:
                 action = self.actions_in_progress[player.id]
 

@@ -166,8 +166,9 @@ class RFController:
             self.ignored_commands_count[robot_id] = 0  # Resetear contador
 
         # Solo loguear cuando se DETIENE el robot
+        # NOTA: robot_id es firmware ID (1-4); restamos 1 para mostrar player ID (0-3).
         if is_stop_command and last_cmd != (0, 0):
-            log.info("⏹️  Robot %i DETENIDO", robot_id)
+            log.info("⏹️  Robot %i DETENIDO", robot_id - 1)
 
         # Actualizar comandos y tiempos
         self.last_commands[robot_id] = (left_val, right_val)
@@ -190,13 +191,13 @@ class RFController:
         # PRIORIDAD ALTA: Detención (0, 0)
         if is_stop_command:
             success = self.serial_manager.send_priority_command(command, priority='high')
-            log.info("🚨 ALTA prioridad (detención) para Robot %i", robot_id)
+            log.info("🚨 ALTA prioridad (detención) para Robot %i", robot_id - 1)
 
         # PRIORIDAD MEDIA: Entrada a rampa (desaceleración >15%)
         elif is_decelerating and not is_stop_command:
             success = self.serial_manager.send_priority_command(command, priority='medium')
             log.info("🔶 MEDIA prioridad (rampa) para Robot %i: mag %.2f → %.2f (Δ=%.2f%%)",
-                     robot_id, last_magnitude, current_magnitude,
+                     robot_id - 1, last_magnitude, current_magnitude,
                      (last_magnitude - current_magnitude) * 100)
 
         # PRIORIDAD NORMAL: Movimiento regular

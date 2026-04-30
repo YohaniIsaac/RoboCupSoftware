@@ -134,6 +134,7 @@ class DifferentialDriveController:
         # pero ANTES de combinar con omega. Así la corrección angular sigue activa.
         self.max_linear_pwm_override = None
         self.detection_pwm_cap = None  # cap impuesto por pérdida de detección de cámara
+        self.auto_kick_enabled = False  # solo True durante move_with_ball; gate del AUTO-KICK por stuck
 
         # Factor multiplicador de PWM con posesión de pelota (dribbler activo).
         # Se setea externamente por RobotCommandManager según has_ball().
@@ -616,8 +617,9 @@ class DifferentialDriveController:
                             _pid_st['stuck_boost'], self.stuck_boost_max, _moved
                         )
                     )
-                    # Auto-kick al alcanzar el boost máximo
-                    if STUCK_AUTO_KICK and _pid_st['stuck_boost'] >= self.stuck_boost_max:
+                    # Auto-kick al alcanzar el boost máximo (solo durante move_with_ball)
+                    if (STUCK_AUTO_KICK and self.auto_kick_enabled
+                            and _pid_st['stuck_boost'] >= self.stuck_boost_max):
                         robot_status_logger.emit_event(
                             robot.id,
                             "AUTO-KICK: stuck_boost max=%d PWM — disparando" % self.stuck_boost_max
