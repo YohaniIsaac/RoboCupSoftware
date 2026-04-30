@@ -494,6 +494,9 @@ CORRIDOR_CLEARANCE_PX = 40
 # recientemente, los robots se orientan al ángulo canónico del equipo en
 # lugar de a una posición stale.
 BALL_FRESHNESS_TIMEOUT_S = 0.5
+# Tiempo (s) desde la última detección hasta parada completa del robot.
+# A 20 fps: 0.5 s = 10 frames consecutivos sin detectar → stop.
+ROBOT_DETECTION_LOST_RAMPDOWN_S = 0.5
 
 # Frames consecutivos requeridos para activar/desactivar ball_out_active.
 # Antes era hardcoded a 3 solo para activación; la desactivación era

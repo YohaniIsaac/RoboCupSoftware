@@ -133,6 +133,7 @@ class DifferentialDriveController:
         # Cuando no es None, v se capea a este valor DESPUÉS del perfil de velocidad
         # pero ANTES de combinar con omega. Así la corrección angular sigue activa.
         self.max_linear_pwm_override = None
+        self.detection_pwm_cap = None  # cap impuesto por pérdida de detección de cámara
 
         # Factor multiplicador de PWM con posesión de pelota (dribbler activo).
         # Se setea externamente por RobotCommandManager según has_ball().
@@ -537,6 +538,8 @@ class DifferentialDriveController:
             # Override de velocidad lineal (creep mode para captura de balón)
             if self.max_linear_pwm_override is not None:
                 v = min(v, self.max_linear_pwm_override)
+            if self.detection_pwm_cap is not None:
+                v = min(v, self.detection_pwm_cap)
 
             # Guardar términos PID lineales para logging combinado
             p_v_stored = p_v

@@ -16,6 +16,8 @@ from robot_soccer.config import (
     RRT_REPLAN_COOLDOWN_S,
     RRT_OBSTACLE_MOVE_PX,
     ROTATE_RECOMMAND_MIN_DEG,
+    ROBOT_DETECTION_LOST_RAMPDOWN_S,
+    ROBOT_MAX_LINEAR_SPEED,
 )
 from robot_soccer.ai.path_planning.tools_for_path_planing import (
     path_closest_waypoint_idx,
@@ -181,6 +183,22 @@ class RobotCommandManager:
             la cola de acciones en progreso.
         """
         for player in self.team_players:
+            # Ramp-down de velocidad cuando el robot no es detectado por la cámara
+            _lost_elapsed = (time.time() - player.last_seen_t
+                             if player.last_seen_t > 0 else 0.0)
+            if _lost_elapsed >= ROBOT_DETECTION_LOST_RAMPDOWN_S:
+                if self.rf_controller:
+                    self.rf_controller.set_motors(player.id + 1, 0, 0)
+                if player.id in self.controllers:
+                    self.controllers[player.id].detection_pwm_cap = 0
+                continue
+            _detection_factor = 1.0 - _lost_elapsed / ROBOT_DETECTION_LOST_RAMPDOWN_S
+            if player.id in self.controllers:
+                self.controllers[player.id].detection_pwm_cap = (
+                    None if _detection_factor >= 1.0
+                    else int(_detection_factor * ROBOT_MAX_LINEAR_SPEED)
+                )
+
             # Activar factor de dribble cuando el robot tiene posesión (post-captura)
             if player.id in self.controllers:
                 controller = self.controllers[player.id]
@@ -425,6 +443,7 @@ class RobotCommandManager:
                     if self.rf_controller:
                         fw_id = player.id + 1
                         speed = action.get('speed', CAPTURE_CREEP_SPEED_PWM)
+                        speed = int(speed * _detection_factor)
                         self.rf_controller.set_motors(fw_id, speed, speed)
 
     def move_robot_to(self, player_id, target_pos, target_angle=None, speed_factor=1.0):

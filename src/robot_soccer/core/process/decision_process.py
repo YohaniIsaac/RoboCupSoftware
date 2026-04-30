@@ -181,6 +181,7 @@ def decision_process(
                                 player_map[rid].x = rd['x']
                                 player_map[rid].y = rd['y']
                                 player_map[rid].angle = rd['angulo']
+                                player_map[rid].last_seen_t = now
                                 if rid not in players_initialized:
                                     log.info("Robot %d detectado en (%d, %d)",
                                              rid, rd['x'], rd['y'])
@@ -197,6 +198,7 @@ def decision_process(
                                 player_map[robot_id].x = rd['x']
                                 player_map[robot_id].y = rd['y']
                                 player_map[robot_id].angle = rd['angulo']
+                                player_map[robot_id].last_seen_t = now
                                 if robot_id not in players_initialized:
                                     log.info("Robot detectado en (%d, %d)",
                                              rd['x'], rd['y'])
@@ -682,6 +684,7 @@ def decision_process_2v2(
                             player_map[rid].x     = rd['x']
                             player_map[rid].y     = rd['y']
                             player_map[rid].angle = rd['angulo']
+                            player_map[rid].last_seen_t = now
                             if rid not in players_initialized:
                                 log.info("Robot %d (%s) detectado en (%d, %d)",
                                          rid, player_map[rid].team, rd['x'], rd['y'])

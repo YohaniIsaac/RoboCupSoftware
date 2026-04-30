@@ -46,6 +46,7 @@ class Player:
 
         self.distance2ball = None
         self.anglerobot2ball = None
+        self.last_seen_t = 0.0
         self.rol = None  # 0: defensivo, 1: atacante
 
         # Estado de posesión
