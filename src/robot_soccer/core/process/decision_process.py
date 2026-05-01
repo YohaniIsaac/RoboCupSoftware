@@ -542,6 +542,7 @@ def decision_process_2v2(
     team_red_ids,
     team_blue_ids,
     serial_port: str,
+    game_active,
 ):
     """Proceso de decisión para partido 2v2: dos BehaviorManagers, un solo RFController.
 
@@ -744,6 +745,7 @@ def decision_process_2v2(
                         running = False
                     elif command == 'goal_scored':
                         goal_reset_active   = True
+                        game_active.value   = 0
                         reset_move_issued   = False
                         reset_robot_phase   = {}
                         active_red = active_blue = False
@@ -777,6 +779,7 @@ def decision_process_2v2(
                                 init_move_issued = False
                                 init_robot_phase = {}
                                 active_red  = active_blue = True
+                                game_active.value = 1
                                 for bm in (bm_red, bm_blue):
                                     for p in bm.team_players:
                                         ctrl = bm.command_manager.controllers.get(p.id)
@@ -789,6 +792,7 @@ def decision_process_2v2(
                                 log.info("└─────────────────────────────────────────────────────┘")
                         elif goal_reset_active:
                             goal_reset_active = False
+                            game_active.value = 1
                             active_red = active_blue = True
                             for bm in (bm_red, bm_blue):
                                 for p in bm.team_players:

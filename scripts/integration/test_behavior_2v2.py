@@ -83,7 +83,8 @@ ROL_LABELS = {'atacante': 'A', 'defensor': 'D'}
 # PROCESO 1: Percepción
 # =============================================================================
 
-def perception_process_2v2(control_pipe, viz_pipe, camera_id, shm_name, frame_counter):
+def perception_process_2v2(control_pipe, viz_pipe, camera_id, shm_name,
+                            frame_counter, game_active):
     import cv2
     import numpy as np
     from robot_soccer.perception.player_tracking import create_aruco_detector
@@ -119,6 +120,8 @@ def perception_process_2v2(control_pipe, viz_pipe, camera_id, shm_name, frame_co
     frame_count   = 0
     detect_counts = {rid: 0 for rid in ALL_IDS}
     ball_det_count = 0
+    partido_frames   = 0   # solo cuenta frames con game_active==1
+    partido_ball_det = 0   # solo cuenta detecciones con game_active==1
     t0 = time.time()
     last_goal_time = 0.0
 
@@ -132,6 +135,9 @@ def perception_process_2v2(control_pipe, viz_pipe, camera_id, shm_name, frame_co
                      (CAMERA_PERSPECTIVE_WIDTH, CAMERA_PERSPECTIVE_HEIGHT))
                      if perspective_matrix is not None else raw_frame)
             frame_count += 1
+            in_partido = bool(game_active.value)
+            if in_partido:
+                partido_frames += 1
 
             # ArUco
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -167,6 +173,8 @@ def perception_process_2v2(control_pipe, viz_pipe, camera_id, shm_name, frame_co
                         ball_pos      = (int(bx), int(by))
                         ball_detected = True
                         ball_det_count += 1
+                        if in_partido:
+                            partido_ball_det += 1
 
             # Detección de gol en ambos arcos
             goal_event = None
@@ -223,7 +231,7 @@ def perception_process_2v2(control_pipe, viz_pipe, camera_id, shm_name, frame_co
                 except Exception:
                     pass
 
-            # Stats cada 5s
+            # Stats cada 5s — Pelota acotada al partido en curso (game_active==1)
             elapsed = time.time() - t0
             if frame_count % 150 == 0 and elapsed > 0:
                 fps    = frame_count / elapsed
@@ -231,8 +239,13 @@ def perception_process_2v2(control_pipe, viz_pipe, camera_id, shm_name, frame_co
                     f"R{rid}={detect_counts.get(rid,0)/frame_count*100:.0f}%"
                     for rid in ALL_IDS
                 )
-                b_rate = ball_det_count / frame_count * 100
-                log.info("FPS=%.1f | %s | Pelota=%.0f%%", fps, rates, b_rate)
+                if partido_frames > 0:
+                    b_rate = partido_ball_det / partido_frames * 100
+                    log.info("FPS=%.1f | %s | Pelota=%.0f%% (partido)",
+                             fps, rates, b_rate)
+                else:
+                    log.info("FPS=%.1f | %s | Pelota=---%% (sin partido)",
+                             fps, rates)
 
     finally:
         cap.release()
@@ -642,6 +655,7 @@ def main():
     frame_size = CAMERA_PERSPECTIVE_HEIGHT * CAMERA_PERSPECTIVE_WIDTH * 3
     shm        = shared_memory.SharedMemory(create=True, name=shm_name, size=frame_size)
     frame_counter = Value('i', 0)
+    game_active   = Value('b', 0)   # 0=pre/init/reset, 1=partido en curso
 
     perc_to_dec_s, perc_to_dec_r = multiprocessing.Pipe()
     perc_to_viz_s, perc_to_viz_r = multiprocessing.Pipe()
@@ -668,13 +682,14 @@ def main():
 
     p1 = multiprocessing.Process(
         target=perception_process_2v2,
-        args=(perc_to_dec_s, perc_to_viz_s, camera_id, shm_name, frame_counter),
+        args=(perc_to_dec_s, perc_to_viz_s, camera_id, shm_name,
+              frame_counter, game_active),
         name="Perception"
     )
     p2 = multiprocessing.Process(
         target=decision_process_2v2,
         args=(perc_to_dec_r, dec_to_viz_s, viz_to_dec_r,
-              TEAM_RED_IDS, TEAM_BLUE_IDS, args.serial_port),
+              TEAM_RED_IDS, TEAM_BLUE_IDS, args.serial_port, game_active),
         name="Decision2v2"
     )
     p3 = multiprocessing.Process(
