@@ -260,6 +260,13 @@ BEHIND_BALL_ARRIVAL_PX     = 15  # px — el BT chequea alineación angular desp
 DEFENSIVE_POS_ARRIVAL_PX   = 40  # px — punto defensivo es ilustrativo (circunferencia)
 INTERCEPT_HOLD_ARRIVAL_PX  = 25  # px — interceptor en línea arco-pelota, tolerancia mediana
 
+# Cooldown mínimo entre cambios de modo en should_yield_to_rival. Sin esto,
+# my_score y opp_score oscilan dentro de la banda muerta de los ratios
+# ENTER/EXIT y el robot alterna ENTRADA/SALIDA cada tick. Con cooldown,
+# el modo se mantiene al menos N segundos antes de poder cambiar.
+# Equivale al modo "Match Once" de la solución estándar SSL (ZJUNlict).
+BT_INTERCEPT_MIN_HOLD_S = 0.8
+
 RESET_MOVE_FACTOR = 0.80         # fracción de pwm_max para movimiento de reset (flooreado en pwm_min)
 RESET_ANGLE       = {'red': 0.0, 'blue': 180.0}  # ángulo canónico de orientación (dirección de ataque)
 

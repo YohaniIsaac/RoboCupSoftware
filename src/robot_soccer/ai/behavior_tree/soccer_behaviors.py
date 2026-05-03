@@ -61,6 +61,7 @@ from robot_soccer.config import (
     BT_INTERCEPT_EXIT_RATIO,
     BT_INTERCEPT_K_ANGLE_PX_DEG,
     BT_INTERCEPT_DEPTH_RATIO,
+    BT_INTERCEPT_MIN_HOLD_S,
 )
 
 from .base import (
@@ -2047,6 +2048,8 @@ def should_yield_to_rival(blackboard) -> bool:
 
     # Bypass: comprometido en contacto → la lógica reactiva de advance_contact decide
     if my_dist < CAPTURE_ACTIVATE_DISTANCE_PX:
+        if getattr(blackboard, '_yielding_to_rival', False):
+            blackboard._yielding_last_change_t = time.time()
         blackboard._yielding_to_rival = False
         return False
 
@@ -2072,10 +2075,19 @@ def should_yield_to_rival(blackboard) -> bool:
     if best_opp_score == float('inf'):
         return False
 
-    yielding = getattr(blackboard, '_yielding_to_rival', False)
+    yielding    = getattr(blackboard, '_yielding_to_rival', False)
+    last_change = getattr(blackboard, '_yielding_last_change_t', 0.0)
+    held_for    = time.time() - last_change
+
+    # Cooldown: no permitir cambiar de modo antes de BT_INTERCEPT_MIN_HOLD_S.
+    # Evita oscilación cuando los scores cruzan la banda muerta entre ratios.
+    if held_for < BT_INTERCEPT_MIN_HOLD_S:
+        return yielding
+
     if yielding:
         if my_score * BT_INTERCEPT_EXIT_RATIO < best_opp_score:
-            blackboard._yielding_to_rival = False
+            blackboard._yielding_to_rival      = False
+            blackboard._yielding_last_change_t = time.time()
             robot_status_logger.emit_event(
                 blackboard.player.id,
                 f"intercept SALIDA: my={my_score:.0f} opp={best_opp_score:.0f}"
@@ -2084,7 +2096,8 @@ def should_yield_to_rival(blackboard) -> bool:
         return True
 
     if best_opp_score * BT_INTERCEPT_ENTER_RATIO < my_score:
-        blackboard._yielding_to_rival = True
+        blackboard._yielding_to_rival      = True
+        blackboard._yielding_last_change_t = time.time()
         robot_status_logger.emit_event(
             blackboard.player.id,
             f"intercept ENTRADA: my={my_score:.0f} opp={best_opp_score:.0f}"
