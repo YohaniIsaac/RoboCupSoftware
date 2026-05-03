@@ -55,6 +55,8 @@ def visualization_loop_behavior(perception_pipe, control_state_pipe, keyboard_pi
         'capture_overshoot_px': 15,
         'capture_confirm_px': 20,
         'creep_speed_pwm': 40,
+        'kick_point_offset_px': 30,
+        'kick_point_tolerance_px': 6,
         'dribble_pwm_factor': 1.0,
         'dribbler_capture_power': 0,
         'dribbler_hold_power': 0,
@@ -578,6 +580,26 @@ def visualization_loop_behavior(perception_pipe, control_state_pipe, keyboard_pi
                     command = 'adjust_threshold'
                     param = 'stuck_boost_max'
                     delta = 1
+                # kick_point: offset desde marker ArUco hasta punto de impacto
+                # del solenoide. Calibrar visualmente con el robot en posición
+                # ideal de kick (dribbler tocando la pelota). Todas las letras
+                # están tomadas → uso punctuation libre.
+                elif key == ord('/'):
+                    command = 'adjust_threshold'
+                    param = 'kick_point_offset_px'
+                    delta = 1
+                elif key == ord('\\'):
+                    command = 'adjust_threshold'
+                    param = 'kick_point_offset_px'
+                    delta = -1
+                elif key == ord("'"):
+                    command = 'adjust_threshold'
+                    param = 'kick_point_tolerance_px'
+                    delta = 1
+                elif key == ord('`'):
+                    command = 'adjust_threshold'
+                    param = 'kick_point_tolerance_px'
+                    delta = -1
                 elif key in [82, 84, 81, 83] and last_robot_pos:
                     command = 'move_waypoint'
                     reached_waypoint = None  # New waypoint movement clears reached
@@ -712,6 +734,33 @@ def _draw_overlays(frame, robot_pos, robot_data, waypoint,
             end_y = int(ry + arrow_len * math.sin(angle_rad))
             cv2.arrowedLine(frame, (rx, ry), (end_x, end_y),
                            (0, 200, 0), 2, cv2.LINE_AA, tipLength=0.3)
+
+            # kick_point overlay: punto donde se asume que impacta el
+            # solenoide (centro_robot + offset * heading). Cruz cyan, círculo
+            # de tolerancia. El usuario calibra ajustando con / \ y ' `.
+            kp_off = behavior_params.get('kick_point_offset_px', 30)
+            kp_tol = behavior_params.get('kick_point_tolerance_px', 6)
+            kpx = int(rx + kp_off * math.cos(angle_rad))
+            kpy = int(ry + kp_off * math.sin(angle_rad))
+            kp_col = (220, 220, 40)  # cyan en BGR
+            steps = 6
+            for s in range(steps):
+                if s % 2 == 0:
+                    x0 = int(rx + (kpx - rx) * s / steps)
+                    y0 = int(ry + (kpy - ry) * s / steps)
+                    x1 = int(rx + (kpx - rx) * (s + 1) / steps)
+                    y1 = int(ry + (kpy - ry) * (s + 1) / steps)
+                    cv2.line(frame, (x0, y0), (x1, y1),
+                             kp_col, 1, cv2.LINE_AA)
+            cv2.line(frame, (kpx - 5, kpy), (kpx + 5, kpy),
+                     kp_col, 2, cv2.LINE_AA)
+            cv2.line(frame, (kpx, kpy - 5), (kpx, kpy + 5),
+                     kp_col, 2, cv2.LINE_AA)
+            cv2.circle(frame, (kpx, kpy), max(1, int(kp_tol)),
+                       kp_col, 1, cv2.LINE_AA)
+            cv2.putText(frame, f"kp:{int(kp_off)}/{int(kp_tol)}",
+                        (kpx + max(8, int(kp_tol)) + 2, kpy - 4),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.32, kp_col, 1, cv2.LINE_AA)
 
         # Trajectory line + target heading + angular error
         if waypoint:
@@ -985,6 +1034,23 @@ def _draw_behavior_panel(behavior_params, robot_pos, waypoint, robot_available,
     cv2.putText(panel, f"Creep: {behavior_params.get('creep_speed_pwm', 40)} PWM", (col_left_x, y_left),
                cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1)
     cv2.putText(panel, "(N/M)", (250, y_left), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (150, 150, 150), 1)
+    y_left += lh
+
+    kp_off = behavior_params.get('kick_point_offset_px', 30)
+    kp_tol = behavior_params.get('kick_point_tolerance_px', 6)
+    cv2.putText(panel, f"Kick offset: {int(kp_off)}px", (col_left_x, y_left),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.45, (220, 220, 40), 1)
+    cv2.putText(panel, "(/ \\)", (250, y_left), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (150, 150, 150), 1)
+    y_left += int(lh * 0.8)
+    cv2.putText(panel, "Centro marker -> punto impacto solenoide", (20, y_left),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.33, (160, 160, 80), 1)
+    y_left += lh
+    cv2.putText(panel, f"Kick tol: {int(kp_tol)}px", (col_left_x, y_left),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.45, (220, 220, 40), 1)
+    cv2.putText(panel, "(' `)", (250, y_left), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (150, 150, 150), 1)
+    y_left += int(lh * 0.8)
+    cv2.putText(panel, "Tolerancia bola<->kick_point", (20, y_left),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.33, (160, 160, 80), 1)
     y_left += lh
 
     # --- Parámetros nuevos sin dribbler ---

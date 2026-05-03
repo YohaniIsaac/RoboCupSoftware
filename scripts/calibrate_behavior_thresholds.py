@@ -46,6 +46,28 @@ Controles:
     I/K: Aumentar/Disminuir capture_overshoot_px
     O/L: Aumentar/Disminuir capture_confirm_distance_px
 
+    KICK_POINT (±1 px por pulsación, calibración geométrica del solenoide):
+    / / \\ : Aumentar/Disminuir KICK_POINT_OFFSET_PX
+             (centro marker ArUco → punto de impacto del solenoide)
+    '  / `  : Aumentar/Disminuir KICK_POINT_TOLERANCE_PX
+             (tolerancia bola↔kick_point para confirmar contacto)
+
+    Procedimiento del kick_point:
+    1. Coloca un robot detectado y la pelota delante de él tocando el dribbler.
+    2. Verifica visualmente que el robot esté en posición ideal de kick.
+    3. Ajusta el offset (/ y \\) hasta que la cruz cyan del kick_point
+       coincida con el centro de la pelota.
+    4. Ajusta la tolerancia (' y `) — debe abrazar el rango razonable de
+       posiciones aceptables de la pelota antes del disparo.
+    5. ENTER guarda los valores en config.py.
+
+    Nota sobre distorsión de cámara: la homografía warpPerspective NO
+    corrige fish-eye/barrel ni paralaje del marker (que está sobre el
+    robot). El offset puede variar 5-15 px entre centro y bordes del
+    campo. Si la varianza importa, calibrar en el centro y mover el
+    robot a varias zonas para verificar que la cruz sigue cerca de la
+    pelota; usar tolerancia más generosa si la varianza es ≤10 px.
+
     DRIBBLER (PWM directo 0-255, ±1 por pulsación):
     1/2: Disminuir/Aumentar dribbler_capture_power (PWM durante captura)
     3/4: Disminuir/Aumentar dribbler_hold_power (PWM al mantener pelota)

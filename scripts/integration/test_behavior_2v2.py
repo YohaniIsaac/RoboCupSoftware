@@ -25,23 +25,17 @@ Controles (ventana OpenCV):
     ESPACIO : Activar/pausar AMBOS equipos
     R       : Activar/pausar solo equipo rojo   (debug: verificar un equipo)
     B       : Activar/pausar solo equipo azul   (debug: verificar un equipo)
-    K       : Mostrar/ocultar overlay del kick_point
-    + / -   : Ajustar KICK_POINT_OFFSET_PX (visualización) +/- 1 px
-    ] / [   : Ajustar KICK_POINT_TOLERANCE_PX (visualización) +/- 1 px
+    K       : Mostrar/ocultar overlay del kick_point (lectura de config.py)
     ESC     : Salir
 
-Calibración del kick_point:
-    El overlay K muestra el punto desplazado del marker ArUco en la dirección
-    de heading del robot, donde se asume que impacta el solenoide. Pon un
-    robot en posición ideal de kick (alineado, dribbler tocando la pelota) y
-    ajusta con +/- hasta que el marcador del kick_point coincida con el
-    centro de la pelota. El círculo de tolerancia muestra el radio aceptable
-    bola↔kick_point para confirmar contacto.
-
-    Importante: los valores ajustados con +/- y [/] son SOLO de visualización
-    en el harness; no afectan el comportamiento real (la decisión usa los
-    valores de config.py). Una vez encontrado el valor correcto, actualizar
-    config.py manualmente y reiniciar.
+Overlay del kick_point:
+    Con K se muestra para cada robot el punto desplazado del marker ArUco en
+    la dirección del heading, donde se asume que impacta el solenoide
+    (KICK_POINT_OFFSET_PX), junto con el círculo de tolerancia
+    (KICK_POINT_TOLERANCE_PX). Verde si la pelota cae dentro de la zona,
+    amarillo en caso contrario. Útil para verificar el alineamiento durante
+    un partido real. La calibración interactiva del valor vive en
+    scripts/calibrate_behavior_thresholds.py.
 """
 
 import sys
@@ -310,12 +304,9 @@ def visualization_process_2v2(perception_pipe, decision_pipe, keyboard_pipe,
     window_name = 'Partido 2v2 — RoboCup'
     cv2.namedWindow(window_name)
 
-    # Overlay de calibración del kick_point: valores locales (sólo visualización).
-    # Se inicializan con la config.py vigente; el usuario los ajusta con +/-, [/]
-    # para encontrar el valor físicamente correcto. Después actualiza config.py.
-    show_kick_point      = True
-    kick_offset_px_viz   = float(KICK_POINT_OFFSET_PX)
-    kick_tol_px_viz      = float(KICK_POINT_TOLERANCE_PX)
+    # Overlay del kick_point: lectura directa de config.py para inspección.
+    # La calibración interactiva vive en scripts/calibrate_behavior_thresholds.py.
+    show_kick_point = True
 
     try:
         while True:
@@ -452,17 +443,17 @@ def visualization_process_2v2(perception_pipe, decision_pipe, keyboard_pipe,
                                             robot_color, 2, cv2.LINE_AA, tipLength=0.3)
 
                             # Overlay kick_point: punto donde se asume que impacta
-                            # el solenoide. Verde si la pelota cae dentro de la
-                            # tolerancia (CONTACTO geométrico), amarillo en caso
-                            # contrario. El círculo punteado es la tolerancia.
+                            # el solenoide (lectura de config.py). Verde si la
+                            # pelota cae dentro de la tolerancia (CONTACTO
+                            # geométrico), amarillo en caso contrario.
                             if show_kick_point:
-                                kpx = int(rx + kick_offset_px_viz * math.cos(ar))
-                                kpy = int(ry + kick_offset_px_viz * math.sin(ar))
+                                kpx = int(rx + KICK_POINT_OFFSET_PX * math.cos(ar))
+                                kpy = int(ry + KICK_POINT_OFFSET_PX * math.sin(ar))
                                 ball_in_zone = False
                                 if ball_pos is not None:
                                     bxc, byc = ball_pos
                                     err = math.hypot(bxc - kpx, byc - kpy)
-                                    ball_in_zone = err <= kick_tol_px_viz
+                                    ball_in_zone = err <= KICK_POINT_TOLERANCE_PX
                                 kp_col = ((40, 220, 40) if ball_in_zone
                                           else (40, 220, 220))
                                 # Línea punteada robot → kick_point
@@ -482,7 +473,7 @@ def visualization_process_2v2(perception_pipe, decision_pipe, keyboard_pipe,
                                          kp_col, 2, cv2.LINE_AA)
                                 # Círculo de tolerancia
                                 cv2.circle(frame, (kpx, kpy),
-                                           max(1, int(kick_tol_px_viz)),
+                                           max(1, int(KICK_POINT_TOLERANCE_PX)),
                                            kp_col, 1, cv2.LINE_AA)
 
                         rol_l = ROL_LABELS.get(rol, '?')
@@ -536,18 +527,14 @@ def visualization_process_2v2(perception_pipe, decision_pipe, keyboard_pipe,
                 cv2.putText(frame, score_text, ((w - tw) // 2, 28),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.75, (255, 255, 255), 2, cv2.LINE_AA)
 
-                cv2.putText(frame, "ESPACIO=Ambos  R=Rojo  B=Azul  K=KickPt  +/-=offset  [/]=tol  ESC=Salir",
+                cv2.putText(frame, "ESPACIO=Ambos  R=Rojo  B=Azul  K=KickPt  ESC=Salir",
                             (10, h - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (180, 180, 180), 1)
 
-                # HUD del kick_point: valores actuales (visualización)
+                # HUD del kick_point: valores activos en config.py
                 if show_kick_point:
-                    diff_off = kick_offset_px_viz - KICK_POINT_OFFSET_PX
-                    diff_tol = kick_tol_px_viz - KICK_POINT_TOLERANCE_PX
-                    sign_off = ('+' if diff_off > 0 else '')
-                    sign_tol = ('+' if diff_tol > 0 else '')
-                    kp_hud = (f"KICK_POINT  offset={kick_offset_px_viz:.0f}px "
-                              f"({sign_off}{diff_off:.0f})  "
-                              f"tol={kick_tol_px_viz:.0f}px ({sign_tol}{diff_tol:.0f})")
+                    kp_hud = (f"KICK_POINT  offset={KICK_POINT_OFFSET_PX}px  "
+                              f"tol={KICK_POINT_TOLERANCE_PX}px  "
+                              f"(calibrar en calibrate_behavior_thresholds.py)")
                     (kw, _), _ = cv2.getTextSize(kp_hud, cv2.FONT_HERSHEY_SIMPLEX, 0.4, 1)
                     cv2.putText(frame, kp_hud, (w - kw - 10, h - 10),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.4, (40, 220, 220), 1, cv2.LINE_AA)
@@ -692,18 +679,6 @@ def visualization_process_2v2(perception_pipe, decision_pipe, keyboard_pipe,
                 show_kick_point = not show_kick_point
                 log.info("kick_point overlay: %s",
                          "ON" if show_kick_point else "OFF")
-            elif key in (ord('+'), ord('=')):
-                kick_offset_px_viz = min(80.0, kick_offset_px_viz + 1)
-                log.info("KICK_POINT_OFFSET_PX (viz)=%.0f", kick_offset_px_viz)
-            elif key in (ord('-'), ord('_')):
-                kick_offset_px_viz = max(0.0, kick_offset_px_viz - 1)
-                log.info("KICK_POINT_OFFSET_PX (viz)=%.0f", kick_offset_px_viz)
-            elif key == ord(']'):
-                kick_tol_px_viz = min(40.0, kick_tol_px_viz + 1)
-                log.info("KICK_POINT_TOLERANCE_PX (viz)=%.0f", kick_tol_px_viz)
-            elif key == ord('['):
-                kick_tol_px_viz = max(1.0, kick_tol_px_viz - 1)
-                log.info("KICK_POINT_TOLERANCE_PX (viz)=%.0f", kick_tol_px_viz)
 
     except KeyboardInterrupt:
         pass

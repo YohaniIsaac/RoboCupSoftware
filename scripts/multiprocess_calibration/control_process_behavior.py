@@ -47,6 +47,8 @@ from robot_soccer.config import (
     STUCK_BOOST_INCREMENT,
     STUCK_BOOST_MAX,
     STUCK_AUTO_KICK,
+    KICK_POINT_OFFSET_PX,
+    KICK_POINT_TOLERANCE_PX,
 )
 
 from robot_soccer.utils.robot_logger import robot_status_logger
@@ -116,6 +118,8 @@ def control_loop_behavior(robot_positions_pipe, frame_pipe, robot_id, serial_por
         'capture_overshoot_px': CAPTURE_OVERSHOOT_PX,
         'capture_confirm_px': CAPTURE_CONFIRM_DISTANCE_PX,
         'creep_speed_pwm': CAPTURE_CREEP_SPEED_PWM,
+        'kick_point_offset_px': KICK_POINT_OFFSET_PX,
+        'kick_point_tolerance_px': KICK_POINT_TOLERANCE_PX,
         'dribble_pwm_factor': DRIBBLE_PWM_FACTOR,
         'dribbler_capture_power': DRIBBLER_CAPTURE_POWER,
         'dribbler_hold_power': DRIBBLER_HOLD_POWER,
@@ -224,6 +228,35 @@ def control_loop_behavior(robot_positions_pipe, frame_pipe, robot_id, serial_por
                             tuple(target_waypoint),
                             (255, 255, 0), 1
                         )
+
+                # Overlay kick_point: punto donde se asume que impacta el solenoide.
+                # El usuario coloca la pelota delante del robot en posición ideal
+                # de kick (dribbler tocando) y ajusta el offset (F/V) hasta que la
+                # cruz coincida con el centro de la pelota. El círculo es la
+                # tolerancia (H/B) para confirmar contacto.
+                if robot:
+                    rx, ry = int(robot.x), int(robot.y)
+                    kp_off = behavior_params.get('kick_point_offset_px', KICK_POINT_OFFSET_PX)
+                    kp_tol = behavior_params.get('kick_point_tolerance_px', KICK_POINT_TOLERANCE_PX)
+                    kpx = int(rx + kp_off * math.cos(robot.angle))
+                    kpy = int(ry + kp_off * math.sin(robot.angle))
+                    kp_col = (40, 220, 220)
+                    # Línea punteada robot -> kick_point
+                    steps = 6
+                    for s in range(steps):
+                        if s % 2 == 0:
+                            x0 = int(rx + (kpx - rx) * s / steps)
+                            y0 = int(ry + (kpy - ry) * s / steps)
+                            x1 = int(rx + (kpx - rx) * (s + 1) / steps)
+                            y1 = int(ry + (kpy - ry) * (s + 1) / steps)
+                            cv2.line(vis_frame, (x0, y0), (x1, y1),
+                                     kp_col, 1, cv2.LINE_AA)
+                    cv2.line(vis_frame, (kpx - 5, kpy), (kpx + 5, kpy),
+                             kp_col, 2, cv2.LINE_AA)
+                    cv2.line(vis_frame, (kpx, kpy - 5), (kpx, kpy + 5),
+                             kp_col, 2, cv2.LINE_AA)
+                    cv2.circle(vis_frame, (kpx, kpy), max(1, int(kp_tol)),
+                               kp_col, 1, cv2.LINE_AA)
 
                 # Indicador de movimiento
                 status_text = "MOVING" if movement_active else "STOPPED"
@@ -413,6 +446,21 @@ def _draw_behavior_panel(behavior_params, robot, waypoint, robot_available):
                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
     y_offset += line_height
     cv2.putText(panel, "  -> Velocidad de motores durante fase 2 (creep)", (20, y_offset),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.4, (180, 180, 180), 1)
+    y_offset += int(line_height * 1.2)
+
+    kp_off = behavior_params.get('kick_point_offset_px', KICK_POINT_OFFSET_PX)
+    kp_tol = behavior_params.get('kick_point_tolerance_px', KICK_POINT_TOLERANCE_PX)
+    cv2.putText(panel, f"Kick point offset: {kp_off}px (F/V)", (10, y_offset),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (40, 220, 220), 1)
+    y_offset += line_height
+    cv2.putText(panel, "  -> Centro marker -> punto impacto solenoide", (20, y_offset),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.4, (180, 180, 180), 1)
+    y_offset += int(line_height * 1.2)
+    cv2.putText(panel, f"Kick point tol:    {kp_tol}px (H/B)", (10, y_offset),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (40, 220, 220), 1)
+    y_offset += line_height
+    cv2.putText(panel, "  -> Tolerancia bola<->kick_point para disparar", (20, y_offset),
                cv2.FONT_HERSHEY_SIMPLEX, 0.4, (180, 180, 180), 1)
     y_offset += int(line_height * 1.2)
 
@@ -610,6 +658,26 @@ def _handle_keyboard_behavior(key, robot, target_waypoint, behavior_params,
         result['action'] = 'update_behavior'
         log.info(f"creep_speed_pwm: {behavior_params['creep_speed_pwm']} PWM")
 
+    # Kick_point: offset desde marker ArUco hasta punto de impacto del solenoide (F/V ±1 px)
+    elif key == ord('f') or key == ord('F'):
+        behavior_params['kick_point_offset_px'] = min(80, behavior_params['kick_point_offset_px'] + 1)
+        result['action'] = 'update_behavior'
+        log.info(f"kick_point_offset_px: {behavior_params['kick_point_offset_px']}px")
+    elif key == ord('v') or key == ord('V'):
+        behavior_params['kick_point_offset_px'] = max(0, behavior_params['kick_point_offset_px'] - 1)
+        result['action'] = 'update_behavior'
+        log.info(f"kick_point_offset_px: {behavior_params['kick_point_offset_px']}px")
+
+    # Kick_point: tolerancia bola↔kick_point para confirmar contacto (H/B ±1 px)
+    elif key == ord('h') or key == ord('H'):
+        behavior_params['kick_point_tolerance_px'] = min(40, behavior_params['kick_point_tolerance_px'] + 1)
+        result['action'] = 'update_behavior'
+        log.info(f"kick_point_tolerance_px: {behavior_params['kick_point_tolerance_px']}px")
+    elif key == ord('b') or key == ord('B'):
+        behavior_params['kick_point_tolerance_px'] = max(1, behavior_params['kick_point_tolerance_px'] - 1)
+        result['action'] = 'update_behavior'
+        log.info(f"kick_point_tolerance_px: {behavior_params['kick_point_tolerance_px']}px")
+
     # Dribble PWM factor (T/Y ±0.05)
     elif key == ord('t') or key == ord('T'):
         behavior_params['dribble_pwm_factor'] = round(max(0.5, behavior_params['dribble_pwm_factor'] - 0.05), 2)
@@ -681,6 +749,8 @@ def _save_behavior_to_config(behavior_params):
         'CAPTURE_OVERSHOOT_PX': f"{behavior_params['capture_overshoot_px']}",
         'CAPTURE_CONFIRM_DISTANCE_PX': f"{behavior_params['capture_confirm_px']}",
         'CAPTURE_CREEP_SPEED_PWM': f"{behavior_params['creep_speed_pwm']}",
+        'KICK_POINT_OFFSET_PX':    f"{int(behavior_params.get('kick_point_offset_px', KICK_POINT_OFFSET_PX))}",
+        'KICK_POINT_TOLERANCE_PX': f"{int(behavior_params.get('kick_point_tolerance_px', KICK_POINT_TOLERANCE_PX))}",
         'DRIBBLE_PWM_FACTOR': f"{behavior_params.get('dribble_pwm_factor', 1.0)}",
         'DRIBBLER_CAPTURE_POWER': f"{behavior_params.get('dribbler_capture_power', 25)}",
         'DRIBBLER_HOLD_POWER': f"{behavior_params.get('dribbler_hold_power', 115)}",
@@ -766,6 +836,8 @@ def control_loop_behavior_pure(perception_pipe, control_state_pipe, keyboard_pip
         'capture_overshoot_px': CAPTURE_OVERSHOOT_PX,
         'capture_confirm_px': CAPTURE_CONFIRM_DISTANCE_PX,
         'creep_speed_pwm': CAPTURE_CREEP_SPEED_PWM,
+        'kick_point_offset_px': KICK_POINT_OFFSET_PX,
+        'kick_point_tolerance_px': KICK_POINT_TOLERANCE_PX,
         'dribble_pwm_factor': DRIBBLE_PWM_FACTOR,
         'dribbler_capture_power': DRIBBLER_CAPTURE_POWER,
         'dribbler_hold_power': DRIBBLER_HOLD_POWER,
@@ -1005,6 +1077,8 @@ def control_loop_behavior_pure(perception_pipe, control_state_pipe, keyboard_pip
                                 'capture_overshoot_px': (0, 50),
                                 'capture_confirm_px': (5, 50),
                                 'creep_speed_pwm': (10, 80),
+                                'kick_point_offset_px':    (0, 80),
+                                'kick_point_tolerance_px': (1, 40),
                                 'dribble_pwm_factor': (0.5, 2.0),
                                 'dribbler_capture_power': (0, 255),
                                 'dribbler_hold_power': (0, 255),
