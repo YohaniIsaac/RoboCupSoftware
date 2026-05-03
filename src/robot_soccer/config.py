@@ -380,7 +380,7 @@ ESTADO_RETROCEDER = "RETROCEDE A DEFENDER ARCO ALIADO"
 # Rangos de colores HSV para detección
 # ==========================================
 # Rango para color naranja (pelota)
-RANGO_COLOR_NARANJO = ((8, 116, 159), (30, 200, 255))  # Rango HSV para pelota naranja
+RANGO_COLOR_NARANJO = ((10, 142, 199), (41, 231, 255))  # Rango HSV para pelota naranja
 
 # Rangos para colores de equipos
 RANGO_COLOR_ROJO = ((0, 100, 20), (8, 255, 255), (175, 100, 20), (179, 255, 255))
@@ -390,7 +390,7 @@ RANGO_COLOR_CIAN = ((85, 150, 150), (95, 255, 255), None, None)
 
 # Parámetros de detección de pelota (morfología y HoughCircles)
 BALL_DETECTION_KERNEL_SIZE = 3  # Tamaño del kernel morfológico
-BALL_DETECTION_MORPH_ITERATIONS = 4  # Iteraciones de apertura/cierre
+BALL_DETECTION_MORPH_ITERATIONS = 3  # Iteraciones de apertura/cierre
 BALL_DETECTION_HOUGH_PARAM1 = 7  # Umbral Canny
 BALL_DETECTION_HOUGH_PARAM2 = 7  # Umbral acumulador
 BALL_DETECTION_MIN_RADIUS = 5  # Radio mínimo (px)
@@ -465,6 +465,27 @@ CAPTURE_OVERSHOOT_PX = 27  # px — empuje suave para asegurar contacto dribbler
 # Este valor debe ser mayor que la distancia real de parada (~23px observado).
 # Calibrar con scripts/calibrate_behavior_thresholds.py (teclas O/L)
 CAPTURE_CONFIRM_DISTANCE_PX = 35  # px — confirmar pelota en dribbler
+
+# --- Geometría del punto de golpeo (kick_point) ---
+# El gate de "pelota lista para disparo" no se mide centro_robot ↔ centro_pelota
+# (eso ignora la dirección del robot), sino kick_point ↔ centro_pelota, donde
+# kick_point = robot_pos + KICK_POINT_OFFSET_PX * heading_unit. Esto exige que
+# la pelota esté delante del robot, no a un costado.
+KICK_POINT_OFFSET_PX    = 30  # px — distancia centro robot → punto donde el solenoide impacta
+                              #      (calibrar físicamente: medir desde marker ArUco hasta
+                              #      el punto de impacto del solenoide cuando el robot está
+                              #      en posición ideal de kick).
+KICK_POINT_TOLERANCE_PX = 6   # px — radio aceptable bola ↔ kick_point para confirmar contacto.
+                              #      Debe estar por encima del piso de ruido de detección
+                              #      (~3-5 px ArUco/HSV); 6 da margen sin volver el gate laxo.
+
+# --- Detección de kick exitoso vs. fallido ---
+# Tras kick_immediately, se compara la posición de la pelota antes/después
+# para distinguir kick mecánicamente exitoso (pelota voló) de fallo
+# (pelota apenas se movió). El behavior tree usa esto para decidir si
+# retroceder (kick desalineado) o re-avanzar (fallo mecánico).
+KICK_FAIL_DETECT_WINDOW_S = 0.5  # s — ventana tras el kick para evaluar éxito
+KICK_SUCCESS_MIN_PX       = 25   # px — desplazamiento mínimo de la bola que indica kick exitoso
 
 # Velocidad PWM para el acercamiento lento hacia la pelota (sin dribbler).
 # Se envía directamente a los motores sin PID.

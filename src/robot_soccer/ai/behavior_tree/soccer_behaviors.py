@@ -25,6 +25,10 @@ from robot_soccer.config import (
     CAPTURE_OVERSHOOT_PX,
     CAPTURE_CONFIRM_DISTANCE_PX,
     CAPTURE_CREEP_SPEED_PWM,
+    KICK_POINT_OFFSET_PX,
+    KICK_POINT_TOLERANCE_PX,
+    KICK_FAIL_DETECT_WINDOW_S,
+    KICK_SUCCESS_MIN_PX,
     CORRIDOR_CLEARANCE_PX,
     DRIBBLER_HOLD_POWER,
     BEHIND_BALL_APPROACH_PX,
@@ -1355,17 +1359,60 @@ def _move_behind_ball_start(blackboard):
     dist_to_ball    = float(np.linalg.norm(ball_pos - player_pos))
     secs_since_kick = time.time() - getattr(blackboard, '_last_kick_time', 0.0)
 
+    # Tras un kick reciente, distinguir tres sub-casos según qué pasó con la pelota:
+    #   (1) Kick exitoso: la pelota voló (ball_displacement >= KICK_SUCCESS_MIN_PX).
+    #       Cae en el flujo normal: behind_ball recalcula posición tras la pelota.
+    #   (2) Kick fallido por fallo mecánico: pelota apenas se movió pero sigue en
+    #       el kick_point (alineada delante del robot). Saltar RETROCESO y dejar
+    #       que el ciclo reentre a advance_contact: el robot sólo necesita
+    #       avanzar unos px más.
+    #   (3) Kick fallido por desalineación: pelota apenas se movió y quedó
+    #       fuera del eje de golpeo (al costado del robot). Avanzar arrastraría
+    #       la pelota; además su cercanía al cuerpo puede impedir su detección.
+    #       → RETROCEDER para liberarla y re-orientar.
+    ball_at_kick = getattr(blackboard, '_ball_pos_at_kick', None)
+    kick_just_failed = False
+    kick_failed_aligned = False
+    if (ball_at_kick is not None
+            and secs_since_kick < KICK_FAIL_DETECT_WINDOW_S):
+        ball_displacement = float(np.linalg.norm(ball_pos - ball_at_kick))
+        if ball_displacement < KICK_SUCCESS_MIN_PX:
+            kick_just_failed = True
+            heading_rad = np.radians(blackboard.player.angle)
+            kick_point  = player_pos + KICK_POINT_OFFSET_PX * np.array(
+                [np.cos(heading_rad), np.sin(heading_rad)]
+            )
+            err_now = float(np.linalg.norm(ball_pos - kick_point))
+            # Tolerancia ampliada (×2) post-kick para absorber jitter y rebote.
+            kick_failed_aligned = err_now < KICK_POINT_TOLERANCE_PX * 2
+            if kick_failed_aligned:
+                # Sub-caso (2): saltar retroceso y dejar que advance_contact reintente.
+                # No setear phase='retreat'; caer al flujo normal de behind_ball.
+                blackboard._ball_pos_at_kick = None  # consumido
+                robot_status_logger.emit_event(
+                    blackboard.player.id,
+                    f"behind_ball KICK FALLO MECANICO: "
+                    f"bola alineada (kick_err={err_now:.0f}px) -> reintentar avance"
+                )
+            # Sub-caso (3) cae al bloque RETROCESO de abajo.
+
     # Fase RETROCESO: si acabamos de patear y la pelota sigue pegada al robot,
     # retroceder en línea recta (sin rotar) antes de intentar el desvío lateral.
     # Sin esto, cualquier rotación barre la pelota (radio robot ≈ 30px, bola a 34px).
-    if secs_since_kick < POST_KICK_COOLDOWN_S and dist_to_ball < BEHIND_BALL_APPROACH_PX:
+    # Excepción: kick fallido pero alineado → saltar este bloque (re-avance directo).
+    if (not (kick_just_failed and kick_failed_aligned)
+            and secs_since_kick < POST_KICK_COOLDOWN_S
+            and dist_to_ball < BEHIND_BALL_APPROACH_PX):
         blackboard._behind_ball_phase = 'retreat'
         blackboard._behind_ball_ref   = ball_pos.copy()
         blackboard.command_manager.creep_forward(blackboard.player.id, speed=-CAPTURE_CREEP_SPEED_PWM)
         blackboard.last_action = "retreating_from_ball"
+        reason = ("kick desalineado, bola al costado"
+                  if (kick_just_failed and not kick_failed_aligned)
+                  else "alejarse antes de rotar")
         robot_status_logger.emit_event(
             blackboard.player.id,
-            f"behind_ball RETROCESO: dist_bola={dist_to_ball:.0f}px -> alejarse antes de rotar"
+            f"behind_ball RETROCESO: dist_bola={dist_to_ball:.0f}px -> {reason}"
         )
         return NodeStatus.RUNNING
 
@@ -1654,34 +1701,37 @@ def _advance_to_contact_start(blackboard):
         np.arctan2(ball_pos[1] - player_pos[1], ball_pos[0] - player_pos[0])
     ))
 
-    # ¿Ya en contacto desde el inicio?
-    # Requiere proximidad Y alineación: si el robot está cerca pero no mira
-    # la pelota, no es contacto real (ej: post-kick con robot girado).
-    if dist < CAPTURE_CONFIRM_DISTANCE_PX:
-        ang_to_ball = float(np.degrees(np.arctan2(
-            ball_pos[1] - player_pos[1], ball_pos[0] - player_pos[0])))
-        err_heading = abs((ang_to_ball - blackboard.player.angle + 180) % 360 - 180)
-        if err_heading <= BEHIND_BALL_ALIGN_TOLERANCE_DEG * 2:
-            blackboard._contact_made         = True
-            blackboard._contact_settle_start = time.time()
-            blackboard.player._has_ball      = True
-            blackboard.last_action           = "settling_contact"
-            robot_status_logger.emit_event(
-                player_id,
-                f"advance_contact CONTACTO INMEDIATO: dist={dist:.1f}px heading_err={err_heading:.1f}°"
-            )
-            return NodeStatus.RUNNING
-        else:
-            robot_status_logger.emit_event(
-                player_id,
-                f"advance_contact DESALINEADO: dist={dist:.1f}px "
-                f"heading_err={err_heading:.1f}° > {BEHIND_BALL_ALIGN_TOLERANCE_DEG * 2:.1f}° -> FAILURE"
-            )
-            return NodeStatus.FAILURE
+    # ¿Ya en contacto desde el inicio? Gate por kick_point: la pelota debe
+    # estar a la altura del punto de impacto del solenoide, no sólo cerca
+    # del centro del robot.
+    heading_rad = np.radians(blackboard.player.angle)
+    kick_point  = np.array([
+        player_pos[0] + KICK_POINT_OFFSET_PX * np.cos(heading_rad),
+        player_pos[1] + KICK_POINT_OFFSET_PX * np.sin(heading_rad),
+    ])
+    kick_err = float(np.linalg.norm(ball_pos - kick_point))
+    if kick_err < KICK_POINT_TOLERANCE_PX:
+        blackboard._contact_made         = True
+        blackboard._contact_settle_start = time.time()
+        blackboard.player._has_ball      = True
+        blackboard.last_action           = "settling_contact"
+        robot_status_logger.emit_event(
+            player_id,
+            f"advance_contact CONTACTO INMEDIATO: kick_err={kick_err:.1f}px"
+        )
+        return NodeStatus.RUNNING
 
-    # Calcular target de overshoot (más allá de la pelota hacia el arco)
-    overshoot = _compute_overshoot_target(ball_pos, goal_pos, CAPTURE_OVERSHOOT_PX)
-    target = (int(overshoot[0]), int(overshoot[1]))
+    # Target geométricamente coherente con el kick_point:
+    # cuando el robot llegue a target_robot, su kick_point queda sobre la
+    # pelota. Se reemplaza el viejo overshoot "27 px más allá de la pelota"
+    # por target = ball - KICK_POINT_OFFSET * unit(goal - ball).
+    goal_to_ball = goal_pos - ball_pos
+    dist_gtb = float(np.linalg.norm(goal_to_ball))
+    if dist_gtb < 1.0:
+        return NodeStatus.FAILURE
+    unit_to_goal = goal_to_ball / dist_gtb
+    target_robot = ball_pos - KICK_POINT_OFFSET_PX * unit_to_goal
+    target = (int(target_robot[0]), int(target_robot[1]))
 
     # Verificar corredor libre: ningún otro robot debe estar perpendicularmente
     # dentro del segmento robot→overshoot. La creep mode avanza en línea recta
@@ -1833,8 +1883,15 @@ def _advance_to_contact_running(blackboard):
             )
             return NodeStatus.FAILURE
 
-        # Contacto alcanzado: detener PID y empezar asentamiento
-        if dist < CAPTURE_CONFIRM_DISTANCE_PX:
+        # Contacto alcanzado: gate por kick_point (la pelota debe estar
+        # delante del robot a la altura del solenoide, no sólo cerca).
+        heading_rad = np.radians(blackboard.player.angle)
+        kick_point  = np.array([
+            player_pos[0] + KICK_POINT_OFFSET_PX * np.cos(heading_rad),
+            player_pos[1] + KICK_POINT_OFFSET_PX * np.sin(heading_rad),
+        ])
+        kick_err = float(np.linalg.norm(ball_pos - kick_point))
+        if kick_err < KICK_POINT_TOLERANCE_PX:
             _clear_advance_state(blackboard, player_id)
             blackboard._contact_made         = True
             blackboard._contact_settle_start = time.time()
@@ -1842,17 +1899,21 @@ def _advance_to_contact_running(blackboard):
             blackboard.last_action           = "settling_contact"
             robot_status_logger.emit_event(
                 player_id,
-                f"advance_contact CONTACTO: dist={dist:.1f}px asentando {CONTACT_SETTLE_TIME_S:.2f}s..."
+                f"advance_contact CONTACTO: kick_err={kick_err:.1f}px asentando {CONTACT_SETTLE_TIME_S:.2f}s..."
             )
             return NodeStatus.RUNNING
 
-        # Solo recalcular el target cuando el robot está lejos de la pelota.
-        # Si ya está dentro del radio de activación, mantener el target actual
-        # para que el PID cierre la distancia sin seguir la pelota que se mueve.
+        # Recalcular target sólo cuando aún no estamos en zona fina de captura.
+        # Una vez dentro, el PID cierra la distancia con el target ya emitido
+        # sin seguir la pelota frame a frame (evita oscilación por jitter).
         if dist > CAPTURE_ACTIVATE_DISTANCE_PX:
-            overshoot = _compute_overshoot_target(ball_pos, goal_pos, CAPTURE_OVERSHOOT_PX)
-            target = (int(overshoot[0]), int(overshoot[1]))
-            blackboard.command_manager.move_robot_to(player_id, target)
+            goal_to_ball = goal_pos - ball_pos
+            dist_gtb = float(np.linalg.norm(goal_to_ball))
+            if dist_gtb >= 1.0:
+                unit_to_goal = goal_to_ball / dist_gtb
+                target_robot = ball_pos - KICK_POINT_OFFSET_PX * unit_to_goal
+                target = (int(target_robot[0]), int(target_robot[1]))
+                blackboard.command_manager.move_robot_to(player_id, target)
         return NodeStatus.RUNNING
 
     # ──────────────────────────────
@@ -1925,6 +1986,11 @@ def kick_immediately(blackboard):
 
     blackboard.player._has_ball = False
     blackboard._last_kick_time  = time.time()  # bloquea fast-path en move_behind_ball
+    # Snapshot de la posición de la pelota al momento del kick: permite
+    # distinguir en move_behind_ball entre kick exitoso (pelota voló) y
+    # fallido (pelota apenas se movió → re-avanzar o retroceder según
+    # si sigue alineada con el kick_point).
+    blackboard._ball_pos_at_kick = np.array(blackboard.ball.get_position(), dtype=float)
     blackboard.last_action = "kick_immediately"
     robot_status_logger.emit_event(
         blackboard.player.id,
