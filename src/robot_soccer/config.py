@@ -244,6 +244,15 @@ RRT_REPLAN_COOLDOWN_S    = 0.5   # s  — tiempo mínimo entre replans por posic
 RRT_OBSTACLE_MOVE_PX     = 25    # px — trigger replan si un obstáculo se mueve >N px
                                   # (bajado de 40→25: detectar movimiento antes de que el path quede inválido)
 
+# --- Umbral de llegada efectivo según proximidad de obstáculos ---
+# El umbral nominal de llegada (arrival_threshold por comando) se contrae
+# linealmente cuando hay otro robot cerca del target, para evitar que dos
+# robots con thresholds laxos se solapen en círculos de aceptación y
+# colisionen. Ver _effective_threshold en robot_command_manager.py.
+OBSTACLE_PROXIMITY_NEAR_PX  = 60   # px — obstáculo más cercano <= este → umbral mínimo
+OBSTACLE_PROXIMITY_FAR_PX   = 120  # px — obstáculo más cercano >= este → umbral nominal
+OBSTACLE_TIGHT_THRESHOLD_PX = 8    # px — umbral mínimo cuando hay obstáculo cercano
+
 RESET_MOVE_FACTOR = 0.80         # fracción de pwm_max para movimiento de reset (flooreado en pwm_min)
 RESET_ANGLE       = {'red': 0.0, 'blue': 180.0}  # ángulo canónico de orientación (dirección de ataque)
 

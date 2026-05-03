@@ -55,6 +55,11 @@ def planning_worker(ctrl_pipe, path_queue, clearance=None):
             robot_pos = data['robot_pos']
             goal_pos  = data['goal_pos']
             obstacles = data.get('obstacles', [])
+            # Umbral de llegada por-request (idea B umbrales dinámicos):
+            # permite al caller relajar el sanity check final cuando el target
+            # es un punto "ilustrativo" (defensa, behind_ball) en vez de uno
+            # crítico (captura).
+            arrival_px = data.get('arrival_px', RRT_WAYPOINT_ARRIVAL_PX)
 
             log.info("Planificando desde %s hacia %s | %d obstaculos...",
                      robot_pos, goal_pos, len(obstacles))
@@ -78,10 +83,10 @@ def planning_worker(ctrl_pipe, path_queue, clearance=None):
                 # que el robot navegue hacia un punto sin relación con el goal.
                 last_wp_to_goal = math.hypot(path[-1][0] - goal_pos[0],
                                              path[-1][1] - goal_pos[1])
-                if last_wp_to_goal > RRT_WAYPOINT_ARRIVAL_PX:
+                if last_wp_to_goal > arrival_px:
                     log.warning("Path RRT* descartado: ultimo wp %s a %.0fpx "
                                 "del goal %s (>%dpx)", path[-1], last_wp_to_goal,
-                                goal_pos, RRT_WAYPOINT_ARRIVAL_PX)
+                                goal_pos, arrival_px)
                     continue
                 log.info("Path encontrado: %d wp en %.2fs", len(path), elapsed)
                 try:

@@ -307,7 +307,8 @@ class DifferentialDriveController:
 
         return (cw_compensation, ccw_compensation)
 
-    def move_to_position(self, robot, target_pos, target_angle=None):
+    def move_to_position(self, robot, target_pos, target_angle=None,
+                         arrival_threshold=None):
         """Mueve el robot a una posición usando control Dual PID (v, ω) estándar.
 
         Arquitectura estándar para tracción diferencial:
@@ -321,6 +322,9 @@ class DifferentialDriveController:
             robot: Objeto robot con atributos x, y, angle (radianes).
             target_pos (tuple): Posición objetivo como (x, y).
             target_angle (float, optional): Ángulo final en grados.
+            arrival_threshold (float, optional): Umbral (px) de llegada para
+                este movimiento. Si None se usa self.position_threshold
+                (default global ROBOT_POSITION_THRESHOLD).
 
         Returns:
             bool: True si llegó al objetivo.
@@ -329,6 +333,9 @@ class DifferentialDriveController:
         dx = target_pos[0] - robot.x
         dy = target_pos[1] - robot.y
         distance = math.sqrt(dx**2 + dy**2)
+
+        threshold = arrival_threshold if arrival_threshold is not None \
+                    else self.position_threshold
 
         state = self._get_pid_state(robot.id)
         robot_min_speed, robot_max_speed = self._get_robot_speed_limits(robot.id)
@@ -349,7 +356,7 @@ class DifferentialDriveController:
         # dist < 2× threshold. Evita ping-pong por overshoot inercial (R1 con
         # rango PWM estrecho oscilaba entre 2-7px del waypoint).
         if state['arrived']:
-            if distance < 2.0 * self.position_threshold:
+            if distance < 2.0 * threshold:
                 if target_angle is not None:
                     return self.rotate_to_angle(robot, target_angle)
                 self._send_motor_commands(robot, 0, 0)
@@ -361,7 +368,7 @@ class DifferentialDriveController:
         speed_norm = abs(state['last_linear_speed']) / 255.0
         predicted_dist = distance - speed_norm * 200.0 * latency_s
 
-        if predicted_dist < self.position_threshold and state['last_linear_speed'] > 0:
+        if predicted_dist < threshold and state['last_linear_speed'] > 0:
             robot_status_logger.emit_event(
                 robot.id,
                 f"STOP PREDICTIVO: dist={distance:.1f}px pred={predicted_dist:.1f}px"
@@ -374,7 +381,7 @@ class DifferentialDriveController:
             self._send_motor_commands(robot, 0, 0)
             return True
 
-        if distance < self.position_threshold:
+        if distance < threshold:
             robot_status_logger.emit_event(
                 robot.id,
                 f"WAYPOINT ALCANZADO: dist={distance:.1f}px"

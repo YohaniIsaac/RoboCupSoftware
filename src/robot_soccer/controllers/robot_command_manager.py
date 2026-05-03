@@ -18,6 +18,9 @@ from robot_soccer.config import (
     ROTATE_RECOMMAND_MIN_DEG,
     ROBOT_DETECTION_LOST_RAMPDOWN_S,
     ROBOT_MAX_LINEAR_SPEED,
+    OBSTACLE_PROXIMITY_NEAR_PX,
+    OBSTACLE_PROXIMITY_FAR_PX,
+    OBSTACLE_TIGHT_THRESHOLD_PX,
 )
 from robot_soccer.ai.path_planning.tools_for_path_planing import (
     path_closest_waypoint_idx,
@@ -221,6 +224,7 @@ class RobotCommandManager:
                 if action['type'] == 'move':
                     target_pos   = action['target_pos']
                     target_angle = action.get('target_angle')
+                    nominal_arrival = action.get('arrival_threshold')
                     player_id    = player.id
 
                     if player_id in self._plan_pipes:
@@ -235,6 +239,12 @@ class RobotCommandManager:
                             [r['x'], r['y'], PATH_PLANNING_ROBOT_OBSTACLE_RADIUS]
                             for r in obs_dicts
                         ]
+
+                        # Umbral de llegada efectivo: contraído si hay obstáculo cerca
+                        # del target. Se aplica al sanity check del planner y al PID.
+                        effective_arrival = self._effective_threshold(
+                            target_pos, nominal_arrival, obs_dicts, player_id
+                        )
 
                         # Incluir pelota como obstáculo si el goal está lejos de ella
                         # (excluir en fase de captura directa donde el robot DEBE llegar a la pelota)
@@ -326,6 +336,9 @@ class RobotCommandManager:
                                     'robot_pos': cur_pos,
                                     'goal_pos':  goal,
                                     'obstacles': obstacles,
+                                    'arrival_px': (effective_arrival
+                                                   if effective_arrival is not None
+                                                   else RRT_WAYPOINT_ARRIVAL_PX),
                                 })
                                 self._last_sent_pos[player_id]  = cur_pos
                                 self._last_sent_goal[player_id] = goal
@@ -345,11 +358,14 @@ class RobotCommandManager:
                         wp_idx = self._current_wp_idx.get(player_id, 0)
 
                         if path and wp_idx < len(path):
-                            # Seguir waypoint activo del path planificado
+                            # Seguir waypoint activo del path planificado.
+                            # En el último wp se aplica el umbral efectivo (arrival_threshold);
+                            # en los intermedios se mantiene RRT_WAYPOINT_ARRIVAL_PX.
                             wp      = path[wp_idx]
                             is_last = (wp_idx == len(path) - 1)
+                            wp_arrival = effective_arrival if is_last else None
                             arrived = self.controllers[player_id].move_to_position(
-                                player, wp, target_angle
+                                player, wp, target_angle, arrival_threshold=wp_arrival
                             )
                             # Umbral relajado en waypoints intermedios
                             if not is_last:
@@ -379,7 +395,8 @@ class RobotCommandManager:
                         else:
                             # Fallback: PID directo mientras llega el primer path
                             is_completed = self.controllers[player_id].move_to_position(
-                                player, target_pos, target_angle
+                                player, target_pos, target_angle,
+                                arrival_threshold=effective_arrival,
                             )
                             if is_completed:
                                 del self.actions_in_progress[player_id]
@@ -387,11 +404,13 @@ class RobotCommandManager:
                                          player_id, target_pos)
 
                     else:
-                        # Sin planner configurado: comportamiento original
+                        # Sin planner configurado: comportamiento original.
+                        # Sin obs_dicts disponibles aquí; se usa el umbral nominal directo.
                         is_completed = self.controllers[player.id].move_to_position(
                             player,
                             action['target_pos'],
-                            action.get('target_angle')
+                            action.get('target_angle'),
+                            arrival_threshold=nominal_arrival,
                         )
                         if is_completed:
                             del self.actions_in_progress[player.id]
@@ -457,7 +476,8 @@ class RobotCommandManager:
                         speed = int(speed * _detection_factor)
                         self.rf_controller.set_motors(fw_id, speed, speed)
 
-    def move_robot_to(self, player_id, target_pos, target_angle=None, speed_factor=1.0):
+    def move_robot_to(self, player_id, target_pos, target_angle=None, speed_factor=1.0,
+                      arrival_threshold=None):
         """Ordena a un robot moverse a una posición específica.
 
         Args:
@@ -467,6 +487,10 @@ class RobotCommandManager:
                 Defaults to None.
             speed_factor (float, optional): Factor de velocidad entre 0 y 2.0.
                 Defaults to 1.0.
+            arrival_threshold (float, optional): Umbral nominal (px) para
+                declarar el target alcanzado. Si None, se usa el del PID
+                (ROBOT_POSITION_THRESHOLD). El umbral efectivo se contrae
+                automáticamente si hay otros robots cerca del target.
 
         Note:
             La acción se ejecuta de forma asíncrona. Use execute_commands()
@@ -502,9 +526,42 @@ class RobotCommandManager:
             'type': 'move',
             'target_pos': target_pos,
             'target_angle': target_angle,
-            'speed_factor': speed_factor
+            'speed_factor': speed_factor,
+            'arrival_threshold': arrival_threshold,
         }
         log.info("Robot %i: Ordenado movimiento a %s", player_id, target_pos)
+
+    def _effective_threshold(self, target_pos, nominal_threshold, obstacles, exclude_id):
+        """Contrae el umbral nominal de llegada cuando hay obstáculos cerca del target.
+
+        Si nominal es None, retorna None (PID usa su default). Si el obstáculo
+        más cercano está a >= OBSTACLE_PROXIMITY_FAR_PX → umbral nominal sin
+        cambios. Si está a <= OBSTACLE_PROXIMITY_NEAR_PX → umbral mínimo.
+        Entre ambos rangos se interpola linealmente.
+
+        Esto evita colisiones cuando dos robots tienen targets cercanos y
+        ambos usan thresholds laxos (sus circunferencias de aceptación se
+        solapan).
+        """
+        if nominal_threshold is None:
+            return None
+        nearest = float('inf')
+        for r in obstacles:
+            if r.get('id') == exclude_id:
+                continue
+            d = math.hypot(r['x'] - target_pos[0], r['y'] - target_pos[1])
+            if d < nearest:
+                nearest = d
+        if nearest >= OBSTACLE_PROXIMITY_FAR_PX:
+            return nominal_threshold
+        if nearest <= OBSTACLE_PROXIMITY_NEAR_PX:
+            return min(nominal_threshold, float(OBSTACLE_TIGHT_THRESHOLD_PX))
+        ratio = (nearest - OBSTACLE_PROXIMITY_NEAR_PX) / (
+            OBSTACLE_PROXIMITY_FAR_PX - OBSTACLE_PROXIMITY_NEAR_PX
+        )
+        return OBSTACLE_TIGHT_THRESHOLD_PX + ratio * (
+            nominal_threshold - OBSTACLE_TIGHT_THRESHOLD_PX
+        )
 
     def rotate_robot_to(self, player_id, target_angle):
         """Ordena a un robot girar a un ángulo específico.
