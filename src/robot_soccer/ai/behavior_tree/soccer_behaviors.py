@@ -1681,21 +1681,6 @@ def create_move_behind_ball_node():
     )
 
 
-def _compute_overshoot_target(ball_pos, goal_pos, overshoot_px):
-    """Calcula target de overshoot: punto más allá de la pelota hacia el arco.
-
-    El PID persigue este punto, que está PAST la pelota en dirección al arco.
-    El robot físicamente se detiene al hacer contacto con la pelota antes de
-    alcanzar el overshoot, garantizando que el PID no frene prematuramente.
-    """
-    ball_to_goal = goal_pos - ball_pos
-    dist_bg = float(np.linalg.norm(ball_to_goal))
-    if dist_bg > 0:
-        unit_to_goal = ball_to_goal / dist_bg
-    else:
-        unit_to_goal = np.array([1, 0], dtype=float)
-    return ball_pos + unit_to_goal * overshoot_px
-
 
 def _advance_to_contact_start(blackboard):
     """on_start: inicia acercamiento con PID lento hacia la pelota.
