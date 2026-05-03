@@ -253,6 +253,13 @@ OBSTACLE_PROXIMITY_NEAR_PX  = 60   # px — obstáculo más cercano <= este → 
 OBSTACLE_PROXIMITY_FAR_PX   = 120  # px — obstáculo más cercano >= este → umbral nominal
 OBSTACLE_TIGHT_THRESHOLD_PX = 8    # px — umbral mínimo cuando hay obstáculo cercano
 
+# Umbrales nominales de llegada por contexto. El contexto determina la
+# precisión deseada al llegar; el umbral efectivo se contrae automáticamente
+# si hay obstáculos cerca del target (ver _effective_threshold).
+BEHIND_BALL_ARRIVAL_PX     = 15  # px — el BT chequea alineación angular después
+DEFENSIVE_POS_ARRIVAL_PX   = 40  # px — punto defensivo es ilustrativo (circunferencia)
+INTERCEPT_HOLD_ARRIVAL_PX  = 25  # px — interceptor en línea arco-pelota, tolerancia mediana
+
 RESET_MOVE_FACTOR = 0.80         # fracción de pwm_max para movimiento de reset (flooreado en pwm_min)
 RESET_ANGLE       = {'red': 0.0, 'blue': 180.0}  # ángulo canónico de orientación (dirección de ataque)
 

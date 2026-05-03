@@ -29,6 +29,9 @@ from robot_soccer.config import (
     KICK_POINT_TOLERANCE_PX,
     KICK_FAIL_DETECT_WINDOW_S,
     KICK_SUCCESS_MIN_PX,
+    BEHIND_BALL_ARRIVAL_PX,
+    DEFENSIVE_POS_ARRIVAL_PX,
+    INTERCEPT_HOLD_ARRIVAL_PX,
     CORRIDOR_CLEARANCE_PX,
     DRIBBLER_HOLD_POWER,
     BEHIND_BALL_APPROACH_PX,
@@ -1127,8 +1130,12 @@ def move_to_defensive_position(blackboard):
         blackboard.last_action = "in_defensive_position"
         return NodeStatus.SUCCESS
 
-    # No estamos en posición: ordenar movimiento
-    blackboard.command_manager.move_robot_to(blackboard.player.id, defensive_pos)
+    # No estamos en posición: ordenar movimiento. Punto defensivo tolera
+    # llegada en una circunferencia (idea B umbrales dinámicos).
+    blackboard.command_manager.move_robot_to(
+        blackboard.player.id, defensive_pos,
+        arrival_threshold=DEFENSIVE_POS_ARRIVAL_PX,
+    )
     blackboard.last_action = "move_to_defensive_position"
     return NodeStatus.RUNNING
 
@@ -1221,8 +1228,11 @@ def position_to_defend_goal(blackboard):
         # Fallback
         defend_pos = tuple(goal_pos)
 
-    # Ordenar movimiento
-    blackboard.command_manager.move_robot_to(blackboard.player.id, defend_pos)
+    # Ordenar movimiento. Punto defensivo tolera llegada en circunferencia.
+    blackboard.command_manager.move_robot_to(
+        blackboard.player.id, defend_pos,
+        arrival_threshold=DEFENSIVE_POS_ARRIVAL_PX,
+    )
 
     # Registrar la acción
     blackboard.last_action = "position_to_defend_goal"
@@ -1485,7 +1495,10 @@ def _move_behind_ball_start(blackboard):
                 f"behind_ball CIRCLE INICIO: dist={dist_to_ball:.0f}px "
                 f"err_ang={ang_err:.0f}° -> ({target[0]},{target[1]})"
             )
-            blackboard.command_manager.move_robot_to(blackboard.player.id, target)
+            blackboard.command_manager.move_robot_to(
+                blackboard.player.id, target,
+                arrival_threshold=BEHIND_BALL_ARRIVAL_PX,
+            )
             blackboard.last_action = "circle_ball"
             return NodeStatus.RUNNING
 
@@ -1519,7 +1532,10 @@ def _move_behind_ball_start(blackboard):
             f"behind_ball CAMINO DIRECTO: tgt=({target[0]},{target[1]})"
         )
 
-    blackboard.command_manager.move_robot_to(blackboard.player.id, target)
+    blackboard.command_manager.move_robot_to(
+        blackboard.player.id, target,
+        arrival_threshold=BEHIND_BALL_ARRIVAL_PX,
+    )
     blackboard.last_action = "move_behind_ball"
     return NodeStatus.RUNNING
 
@@ -1588,7 +1604,10 @@ def _move_behind_ball_running(blackboard):
         if ang_err <= CIRCLE_BALL_EXIT_TOLERANCE_DEG:
             blackboard._behind_ball_phase = 'direct'
             target = (int(behind_pos[0]), int(behind_pos[1]))
-            blackboard.command_manager.move_robot_to(player_id, target)
+            blackboard.command_manager.move_robot_to(
+                player_id, target,
+                arrival_threshold=BEHIND_BALL_ARRIVAL_PX,
+            )
             robot_status_logger.emit_event(
                 player_id,
                 f"behind_ball CIRCLE OK: ang_err={ang_err:.0f}° "
@@ -1598,7 +1617,10 @@ def _move_behind_ball_running(blackboard):
 
         lookahead = np.array(blackboard.field.clamp(lookahead.astype(int)), dtype=float)
         target = (int(lookahead[0]), int(lookahead[1]))
-        blackboard.command_manager.move_robot_to(player_id, target)
+        blackboard.command_manager.move_robot_to(
+            player_id, target,
+            arrival_threshold=BEHIND_BALL_ARRIVAL_PX,
+        )
         blackboard.last_action = "circle_ball"
         return NodeStatus.RUNNING
 
@@ -1610,7 +1632,10 @@ def _move_behind_ball_running(blackboard):
             blackboard._behind_ball_phase = 'direct'
             bp = blackboard._behind_ball_pos
             target = (int(bp[0]), int(bp[1]))
-            blackboard.command_manager.move_robot_to(player_id, target)
+            blackboard.command_manager.move_robot_to(
+                player_id, target,
+                arrival_threshold=BEHIND_BALL_ARRIVAL_PX,
+            )
             robot_status_logger.emit_event(
                 player_id,
                 f"behind_ball DESVIO OK: yendo a behind_pos ({target[0]},{target[1]})"
@@ -2141,7 +2166,10 @@ def hold_intercept_position(blackboard):
             blackboard.last_action = "intercept_hold"
         return NodeStatus.SUCCESS
 
-    blackboard.command_manager.move_robot_to(blackboard.player.id, intercept_pos)
+    blackboard.command_manager.move_robot_to(
+        blackboard.player.id, intercept_pos,
+        arrival_threshold=INTERCEPT_HOLD_ARRIVAL_PX,
+    )
     blackboard.last_action = "move_to_intercept"
     return NodeStatus.SUCCESS
 
