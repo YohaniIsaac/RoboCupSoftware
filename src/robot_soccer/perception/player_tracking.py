@@ -28,6 +28,9 @@ from robot_soccer.config import (
     ARUCO_PERSPECTIVE_REMOVE_PX_PER_CELL, ARUCO_PERSPECTIVE_REMOVE_IGNORED_MARGIN,
     ARUCO_MIN_DISTANCE_TO_BORDER, ARUCO_MARKER_BORDER_BITS,
     ARUCO_MIN_OTSU_STD_DEV, ARUCO_POLYGONAL_APPROX_ACCURACY_RATE,
+    # Corrección de paralaje
+    CAMERA_PERSPECTIVE_WIDTH, CAMERA_PERSPECTIVE_HEIGHT,
+    CAMERA_HEIGHT_ABOVE_FIELD_CM, MARKER_HEIGHT_ABOVE_FIELD_CM,
 )
 
 log = logging.getLogger(__name__)
@@ -127,9 +130,18 @@ def deteccion_jugadores_aruco_tag(frame, detector, allowed_ids=None, draw=True):
 
             corner_points = corner.reshape(4, 2)
 
-            # Centro del marcador
-            center_x = int(np.mean(corner_points[:, 0]))
-            center_y = int(np.mean(corner_points[:, 1]))
+            # Centro del marcador (en float para la corrección de paralaje)
+            center_x = float(np.mean(corner_points[:, 0]))
+            center_y = float(np.mean(corner_points[:, 1]))
+
+            # Corrección de paralaje: el marker está elevado sobre el campo.
+            # La cámara perspectiva desplaza objetos elevados hacia afuera del
+            # centro de la imagen. Se corrige proyectando al plano del campo.
+            _pf = MARKER_HEIGHT_ABOVE_FIELD_CM / CAMERA_HEIGHT_ABOVE_FIELD_CM
+            center_x = center_x - (center_x - CAMERA_PERSPECTIVE_WIDTH  / 2.0) * _pf
+            center_y = center_y - (center_y - CAMERA_PERSPECTIVE_HEIGHT / 2.0) * _pf
+            center_x = int(center_x)
+            center_y = int(center_y)
 
             # Ángulo de orientación (vector esquina 0 → esquina 1)
             vector_1 = corner_points[1] - corner_points[0]

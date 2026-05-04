@@ -501,6 +501,20 @@ KICK_POINT_OFFSET_PX    = 30  # px — distancia centro robot → punto donde el
 KICK_POINT_TOLERANCE_PX = 6   # px — radio aceptable bola ↔ kick_point para confirmar contacto.
                               #      Debe estar por encima del piso de ruido de detección
                               #      (~3-5 px ArUco/HSV); 6 da margen sin volver el gate laxo.
+KICK_POINT_ANGLE_OFFSET_DEG = 0.0  # ° — offset angular entre el eje del marker ArUco y el eje
+                                    #      real del solenoide (desalineación mecánica). Calibrar
+                                    #      con el robot en múltiples orientaciones en el centro
+                                    #      del campo: ajustar con </>  en calibrate_behavior_thresholds
+                                    #      hasta que la cruz del kick_point coincida con la pelota.
+                                    #      Positivo = sentido horario.
+
+# --- Corrección de paralaje por altura del marker ---
+# El marker ArUco está elevado sobre el campo. Una cámara perspectiva desplaza
+# objetos elevados hacia afuera del centro de la imagen respecto a su posición
+# real en el suelo. La corrección se aplica en player_tracking.py al calcular
+# el centro del marker.
+CAMERA_HEIGHT_ABOVE_FIELD_CM = 128.0  # cm — altura de la cámara sobre el plano del campo
+MARKER_HEIGHT_ABOVE_FIELD_CM = 8.5    # cm — altura del plano del marker ArUco sobre el campo
 
 # --- Detección de kick exitoso vs. fallido ---
 # Tras kick_immediately, se compara la posición de la pelota antes/después
