@@ -900,6 +900,35 @@ def _draw_overlays_zoom(frame, robot_pos, robot_data, waypoint,
                 cv2.arrowedLine(frame, (zrx, zry), (end_x, end_y),
                                (0, 200, 0), 2, cv2.LINE_AA, tipLength=0.25)
 
+                # kick_point overlay en zoom: mismo punto que en full view pero
+                # escalado por sx para mantener proporciones correctas
+                kp_off = behavior_params.get('kick_point_offset_px', 30)
+                kp_tol = behavior_params.get('kick_point_tolerance_px', 6)
+                kpx_full = robot_pos[0] + kp_off * math.cos(angle_rad)
+                kpy_full = robot_pos[1] + kp_off * math.sin(angle_rad)
+                zkpx, zkpy = to_zoom(kpx_full, kpy_full)
+                if in_bounds(zkpx, zkpy):
+                    kp_col = (220, 220, 40)
+                    steps = 6
+                    for s in range(steps):
+                        if s % 2 == 0:
+                            lx0 = int(zrx + (zkpx - zrx) * s / steps)
+                            ly0 = int(zry + (zkpy - zry) * s / steps)
+                            lx1 = int(zrx + (zkpx - zrx) * (s + 1) / steps)
+                            ly1 = int(zry + (zkpy - zry) * (s + 1) / steps)
+                            cv2.line(frame, (lx0, ly0), (lx1, ly1),
+                                     kp_col, 1, cv2.LINE_AA)
+                    cross_arm = max(6, int(6 * sx))
+                    cv2.line(frame, (zkpx - cross_arm, zkpy), (zkpx + cross_arm, zkpy),
+                             kp_col, 2, cv2.LINE_AA)
+                    cv2.line(frame, (zkpx, zkpy - cross_arm), (zkpx, zkpy + cross_arm),
+                             kp_col, 2, cv2.LINE_AA)
+                    tol_r = max(2, int(kp_tol * sx))
+                    cv2.circle(frame, (zkpx, zkpy), tol_r, kp_col, 1, cv2.LINE_AA)
+                    cv2.putText(frame, f"kp:{int(kp_off)}/{int(kp_tol)}",
+                                (zkpx + tol_r + 3, zkpy - 4),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.38, kp_col, 1, cv2.LINE_AA)
+
             # Target heading arrow
             if waypoint and target_heading_deg is not None:
                 th_rad = math.radians(target_heading_deg)
