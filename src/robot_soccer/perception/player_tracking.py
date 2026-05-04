@@ -28,9 +28,10 @@ from robot_soccer.config import (
     ARUCO_PERSPECTIVE_REMOVE_PX_PER_CELL, ARUCO_PERSPECTIVE_REMOVE_IGNORED_MARGIN,
     ARUCO_MIN_DISTANCE_TO_BORDER, ARUCO_MARKER_BORDER_BITS,
     ARUCO_MIN_OTSU_STD_DEV, ARUCO_POLYGONAL_APPROX_ACCURACY_RATE,
-    # Corrección de paralaje
+    # Corrección de paralaje y escala métrica
     CAMERA_PERSPECTIVE_WIDTH, CAMERA_PERSPECTIVE_HEIGHT,
     CAMERA_HEIGHT_ABOVE_FIELD_CM, MARKER_HEIGHT_ABOVE_FIELD_CM,
+    FIELD_PHYSICAL_WIDTH_CM, FIELD_PHYSICAL_HEIGHT_CM,
 )
 
 log = logging.getLogger(__name__)
@@ -143,9 +144,15 @@ def deteccion_jugadores_aruco_tag(frame, detector, allowed_ids=None, draw=True):
             center_x = int(center_x)
             center_y = int(center_y)
 
-            # Ángulo de orientación (vector esquina 0 → esquina 1)
+            # Ángulo de orientación (vector esquina 0 → esquina 1).
+            # Se normaliza a espacio métrico antes del atan2 para eliminar la
+            # anisotropía del warpPerspective: sin esta corrección, atan2 en
+            # píxeles produce hasta ~7° de error cuando el campo físico no tiene
+            # la misma proporción que la imagen warped (150x88cm vs 640x480px).
             vector_1 = corner_points[1] - corner_points[0]
-            angle = np.arctan2(vector_1[1], vector_1[0])
+            dx_metric = vector_1[0] / CAMERA_PERSPECTIVE_WIDTH  * FIELD_PHYSICAL_WIDTH_CM
+            dy_metric = vector_1[1] / CAMERA_PERSPECTIVE_HEIGHT * FIELD_PHYSICAL_HEIGHT_CM
+            angle = np.arctan2(dy_metric, dx_metric)
             angle_deg = np.degrees(angle)
 
             # Rectángulo que representa al robot (rotado según orientación)

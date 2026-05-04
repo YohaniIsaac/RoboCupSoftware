@@ -515,6 +515,10 @@ KICK_POINT_ANGLE_OFFSET_DEG = 0.0  # ° — offset angular entre el eje del mark
 # el centro del marker.
 CAMERA_HEIGHT_ABOVE_FIELD_CM = 128.0  # cm — altura de la cámara sobre el plano del campo
 MARKER_HEIGHT_ABOVE_FIELD_CM = 8.5    # cm — altura del plano del marker ArUco sobre el campo
+FIELD_PHYSICAL_WIDTH_CM      = 150.0  # cm — ancho real del área de juego (lado largo)
+FIELD_PHYSICAL_HEIGHT_CM     = 88.0   # cm — alto real del área de juego (lado corto)
+# Nota: estas dimensiones corrigen la anisotropía del warpPerspective en el cómputo
+# del heading (atan2 en pixels da heading erróneo cuando px/cm_x != px/cm_y).
 
 # --- Detección de kick exitoso vs. fallido ---
 # Tras kick_immediately, se compara la posición de la pelota antes/después
