@@ -27,6 +27,7 @@ from robot_soccer.config import (
     CAPTURE_CREEP_SPEED_PWM,
     KICK_POINT_OFFSET_PX,
     KICK_POINT_TOLERANCE_PX,
+    KICK_POINT_ANGLE_OFFSET_DEG,
     KICK_FAIL_DETECT_WINDOW_S,
     KICK_SUCCESS_MIN_PX,
     BEHIND_BALL_ARRIVAL_PX,
@@ -1389,7 +1390,7 @@ def _move_behind_ball_start(blackboard):
         ball_displacement = float(np.linalg.norm(ball_pos - ball_at_kick))
         if ball_displacement < KICK_SUCCESS_MIN_PX:
             kick_just_failed = True
-            heading_rad = np.radians(blackboard.player.angle)
+            heading_rad = np.radians(blackboard.player.angle + KICK_POINT_ANGLE_OFFSET_DEG)
             kick_point  = player_pos + KICK_POINT_OFFSET_PX * np.array(
                 [np.cos(heading_rad), np.sin(heading_rad)]
             )
@@ -1715,7 +1716,7 @@ def _advance_to_contact_start(blackboard):
     # ¿Ya en contacto desde el inicio? Gate por kick_point: la pelota debe
     # estar a la altura del punto de impacto del solenoide, no sólo cerca
     # del centro del robot.
-    heading_rad = np.radians(blackboard.player.angle)
+    heading_rad = np.radians(blackboard.player.angle + KICK_POINT_ANGLE_OFFSET_DEG)
     kick_point  = np.array([
         player_pos[0] + KICK_POINT_OFFSET_PX * np.cos(heading_rad),
         player_pos[1] + KICK_POINT_OFFSET_PX * np.sin(heading_rad),
@@ -1896,7 +1897,7 @@ def _advance_to_contact_running(blackboard):
 
         # Contacto alcanzado: gate por kick_point (la pelota debe estar
         # delante del robot a la altura del solenoide, no sólo cerca).
-        heading_rad = np.radians(blackboard.player.angle)
+        heading_rad = np.radians(blackboard.player.angle + KICK_POINT_ANGLE_OFFSET_DEG)
         kick_point  = np.array([
             player_pos[0] + KICK_POINT_OFFSET_PX * np.cos(heading_rad),
             player_pos[1] + KICK_POINT_OFFSET_PX * np.sin(heading_rad),

@@ -57,6 +57,7 @@ def visualization_loop_behavior(perception_pipe, control_state_pipe, keyboard_pi
         'creep_speed_pwm': 40,
         'kick_point_offset_px': 30,
         'kick_point_tolerance_px': 6,
+        'kick_point_angle_offset_deg': 0.0,
         'dribble_pwm_factor': 1.0,
         'dribbler_capture_power': 0,
         'dribbler_hold_power': 0,
@@ -600,6 +601,14 @@ def visualization_loop_behavior(perception_pipe, control_state_pipe, keyboard_pi
                     command = 'adjust_threshold'
                     param = 'kick_point_tolerance_px'
                     delta = -1
+                elif key == ord('>'):
+                    command = 'adjust_threshold'
+                    param = 'kick_point_angle_offset_deg'
+                    delta = 1
+                elif key == ord('<'):
+                    command = 'adjust_threshold'
+                    param = 'kick_point_angle_offset_deg'
+                    delta = -1
                 elif key in [82, 84, 81, 83] and last_robot_pos:
                     command = 'move_waypoint'
                     reached_waypoint = None  # New waypoint movement clears reached
@@ -740,8 +749,10 @@ def _draw_overlays(frame, robot_pos, robot_data, waypoint,
             # de tolerancia. El usuario calibra ajustando con / \ y ' `.
             kp_off = behavior_params.get('kick_point_offset_px', 30)
             kp_tol = behavior_params.get('kick_point_tolerance_px', 6)
-            kpx = int(rx + kp_off * math.cos(angle_rad))
-            kpy = int(ry + kp_off * math.sin(angle_rad))
+            kp_ang = math.radians(behavior_params.get('kick_point_angle_offset_deg', 0.0))
+            kp_rad = angle_rad + kp_ang
+            kpx = int(rx + kp_off * math.cos(kp_rad))
+            kpy = int(ry + kp_off * math.sin(kp_rad))
             kp_col = (220, 220, 40)  # cyan en BGR
             steps = 6
             for s in range(steps):
@@ -904,8 +915,10 @@ def _draw_overlays_zoom(frame, robot_pos, robot_data, waypoint,
                 # escalado por sx para mantener proporciones correctas
                 kp_off = behavior_params.get('kick_point_offset_px', 30)
                 kp_tol = behavior_params.get('kick_point_tolerance_px', 6)
-                kpx_full = robot_pos[0] + kp_off * math.cos(angle_rad)
-                kpy_full = robot_pos[1] + kp_off * math.sin(angle_rad)
+                kp_ang = math.radians(behavior_params.get('kick_point_angle_offset_deg', 0.0))
+                kp_rad = angle_rad + kp_ang
+                kpx_full = robot_pos[0] + kp_off * math.cos(kp_rad)
+                kpy_full = robot_pos[1] + kp_off * math.sin(kp_rad)
                 zkpx, zkpy = to_zoom(kpx_full, kpy_full)
                 if in_bounds(zkpx, zkpy):
                     kp_col = (220, 220, 40)
@@ -1079,6 +1092,14 @@ def _draw_behavior_panel(behavior_params, robot_pos, waypoint, robot_available,
     cv2.putText(panel, "(' `)", (250, y_left), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (150, 150, 150), 1)
     y_left += int(lh * 0.8)
     cv2.putText(panel, "Tolerancia bola<->kick_point", (20, y_left),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.33, (160, 160, 80), 1)
+    y_left += lh
+    kp_ang = behavior_params.get('kick_point_angle_offset_deg', 0.0)
+    cv2.putText(panel, f"Kick angulo: {kp_ang:+.1f}deg", (col_left_x, y_left),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.45, (220, 220, 40), 1)
+    cv2.putText(panel, "(</>)", (250, y_left), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (150, 150, 150), 1)
+    y_left += int(lh * 0.8)
+    cv2.putText(panel, "Offset angular solenoide (desalineacion mecanica)", (20, y_left),
                cv2.FONT_HERSHEY_SIMPLEX, 0.33, (160, 160, 80), 1)
     y_left += lh
 
