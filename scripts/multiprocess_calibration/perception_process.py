@@ -28,6 +28,7 @@ from robot_soccer.config import (
     CAMERA_PERSPECTIVE_WIDTH,
     CAMERA_PERSPECTIVE_HEIGHT,
 )
+from robot_soccer.utils.camera_undistort import load_intrinsics, undistort_frame
 
 log = logging.getLogger(__name__)
 
@@ -41,6 +42,8 @@ def perception_loop(robot_positions_pipe, frame_pipe, camera_id):
         camera_id: ID de la cámara a usar
     """
     log.info(f"🎥 Proceso de percepción iniciado con cámara /dev/video{camera_id}")
+
+    _K, _D = load_intrinsics()
 
     # Abrir cámara
     cap = cv2.VideoCapture(camera_id)
@@ -118,6 +121,8 @@ def perception_loop(robot_positions_pipe, frame_pipe, camera_id):
                 log.warning("⚠️  No se pudo leer frame de la cámara")
                 time.sleep(0.1)
                 continue
+
+            frame = undistort_frame(frame, _K, _D)
 
             # Aplicar transformación de perspectiva
             if perspective_matrix is not None:

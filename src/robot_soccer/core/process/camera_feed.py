@@ -10,6 +10,7 @@ import numpy as np
 from robot_soccer.config import (CAMERA_PERSPECTIVE_ENABLED, CAMERA_PERSPECTIVE_SRC_POINTS,
                                   CAMERA_PERSPECTIVE_WIDTH, CAMERA_PERSPECTIVE_HEIGHT)
 from robot_soccer.core.shared_frame import SharedFrameWriter
+from robot_soccer.utils.camera_undistort import load_intrinsics, undistort_frame
 
 log = logging.getLogger(__name__)
 
@@ -40,6 +41,9 @@ def camera_feed(frame_config, env_ruta, camera_id=2):
     log.info("INICIANDO MODO CÁMARA")
     log.info("=" * 60)
     log.info("Cámara ID: %i", camera_id)
+
+    # Cargar corrección intrínseca (no-op si camera_intrinsics.json no existe)
+    _K, _D = load_intrinsics()
 
     # Abrir cámara
     cap = cv2.VideoCapture(camera_id)
@@ -126,15 +130,18 @@ def camera_feed(frame_config, env_ruta, camera_id=2):
                 fps_display = frame_count / elapsed if elapsed > 0 else 0
                 log.debug("FPS: %.1f  | Frames: %i", fps_display, frame_count)
 
+            # Corregir distorsión de lente ANTES de la perspectiva (no-op si no hay calibración)
+            frame_undist = undistort_frame(frame, _K, _D)
+
             # Aplicar transformación de perspectiva
             if CAMERA_PERSPECTIVE_ENABLED and perspective_matrix is not None:
                 frame_transformed = cv2.warpPerspective(
-                    frame,
+                    frame_undist,
                     perspective_matrix,
                     (CAMERA_PERSPECTIVE_WIDTH, CAMERA_PERSPECTIVE_HEIGHT)
                 )
             else:
-                frame_transformed = frame
+                frame_transformed = frame_undist
 
             # Escribir frame a shared memory (todos los consumidores leen de ahí)
             try:

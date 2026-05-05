@@ -40,6 +40,7 @@ from robot_soccer.config import (
     CAMERA_PERSPECTIVE_WIDTH,
 )
 from robot_soccer.perception.player_tracking import create_aruco_detector
+from robot_soccer.utils.camera_undistort import load_intrinsics, undistort_frame
 
 log = logging.getLogger(__name__)
 
@@ -247,6 +248,8 @@ def perception_loop_pid(robot_positions_pipe, frame_pipe, robot_id: int, camera_
     log.info("     ✓ Metadata enviada a Visualización (pipe 2, ~100 bytes)")
     log.info("     → FPS objetivo: >40")
 
+    _K, _D = load_intrinsics()
+
     # Abrir cámara
     cap = cv2.VideoCapture(camera_id)
     if not cap.isOpened():
@@ -324,6 +327,8 @@ def perception_loop_pid(robot_positions_pipe, frame_pipe, robot_id: int, camera_
                 log.warning("⚠️  No se pudo leer frame")
                 time.sleep(0.01)
                 continue
+
+            frame = undistort_frame(frame, _K, _D)
 
             # Aplicar transformación de perspectiva (si está habilitada)
             if CAMERA_PERSPECTIVE_ENABLED and perspective_matrix is not None:
