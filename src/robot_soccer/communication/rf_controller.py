@@ -370,21 +370,8 @@ class RFController:
 
     def update_robot_calibration(self, robot_id, max_left, max_right, bias):
         # pylint: disable=unused-argument
-        """Actualiza la calibración de un robot en tiempo real.
-
-        OBSOLETO: Este método era para calibración single-point.
-        El sistema multipoint usa 10 puntos y se configura mediante
-        set_calibration_point() con índices específicos.
-
-        Args:
-            robot_id (int): ID del robot (ArUco marker ID: 0-3)
-            max_left (float): Factor de calibración motor izquierdo (0.0-1.0)
-            max_right (float): Factor de calibración motor derecho (0.0-1.0)
-            bias (float): Corrección de sesgo (-0.3 a 0.3)
-        """
-        # Método deprecado - el sistema multipoint no soporta set_calibration()
-        # Para actualizar calibración, usar: calibration.set_calibration_point(robot_id, index, ...)
+        """OBSOLETO: Usar calibrate_robot_pwm_range.py y calibrate_robot_bias.py."""
         log.warning(
-            "update_robot_calibration() está deprecado en sistema multipoint. "
-            "Usar set_calibration_point() en su lugar."
+            "update_robot_calibration() está deprecado. "
+            "Usar calibrate_robot_pwm_range.py (paso 1) y calibrate_robot_bias.py (paso 2)."
         )
