@@ -33,6 +33,7 @@ import time
 import queue
 import logging
 import argparse
+import statistics
 import multiprocessing
 from multiprocessing import Value, shared_memory
 from pathlib import Path
@@ -54,6 +55,7 @@ from robot_soccer.ai.path_planning.tools_for_path_planing import (
     path_length_from,
     obstacles_moved,
 )
+from metrics.metrics_capture import save_metrics
 
 logging.basicConfig(
     level=logging.INFO,
@@ -194,12 +196,16 @@ def perception_process(ctrl_pipe, viz_pipe, robot_id, camera_id,
 # PROCESO 2: Planning (RRT* Smart)
 # =============================================================================
 
-def planning_process(ctrl_to_plan_pipe, path_queue, goal_pos, clearance):
+def planning_process(ctrl_to_plan_pipe, path_queue, goal_pos, clearance,
+                     metrics_queue=None):
     """Ejecuta RRT* Smart en proceso separado. Nunca bloquea al control.
 
     Recibe posicion del robot Y lista de obstaculos actuales por pipe.
     Los obstaculos son dinamicos: incluyen robots detectados + estaticos del CLI.
     Pone el resultado en path_queue (maxsize=1, descarta paths obsoletos).
+
+    Si se provee metrics_queue, publica por cada planificacion un dict
+    {"t": elapsed_s, "waypoints": n, "trigger": reason} (put_nowait, no bloquea).
     """
     from robot_soccer.ai.path_planning.rrt_star_smart import RrtStarSmart
 
@@ -220,6 +226,10 @@ def planning_process(ctrl_to_plan_pipe, path_queue, goal_pos, clearance):
             try:
                 data = ctrl_to_plan_pipe.recv()
             except EOFError:
+                break
+
+            # Sentinel de cierre limpio (enviado por main en KeyboardInterrupt)
+            if isinstance(data, dict) and data.get('__stop__'):
                 break
 
             robot_pos = data['robot_pos']
@@ -254,6 +264,17 @@ def planning_process(ctrl_to_plan_pipe, path_queue, goal_pos, clearance):
                     pass
             else:
                 log.warning("RRT* no encontro ruta en %.2f s", elapsed)
+
+            # Registro de metrica (no bloquea al planner)
+            if metrics_queue is not None:
+                try:
+                    metrics_queue.put_nowait({
+                        't': elapsed,
+                        'waypoints': len(path) if path else 0,
+                        'trigger': data.get('trigger', 'unknown'),
+                    })
+                except Exception:
+                    pass
 
     except KeyboardInterrupt:
         pass
@@ -441,11 +462,18 @@ def control_process(perc_pipe, ctrl_to_plan_pipe, path_queue,
                 )
                 if robot_moved or obs_changed:
                     try:
+                        if force_replan:
+                            trigger = 'manual'
+                        elif obs_changed:
+                            trigger = 'obstaculo'
+                        else:
+                            trigger = 'desviacion'
                         while ctrl_to_plan_pipe.poll():
                             ctrl_to_plan_pipe.recv()
                         ctrl_to_plan_pipe.send({
                             'robot_pos': new_pos,
                             'obstacles': current_obstacles,
+                            'trigger': trigger,
                         })
                         last_sent_pos = new_pos
                         last_replan_time = now
@@ -812,6 +840,49 @@ def visualization_process(perc_pipe, ctrl_pipe, keyboard_pipe,
 
 
 # =============================================================================
+# METRICAS
+# =============================================================================
+
+def _save_planning_metrics(metrics_queue):
+    """Drena metrics_queue y guarda JSON con estadisticas de planificacion.
+
+    Llamar antes de terminar el planner para no perder registros pendientes.
+    Si no hay registros, no genera archivo.
+    """
+    records = []
+    deadline = time.time() + 1.0   # 1 s para drenar lo que haya en transito
+    while time.time() < deadline:
+        try:
+            records.append(metrics_queue.get(timeout=0.05))
+        except queue.Empty:
+            break
+        except Exception:
+            break
+
+    if not records:
+        log.info("Sin registros de planificacion; no se guarda JSON")
+        return
+
+    times = [r['t'] for r in records]
+    wps = [r['waypoints'] for r in records]
+    triggers = [r.get('trigger', 'unknown') for r in records]
+
+    summary = {
+        'planning_time_mean_s': statistics.mean(times),
+        'planning_time_std_s': statistics.stdev(times) if len(times) > 1 else 0.0,
+        'planning_time_min_s': min(times),
+        'planning_time_max_s': max(times),
+        'waypoints_avg': statistics.mean(wps),
+        'replan_count_total': len(records),
+        'replan_count_desviacion': sum(1 for t in triggers if t == 'desviacion'),
+        'replan_count_obstaculo': sum(1 for t in triggers if t == 'obstaculo'),
+        'replan_count_manual': sum(1 for t in triggers if t == 'manual'),
+    }
+    out = save_metrics('test_path_planning_1robot', summary)
+    log.info("Metricas guardadas en %s", out)
+
+
+# =============================================================================
 # MAIN
 # =============================================================================
 
@@ -921,6 +992,9 @@ def main():
     # Queue para path (maxsize=1: siempre el mas reciente)
     path_queue = multiprocessing.Queue(maxsize=1)
 
+    # Queue para metricas del planner (no acotada, drenada al cierre)
+    metrics_queue = multiprocessing.Queue()
+
     processes = []
 
     p1 = multiprocessing.Process(
@@ -933,7 +1007,8 @@ def main():
 
     p2 = multiprocessing.Process(
         target=planning_process,
-        args=(ctrl_to_plan_r, path_queue, goal_pos, args.clearance),
+        args=(ctrl_to_plan_r, path_queue, goal_pos, args.clearance,
+              metrics_queue),
         name="Planning"
     )
     processes.append(p2)
@@ -956,6 +1031,7 @@ def main():
     )
     processes.append(p4)
 
+    metrics_saved = False
     try:
         for proc in processes:
             proc.start()
@@ -972,11 +1048,39 @@ def main():
 
     except KeyboardInterrupt:
         log.info("Interrumpido por usuario")
+
+        # 1) Sentinel al planner para que termine su loop limpiamente
+        #    (ctrl_to_plan_s vive en main porque main creo el Pipe)
+        try:
+            ctrl_to_plan_s.send({'__stop__': True})
+        except Exception:
+            pass
+
+        # 2) Esperar al planner para que escriba su ultimo registro al queue.
+        #    Timeout 5 s: suficiente para una iteracion de RRT* en curso.
+        for proc in processes:
+            if proc.name == 'Planning':
+                proc.join(timeout=5)
+                break
+
+        # 3) Drenar AHORA que sabemos que no habra mas writes
+        _save_planning_metrics(metrics_queue)
+        metrics_saved = True
+
+        # 4) Terminar el resto (perception/control/viz no escriben al metrics_queue)
         for proc in processes:
             if proc.is_alive():
                 proc.terminate()
                 proc.join(timeout=2)
     finally:
+        if not metrics_saved:
+            _save_planning_metrics(metrics_queue)
+        # Cerrar queue para evitar leaked-semaphore warnings al salir
+        try:
+            metrics_queue.close()
+            metrics_queue.join_thread()
+        except Exception:
+            pass
         try:
             shm.close()
             shm.unlink()
