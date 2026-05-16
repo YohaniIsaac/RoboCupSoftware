@@ -63,6 +63,9 @@ def visualization_loop_pwm_range(frame_pipe, control_state_pipe, keyboard_pipe,
             },
             'total_detections': int,
             'robot_id': int,
+            'last_speed_px_s': float or None,  # velocidad medida en última sesión
+            'last_speed_n_samples': int,
+            'last_speed_distance_px': float,
             'timestamp': float
         }
 
@@ -121,11 +124,14 @@ def visualization_loop_pwm_range(frame_pipe, control_state_pipe, keyboard_pipe,
             'detection_rate': 0.0
         },
         'total_detections': 0,
-        'robot_id': 0
+        'robot_id': 0,
+        'last_speed_px_s': None,
+        'last_speed_n_samples': 0,
+        'last_speed_distance_px': 0.0
     }
 
     # Configuración de ventana
-    panel_height = 300
+    panel_height = 325
 
     log.info("✅ Visualización iniciada - Esperando datos...")
 
@@ -275,15 +281,28 @@ def visualization_loop_pwm_range(frame_pipe, control_state_pipe, keyboard_pipe,
             cv2.putText(panel, session_text, (10, 220),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, session_color, 2)
 
+            # Velocidad medida en la última sesión completada
+            speed_val = last_pwm_state.get('last_speed_px_s', None)
+            speed_n = last_pwm_state.get('last_speed_n_samples', 0)
+            speed_dist = last_pwm_state.get('last_speed_distance_px', 0.0)
+            if speed_val is not None:
+                speed_text = f"Velocidad: {speed_val:.1f} px/s  (n={speed_n}, dist={speed_dist:.0f} px)"
+                speed_color = (0, 255, 255)
+            else:
+                speed_text = "Velocidad: N/A (sin detecciones)"
+                speed_color = (150, 150, 150)
+            cv2.putText(panel, speed_text, (10, 250),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, speed_color, 2)
+
             # Total detecciones
             total_det = last_pwm_state.get('total_detections', 0)
             total_text = f"Total detecciones: {total_det}  |  g=Guardar rango  |  r=sugerencia"
-            cv2.putText(panel, total_text, (10, 250),
+            cv2.putText(panel, total_text, (10, 280),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (150, 150, 150), 1)
 
             # Controles
             controls_text = "ESPACIO=adelante | BACKSPACE=atras | x=detener | ESC=salir"
-            cv2.putText(panel, controls_text, (10, 280),
+            cv2.putText(panel, controls_text, (10, 310),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (150, 150, 150), 1)
 
             # Combinar panel y frame

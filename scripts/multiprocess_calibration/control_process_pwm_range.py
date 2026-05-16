@@ -27,6 +27,38 @@ from robot_soccer.controllers.robot_calibration_multipoint import RobotCalibrati
 log = logging.getLogger(__name__)
 
 
+def compute_avg_speed(samples):
+    """Calcula velocidad promedio en px/s a partir de muestras (timestamp, x, y).
+
+    Aplica trim simétrico del 10% si hay >=10 muestras para mitigar outliers
+    (saltos del tracker, frames con detección imprecisa).
+    """
+    if len(samples) < 2:
+        return None, 0, 0.0
+    velocities = []
+    total_dist = 0.0
+    for (t0, x0, y0), (t1, x1, y1) in zip(samples, samples[1:]):
+        dt = t1 - t0
+        if dt < 0.005:
+            continue
+        dist = ((x1 - x0) ** 2 + (y1 - y0) ** 2) ** 0.5
+        total_dist += dist
+        velocities.append(dist / dt)
+    if not velocities:
+        return None, 0, total_dist
+    velocities.sort()
+    n = len(velocities)
+    if n >= 10:
+        cut = max(1, n // 10)
+        trimmed = velocities[cut:n - cut]
+        if len(trimmed) < 3:
+            trimmed = velocities
+    else:
+        trimmed = velocities
+    avg = sum(trimmed) / len(trimmed)
+    return avg, len(trimmed), total_dist
+
+
 def control_loop_pwm_range(robot_positions_pipe, control_state_pipe, keyboard_pipe,
                           control_to_perception_pipe, robot_id, serial_port):
     """Bucle principal del proceso de control para PWM range.
@@ -87,6 +119,12 @@ def control_loop_pwm_range(robot_positions_pipe, control_state_pipe, keyboard_pi
         'avg_fps': 0.0
     }
 
+    # Buffer para medición de velocidad (durante el movimiento activo)
+    position_samples = []  # lista de (timestamp, x, y)
+    last_speed_px_s = None
+    last_speed_n_samples = 0
+    last_speed_distance_px = 0.0
+
     def send_motor_command(left_speed, right_speed):
         """Envía comando de motor."""
         if not rf_controller:
@@ -116,6 +154,9 @@ def control_loop_pwm_range(robot_positions_pipe, control_state_pipe, keyboard_pi
                     'session_stats': session_stats.copy(),
                     'total_detections': global_stats['total_detections'],
                     'robot_id': robot_id,
+                    'last_speed_px_s': last_speed_px_s,
+                    'last_speed_n_samples': last_speed_n_samples,
+                    'last_speed_distance_px': last_speed_distance_px,
                     'timestamp': current_time
                 })
                 last_state_send_time = current_time
@@ -156,6 +197,7 @@ def control_loop_pwm_range(robot_positions_pipe, control_state_pipe, keyboard_pi
                         movement_direction = value if value else 1
                         movement_start_time = current_time
                         reset_session()
+                        position_samples.clear()
                         
                         # Enviar señal de reset a percepción para empezar a contar desde 0
                         try:
@@ -238,6 +280,12 @@ def control_loop_pwm_range(robot_positions_pipe, control_state_pipe, keyboard_pi
                     movement_active = False
                     log.info(f"⏹️  Movimiento completado ({time_elapsed:.2f}s)")
 
+                    # Calcular velocidad de la sesión
+                    avg_speed, n_used, total_dist = compute_avg_speed(position_samples)
+                    last_speed_px_s = avg_speed
+                    last_speed_n_samples = n_used
+                    last_speed_distance_px = total_dist
+
                     # Resumen de sesión
                     log.info("=" * 50)
                     log.info("📊 RESUMEN DE SESIÓN")
@@ -246,6 +294,11 @@ def control_loop_pwm_range(robot_positions_pipe, control_state_pipe, keyboard_pi
                     log.info(f"   Frames detectados: {session_stats['frames_detected']}")
                     log.info(f"   Tasa detección: {session_stats['detection_rate']*100:.1f}%")
                     log.info(f"   FPS promedio: {global_stats['avg_fps']:.1f}")
+                    if avg_speed is not None:
+                        log.info("   Velocidad: %.1f px/s | %d muestras | distancia=%.1f px",
+                                 avg_speed, n_used, total_dist)
+                    else:
+                        log.info("   Velocidad: N/A (sin detecciones suficientes)")
                     log.info("=" * 50)
 
             # ===== RECIBIR DATOS DE PERCEPCIÓN =====
@@ -271,6 +324,15 @@ def control_loop_pwm_range(robot_positions_pipe, control_state_pipe, keyboard_pi
                         session_stats['frames_analyzed'] = perception_stats.get('frames_analyzed', 0)
                         session_stats['frames_detected'] = perception_stats.get('frames_detected', 0)
                         session_stats['detection_rate'] = perception_stats.get('detection_rate', 0.0)
+
+                        # Acumular muestras (timestamp, x, y) para medir velocidad
+                        if robot_detected and robot_data is not None:
+                            sample_t = perception_data.get('timestamp', current_time)
+                            position_samples.append((
+                                sample_t,
+                                robot_data.get('x', 0),
+                                robot_data.get('y', 0),
+                            ))
 
                 except Exception as e:
                     log.warning(f"⚠️  Error recibiendo datos de percepción: {e}")
