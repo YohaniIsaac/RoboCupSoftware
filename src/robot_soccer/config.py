@@ -288,10 +288,10 @@ CAMERA_PERSPECTIVE_ENABLED = True  # Habilitar/deshabilitar transformacion de pe
 # Puntos de origen (esquinas de la cancha en la imagen de la cámara)
 # Ajusta estos valores usando el script scripts/calibrate_perspective.py
 CAMERA_PERSPECTIVE_SRC_POINTS = [
-    (44, 17),      # Top-left (esquina superior izquierda)
-    (629, 11),     # Top-right (esquina superior derecha)
-    (631, 353),    # Bottom-right (esquina inferior derecha)
-    (40, 356)       # Bottom-left (esquina inferior izquierda)
+    (41, 10),      # Top-left (esquina superior izquierda)
+    (622, 14),     # Top-right (esquina superior derecha)
+    (627, 353),    # Bottom-right (esquina inferior derecha)
+    (49, 349)       # Bottom-left (esquina inferior izquierda)
 ]
 
 # Dimensiones de la imagen de salida (rectángulo destino)
@@ -302,12 +302,12 @@ CAMERA_PERSPECTIVE_HEIGHT = 480  # Alto de la imagen transformada
 FIELD_CAM = FieldGeometry(
     width=CAMERA_PERSPECTIVE_WIDTH,
     height=CAMERA_PERSPECTIVE_HEIGHT,
-    goal_left_x=10,
-    goal_left_top_y=190,
-    goal_left_bottom_y=294,
-    goal_right_x=622,
-    goal_right_top_y=191,
-    goal_right_bottom_y=297,
+    goal_left_x=5,
+    goal_left_top_y=191,
+    goal_left_bottom_y=297,
+    goal_right_x=629,
+    goal_right_top_y=189,
+    goal_right_bottom_y=292,
     margin=15,
 )
 
