@@ -50,6 +50,7 @@ from robot_soccer.config import (
 )
 from robot_soccer.utils.camera_utils import get_camera_index
 from robot_soccer.core.process.decision_process import decision_process
+from metrics.metrics_capture import save_metrics
 
 logging.basicConfig(
     level=logging.INFO,
@@ -246,6 +247,13 @@ def visualization_process_multi(perception_pipe, decision_pipe, keyboard_pipe,
     }
     ROL_LABELS = {'atacante': 'A', 'defensor': 'D'}
 
+    # Captura F1.4: observar transiciones de rol vía decision_pipe
+    t_start = time.time()
+    prev_roles: dict = {}
+    role_history: list = []
+    role_change_counts: dict = {rid: 0 for rid in robot_ids}
+    initial_roles: dict = {}
+
     try:
         while True:
             # Leer frame
@@ -273,6 +281,25 @@ def visualization_process_multi(perception_pipe, decision_pipe, keyboard_pipe,
                     robot_available = data.get('robot_available', False)
                 except Exception:
                     pass
+
+            # F1.4: observar transiciones de rol sin modificar src/
+            if players_state:
+                for rid in robot_ids:
+                    new_rol = players_state.get(rid, {}).get('rol')
+                    if new_rol is None:
+                        continue
+                    if rid not in initial_roles:
+                        initial_roles[rid] = new_rol
+                    old_rol = prev_roles.get(rid)
+                    if old_rol is not None and old_rol != new_rol:
+                        role_history.append({
+                            "t": round(time.time() - t_start, 3),
+                            "robot_id": rid,
+                            "from": old_rol,
+                            "to": new_rol,
+                        })
+                        role_change_counts[rid] += 1
+                    prev_roles[rid] = new_rol
 
             if last_frame is not None:
                 frame = last_frame.copy()
@@ -412,6 +439,25 @@ def visualization_process_multi(perception_pipe, decision_pipe, keyboard_pipe,
     except KeyboardInterrupt:
         pass
     finally:
+        try:
+            summary = {
+                "duration_s": round(time.time() - t_start, 3),
+                "robot_ids": list(robot_ids),
+                "n_role_changes": sum(role_change_counts.values()),
+                "n_role_changes_per_robot": {
+                    str(rid): role_change_counts[rid] for rid in robot_ids
+                },
+                "initial_roles": {
+                    str(rid): initial_roles.get(rid) for rid in robot_ids
+                },
+                "final_roles": {
+                    str(rid): prev_roles.get(rid) for rid in robot_ids
+                },
+                "role_history": role_history,
+            }
+            save_metrics("test_behavior_2robots", summary)
+        except Exception as e:
+            log.warning("No se pudieron guardar metricas de roles: %s", e)
         shm.close()
         cv2.destroyAllWindows()
         log.info("Visualizacion multi finalizada")
