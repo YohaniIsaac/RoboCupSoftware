@@ -203,9 +203,12 @@ def main():
         "scenarios": all_results,
     }
 
-    out = save_metrics("behavior_sim", summary)
-    print(f"\n{'=' * 60}")
-    print(f"  Métricas guardadas en: {out}")
+    try:
+        out = save_metrics("behavior_sim", summary)
+        print(f"\n{'=' * 60}")
+        print(f"  Métricas guardadas en: {out}")
+    except Exception as e:
+        print(f"\n  ADVERTENCIA: No se pudieron guardar metricas: {e}")
     print(f"  Escenarios procesados: {len(all_results)}/{len(SCENARIOS)}")
     print(f"  BT update time global: {summary['bt_global_mean_ms']:.3f} ms")
     print("=" * 60)
