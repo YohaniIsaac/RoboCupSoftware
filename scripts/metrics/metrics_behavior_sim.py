@@ -25,6 +25,7 @@ logging.basicConfig(
     level=logging.WARNING,
     format="%(asctime)s %(levelname)-8s %(message)s",
 )
+log = logging.getLogger(__name__)
 
 from robot_soccer.entities.player import Player
 from robot_soccer.entities.ball import Ball
@@ -97,16 +98,13 @@ def run_scenario(name, player_data, ball_pos):
 
     for _ in range(N_CYCLES):
         try:
-            ctx = fuzzy.evaluar_ms_logic_difusse()
-            fuzzy_posesion.append(ctx["estado_pelota"])
-            fuzzy_proximidad.append(ctx["equipo_cercano"])
-            fuzzy_zona.append(ctx["zona_pelota"])
-            bm.update_game_context((
-                ctx["estado_pelota"],
-                ctx["equipo_cercano"],
-                ctx["zona_pelota"],
-            ))
-        except Exception:
+            posesion, proximidad, zona = fuzzy.evaluar_ms_logic_difusse()
+            fuzzy_posesion.append(posesion)
+            fuzzy_proximidad.append(proximidad)
+            fuzzy_zona.append(zona)
+            bm.update_game_context((posesion, proximidad, zona))
+        except Exception as e:
+            log.warning("Fuzzy eval fallo en escenario '%s': %s — usando defaults", name, e)
             fuzzy_posesion.append(0.5)
             fuzzy_proximidad.append(1.0)
             fuzzy_zona.append(1.0)
@@ -114,8 +112,8 @@ def run_scenario(name, player_data, ball_pos):
         t0 = time.perf_counter()
         try:
             bm.update()
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("BT update fallo en escenario '%s': %s", name, e)
         bt_times_ms.append((time.perf_counter() - t0) * 1000.0)
 
         roles = {p.id: p.rol for p in players if p.team == "red"}
