@@ -434,6 +434,7 @@ def _move_to_ball_start(blackboard):
 
     # Emitir comando: el guard en move_robot_to evitará sobreescritura si target es igual
     blackboard.command_manager.move_robot_to(blackboard.player.id, target_pos)
+    blackboard.last_action = "move_to_ball"
     return NodeStatus.RUNNING
 
 
@@ -628,6 +629,7 @@ def capture_ball(blackboard):
              blackboard.player.has_ball())
 
     if distance_to_ball < CAPTURE_ACTIVATE_DISTANCE_PX:
+        blackboard.last_action = "capturing_ball"
         # PASO 1: Orientarse hacia la pelota (solo ajustes pequeños ≤10°)
         angle_to_ball = np.degrees(
             np.arctan2(ball_pos[1] - player_pos[1], ball_pos[0] - player_pos[0])
@@ -726,6 +728,7 @@ def dribble_forward(blackboard):
         blackboard.command_manager.move_with_ball(
             blackboard.player.id, target_pos, blackboard.ball, speed_factor=0.7
         )
+        blackboard.last_action = "dribble_forward"
 
         # Verificar progreso
         distance_to_goal = np.linalg.norm(np.array(player_pos) - np.array(goal_pos))
