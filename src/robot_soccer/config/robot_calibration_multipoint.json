@@ -10,7 +10,7 @@
     "bias": "Corrección para línea recta: positivo = más PWM a izquierda, menos a derecha"
   },
   "0": {
-    "pwm_min": 22,
+    "pwm_min": 20,
     "pwm_max": 32,
     "deadzone_left_fwd": 0,
     "deadzone_left_rev": 0,
