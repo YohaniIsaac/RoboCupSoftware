@@ -571,8 +571,20 @@ class DifferentialDriveController:
                 left_speed = max(0, min(robot_max_speed, left_speed))
                 right_speed = max(0, min(robot_max_speed, right_speed))
             else:
-                left_speed = max(robot_min_speed, min(robot_max_speed, left_speed))
-                right_speed = max(robot_min_speed, min(robot_max_speed, right_speed))
+                # Desaturación con prioridad de giro: si una rueda supera el techo,
+                # se baja el par COMPLETO en la misma cantidad para conservar el
+                # diferencial L-R (el giro), en vez de recortar cada rueda por
+                # separado, que descartaba la mitad de la corrección angular cuando
+                # v ya estaba saturada. La rueda dominante queda en el techo; la
+                # otra puede caer hasta 0 (pivote suave). v >= robot_min_speed
+                # (garantizado por el perfil de velocidad), así que la rueda
+                # dominante = v + |omega| siempre mantiene velocidad de movimiento.
+                exceso = max(left_speed, right_speed) - robot_max_speed
+                if exceso > 0:
+                    left_speed -= exceso
+                    right_speed -= exceso
+                left_speed = max(0, min(robot_max_speed, left_speed))
+                right_speed = max(0, min(robot_max_speed, right_speed))
 
             state['last_linear_speed'] = v
             state['last_rotation_speed'] = 0
