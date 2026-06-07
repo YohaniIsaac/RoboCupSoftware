@@ -278,6 +278,7 @@ def control_loop_pid(robot_positions_pipe, control_state_pipe, keyboard_pipe, ro
     try:
         while running:
             iteration_count += 1
+            _loop_start = time.perf_counter()
 
             # ===== RECIBIR DATOS DE PERCEPCIÓN =====
             # Drenar TODOS los mensajes del pipe, quedarse con el más reciente
@@ -416,9 +417,13 @@ def control_loop_pid(robot_positions_pipe, control_state_pipe, keyboard_pipe, ro
                 iteration_count = 0
                 last_stats_time = current_time
 
-            # Pausa mínima para permitir ~100-200 Hz
-            # No usar sleep - el polling de pipes ya introduce suficiente delay
-            # time.sleep(0.001)  # Removido para máximo rendimiento
+            # Cadencia fija ~150 Hz. Sin límite el lazo corría a ~43 kHz, lo que
+            # vuelve ruidoso el término derivativo del PID y satura el canal RF.
+            # La cámara entrega a 30-60 Hz, así que 150 Hz de control es holgado.
+            _loop_elapsed = time.perf_counter() - _loop_start
+            _target_period = 1.0 / 150.0
+            if _loop_elapsed < _target_period:
+                time.sleep(_target_period - _loop_elapsed)
 
     except KeyboardInterrupt:
         log.info("⏹️  Proceso de control detenido por usuario")
