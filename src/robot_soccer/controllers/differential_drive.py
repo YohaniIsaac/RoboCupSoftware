@@ -611,9 +611,11 @@ class DifferentialDriveController:
                 left=left_speed, right=right_speed)
 
         # === STUCK DETECTION ===
+        # Congelada en rotación pura: al girar en el sitio la posición no cambia,
+        # lo que se interpretaba como atasco y disparaba un boost de PWM espurio.
         _pid_st = self._get_pid_state(robot.id)
         _now = time.monotonic()
-        if distance > self.position_threshold:
+        if distance > self.position_threshold and not _pid_st['in_rotation_mode']:
             if _pid_st['stuck_ref_x'] is None:
                 _pid_st['stuck_ref_x'] = robot.x
                 _pid_st['stuck_ref_y'] = robot.y
