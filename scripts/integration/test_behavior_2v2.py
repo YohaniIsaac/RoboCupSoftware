@@ -36,6 +36,15 @@ Overlay del kick_point:
     amarillo en caso contrario. Útil para verificar el alineamiento durante
     un partido real. La calibración interactiva del valor vive en
     scripts/calibrate_behavior_thresholds.py.
+
+Métricas:
+    Al salir (ESC) se guarda LOG/match_2v2_<ts>.json con las métricas del
+    partido: tiempo efectivo de juego, goles, embudo de secuencias de ataque
+    (posicionamiento → avance → contacto → disparo), recuperaciones del
+    defensor, cambios de rol, repertorio de acciones del BT, error de
+    seguimiento de ruta, cadencia del lazo de decisión y tasas de detección
+    de percepción durante el partido. La captura observa los payloads que ya
+    fluyen por los pipes (sin tocar src/).
 """
 
 import sys
@@ -43,6 +52,7 @@ import math
 import time
 import logging
 import argparse
+import statistics
 import multiprocessing
 from multiprocessing import Value, shared_memory
 from pathlib import Path
@@ -60,9 +70,12 @@ from robot_soccer.config import (
     RESET_POS,
     KICK_POINT_OFFSET_PX,
     KICK_POINT_TOLERANCE_PX,
+    FIELD_PHYSICAL_WIDTH_CM,
+    FIELD_PHYSICAL_HEIGHT_CM,
 )
 from robot_soccer.utils.camera_utils import get_camera_index
 from robot_soccer.core.process.decision_process import decision_process_2v2
+from metrics.metrics_capture import save_metrics
 
 logging.basicConfig(
     level=logging.INFO,
@@ -89,6 +102,320 @@ ROBOT_COLORS = {
 }
 TEAM_COLOR = {'red': (60, 60, 220), 'blue': (220, 80, 60)}
 ROL_LABELS = {'atacante': 'A', 'defensor': 'D'}
+
+
+# =============================================================================
+# Captura de métricas del partido (observación pura sobre los pipes)
+# =============================================================================
+
+# Acciones del ciclo de ataque directo, por etapa del embudo:
+# 1=posicionamiento, 2=avance al contacto, 3=contacto confirmado, 4=disparo.
+_ATTACK_STAGE = {
+    'retreating_from_ball': 1,
+    'circle_ball':          1,
+    'move_behind_ball':     1,
+    'behind_ball_ready':    1,
+    'advancing_to_contact': 2,
+    'settling_contact':     2,
+    'contact_confirmed':    3,
+    'kick_immediately':     4,
+}
+
+_DEFENDER_CAPTURE_ACTIONS = {'capturing_ball', 'ball_captured_with_motor'}
+
+# Escala px → mm por eje (misma convención que metrics_robot_precision.py)
+_MM_X = FIELD_PHYSICAL_WIDTH_CM * 10.0 / CAMERA_PERSPECTIVE_WIDTH
+_MM_Y = FIELD_PHYSICAL_HEIGHT_CM * 10.0 / CAMERA_PERSPECTIVE_HEIGHT
+
+
+def _cross_track_error_mm(pos, seg_a, seg_b):
+    """Distancia en mm del robot al segmento activo de su ruta (escala por eje)."""
+    px, py = float(pos[0]), float(pos[1])
+    ax, ay = float(seg_a[0]), float(seg_a[1])
+    bx, by = float(seg_b[0]), float(seg_b[1])
+    dx, dy = bx - ax, by - ay
+    l2 = dx * dx + dy * dy
+    t = 0.0 if l2 <= 1e-9 else max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / l2))
+    ex = (px - (ax + t * dx)) * _MM_X
+    ey = (py - (ay + t * dy)) * _MM_Y
+    return math.hypot(ex, ey)
+
+
+def _stats(values):
+    """mean/std/p95/max/n de una lista de valores, o None si está vacía."""
+    if not values:
+        return None
+    vs = sorted(values)
+    return {
+        'mean': round(statistics.fmean(vs), 3),
+        'std': round(statistics.pstdev(vs), 3) if len(vs) > 1 else 0.0,
+        'p95': round(vs[min(len(vs) - 1, int(round(0.95 * (len(vs) - 1))))], 3),
+        'max': round(vs[-1], 3),
+        'n': len(vs),
+    }
+
+
+class _MatchRecorder:
+    """Acumula métricas del partido observando los payloads de los pipes.
+
+    Solo observa: no modifica payloads ni interactúa con percepción, decisión
+    o RF. Las métricas de juego se acotan a los tramos con ambos equipos
+    activos y sin pausas (init, reset post-gol, pelota fuera).
+    """
+
+    def __init__(self):
+        self.t0 = None                 # timestamp del primer estado de decisión
+        self._prev_ts = None
+        self._in_play = False
+        self.active_s = 0.0
+        self.play_segments = 0
+        self.decision_deltas_ms = []
+        self._prev_ball_out = False
+        self.ball_out_events = 0
+        self.goals = []
+        self.events = []               # cronología compacta (cap 800)
+        # Percepción: contadores acumulados que publica el proceso de percepción
+        self._perc_first = None        # (timestamp, frame_idx)
+        self._perc_last = None
+        self.perc_partido_frames = 0
+        self.perc_partido_ball_det = 0
+        self.perc_partido_detect = {}
+        self.perc_samples_in_play = 0
+        self.perc_robots_hist = {n: 0 for n in range(len(ALL_IDS) + 1)}
+        self.robots = {
+            rid: {
+                'action_prev': None,
+                'rol_prev': None,
+                'has_ball_prev': False,
+                'pos_prev': None,
+                'dwell_s': {},
+                'action_entries': {},
+                'role_changes': 0,
+                'kicks': 0,
+                'seq_initiated': 0,
+                'seq_completed': 0,
+                'seq_aborted_stage': {1: 0, 2: 0, 3: 0},
+                '_seq_max_stage': 0,
+                'defender_ball_gains': 0,
+                'defender_captures': 0,
+                'has_ball_s': 0.0,
+                'dist_px': 0.0,
+                'tracking_mm': [],
+            }
+            for rid in ALL_IDS
+        }
+
+    def _event(self, t_rel, kind, **extra):
+        if len(self.events) < 800:
+            self.events.append({'t': round(t_rel, 2), 'event': kind, **extra})
+
+    def on_goal(self, team):
+        t_rel = 0.0 if self.t0 is None else time.time() - self.t0
+        self.goals.append({'t_s': round(t_rel, 2), 'team': team})
+        self._event(t_rel, 'goal', team=team)
+
+    def on_perception(self, data):
+        """Payload de percepción → FPS y tasas de detección durante el partido."""
+        ts = data.get('timestamp')
+        fi = data.get('frame_idx')
+        if ts is not None and fi is not None:
+            if self._perc_first is None:
+                self._perc_first = (ts, fi)
+            self._perc_last = (ts, fi)
+        self.perc_partido_frames = data.get('partido_frames', self.perc_partido_frames)
+        self.perc_partido_ball_det = data.get('partido_ball_det', self.perc_partido_ball_det)
+        pdc = data.get('partido_detect_counts')
+        if pdc:
+            self.perc_partido_detect = pdc
+        if self._in_play:
+            n_rob = len(data.get('robots') or {})
+            if n_rob in self.perc_robots_hist:
+                self.perc_robots_hist[n_rob] += 1
+            self.perc_samples_in_play += 1
+
+    def on_decision(self, data):
+        """Payload de decisión → tiempo activo, roles, acciones, embudo, rutas."""
+        ts = data.get('timestamp')
+        if ts is None:
+            return
+        if self.t0 is None:
+            self.t0 = ts
+        t_rel = ts - self.t0
+
+        in_play = bool(
+            data.get('active_red') and data.get('active_blue')
+            and not data.get('pre_init') and not data.get('init_phase')
+            and not data.get('goal_reset') and not data.get('ball_out')
+        )
+
+        ball_out = bool(data.get('ball_out'))
+        if ball_out and not self._prev_ball_out:
+            self.ball_out_events += 1
+            self._event(t_rel, 'ball_out')
+        self._prev_ball_out = ball_out
+
+        dt = None
+        if self._in_play and in_play and self._prev_ts is not None:
+            dt = ts - self._prev_ts
+            self.active_s += dt
+            self.decision_deltas_ms.append(dt * 1000.0)
+        if in_play and not self._in_play:
+            self.play_segments += 1
+            self._event(t_rel, 'play_start')
+        elif self._in_play and not in_play:
+            self._event(t_rel, 'play_pause')
+            for st in self.robots.values():
+                st['pos_prev'] = None
+        self._in_play = in_play
+        self._prev_ts = ts
+        if not in_play:
+            return
+
+        players = data.get('players') or {}
+        for rid, st in self.robots.items():
+            p = players.get(rid)
+            if not p:
+                continue
+            rol = p.get('rol')
+            action = p.get('last_action')
+            has_ball = bool(p.get('has_ball'))
+            pos = p.get('pos')
+
+            if st['rol_prev'] is not None and rol != st['rol_prev']:
+                st['role_changes'] += 1
+                self._event(t_rel, 'role_change', robot=rid,
+                            from_rol=st['rol_prev'], to_rol=rol)
+            st['rol_prev'] = rol
+
+            if action is not None and dt is not None:
+                st['dwell_s'][action] = st['dwell_s'].get(action, 0.0) + dt
+            if action != st['action_prev']:
+                if action is not None:
+                    st['action_entries'][action] = st['action_entries'].get(action, 0) + 1
+                self._on_action_change(st, rid, action, t_rel)
+                st['action_prev'] = action
+
+            if has_ball and dt is not None:
+                st['has_ball_s'] += dt
+            if has_ball and not st['has_ball_prev'] and rol == 'defensor':
+                st['defender_ball_gains'] += 1
+                self._event(t_rel, 'defender_ball_gain', robot=rid)
+            st['has_ball_prev'] = has_ball
+
+            if pos is not None:
+                if st['pos_prev'] is not None:
+                    st['dist_px'] += math.hypot(pos[0] - st['pos_prev'][0],
+                                                pos[1] - st['pos_prev'][1])
+                st['pos_prev'] = pos
+                path = p.get('path') or []
+                wp_idx = p.get('wp_idx', -1)
+                if wp_idx is not None and 1 <= wp_idx < len(path):
+                    st['tracking_mm'].append(
+                        _cross_track_error_mm(pos, path[wp_idx - 1], path[wp_idx]))
+
+    def _on_action_change(self, st, rid, action, t_rel):
+        """Embudo de ataque y recuperaciones, contados por transición de acción."""
+        stage = _ATTACK_STAGE.get(action)
+        prev_stage = st['_seq_max_stage']
+        if stage is not None:
+            if prev_stage == 0:
+                st['seq_initiated'] += 1
+            st['_seq_max_stage'] = max(prev_stage, stage)
+            if stage == 4:
+                st['kicks'] += 1
+                st['seq_completed'] += 1
+                st['_seq_max_stage'] = 0
+                self._event(t_rel, 'kick', robot=rid)
+        else:
+            if prev_stage in (1, 2, 3):
+                st['seq_aborted_stage'][prev_stage] += 1
+            st['_seq_max_stage'] = 0
+            if st['rol_prev'] == 'defensor' and action in _DEFENDER_CAPTURE_ACTIONS:
+                st['defender_captures'] += 1
+                self._event(t_rel, 'defender_capture', robot=rid)
+
+    def summary(self, score):
+        team_of = {rid: ('red' if rid in TEAM_RED_IDS else 'blue') for rid in ALL_IDS}
+        per_robot = {}
+        for rid, st in self.robots.items():
+            per_robot[str(rid)] = {
+                'team': team_of[rid],
+                'kicks': st['kicks'],
+                'attack_sequences': {
+                    'initiated': st['seq_initiated'],
+                    'completed': st['seq_completed'],
+                    'aborted_by_stage': {str(k): v
+                                         for k, v in st['seq_aborted_stage'].items()},
+                },
+                'role_changes': st['role_changes'],
+                'defender_ball_gains': st['defender_ball_gains'],
+                'defender_captures': st['defender_captures'],
+                'has_ball_s': round(st['has_ball_s'], 2),
+                'distance_traveled_px': round(st['dist_px'], 1),
+                'tracking_error_mm': _stats(st['tracking_mm']),
+                'actions': {
+                    a: {'dwell_s': round(st['dwell_s'].get(a, 0.0), 2),
+                        'entries': st['action_entries'].get(a, 0)}
+                    for a in sorted(set(st['dwell_s']) | set(st['action_entries']))
+                },
+            }
+
+        def team_sum(field_fn):
+            return {team: sum(field_fn(self.robots[rid]) for rid in ids)
+                    for team, ids in (('red', TEAM_RED_IDS), ('blue', TEAM_BLUE_IDS))}
+
+        fps = None
+        if (self._perc_first and self._perc_last
+                and self._perc_last[0] > self._perc_first[0]):
+            fps = round((self._perc_last[1] - self._perc_first[1])
+                        / (self._perc_last[0] - self._perc_first[0]), 2)
+        ball_rate = (round(100.0 * self.perc_partido_ball_det / self.perc_partido_frames, 1)
+                     if self.perc_partido_frames else None)
+        robot_rates = ({str(r): round(100.0 * c / self.perc_partido_frames, 1)
+                        for r, c in (self.perc_partido_detect or {}).items()}
+                       if self.perc_partido_frames else None)
+
+        duration_wall = (round(self._prev_ts - self.t0, 1)
+                         if self.t0 is not None and self._prev_ts is not None else 0.0)
+        return {
+            'mode': 'match_2v2',
+            'teams': {'red': list(TEAM_RED_IDS), 'blue': list(TEAM_BLUE_IDS)},
+            'robot_id_note': 'IDs de código 0-3 (en prosa de la tesis: 1-4)',
+            'duration_wall_s': duration_wall,
+            'duration_active_s': round(self.active_s, 1),
+            'play_segments': self.play_segments,
+            'score': dict(score),
+            'goals': self.goals,
+            'ball_out_events': self.ball_out_events,
+            'decision_cadence_ms': _stats(self.decision_deltas_ms),
+            'perception_in_match': {
+                'camera_fps_session': fps,
+                'partido_frames': self.perc_partido_frames,
+                'ball_detection_rate_pct': ball_rate,
+                'robot_detection_rate_pct': robot_rates,
+                'robots_detected_hist_sampled': {str(k): v
+                                                 for k, v in self.perc_robots_hist.items()},
+                'n_samples_in_play': self.perc_samples_in_play,
+            },
+            'kicks_team': team_sum(lambda s: s['kicks']),
+            'attack_sequences_team': {
+                'initiated': team_sum(lambda s: s['seq_initiated']),
+                'completed': team_sum(lambda s: s['seq_completed']),
+            },
+            'role_changes_total': sum(s['role_changes'] for s in self.robots.values()),
+            'action_repertoire_in_play': sorted(
+                {a for st in self.robots.values() for a in st['action_entries']}),
+            'per_robot': per_robot,
+            'events': self.events,
+            'notes': [
+                'Métricas acotadas a tramos con ambos equipos activos (sin init, reset post-gol ni pelota fuera).',
+                'Muestreo por estados de decisión (~25 Hz); el BT publica cambios cada ~100 ms, ninguna acción queda sin muestrear.',
+                'Embudo de ataque: 1=posicionamiento, 2=avance, 3=contacto, 4=disparo; abortos contados por etapa máxima alcanzada.',
+                'tracking_error_mm: distancia del robot al segmento activo de su ruta RRT*, escala por eje px→mm.',
+                'decision_cadence_ms: intervalo entre estados publicados por el proceso de decisión (throttle nominal 40 ms) bajo carga real.',
+                'partido_frames/tasas de detección: contadores del proceso de percepción acotados por game_active (incluyen tramos de pelota fuera).',
+            ],
+        }
 
 
 # =============================================================================
@@ -134,6 +461,7 @@ def perception_process_2v2(control_pipe, viz_pipe, camera_id, shm_name,
     ball_det_count = 0
     partido_frames   = 0   # solo cuenta frames con game_active==1
     partido_ball_det = 0   # solo cuenta detecciones con game_active==1
+    partido_detect_counts = {rid: 0 for rid in ALL_IDS}  # detecciones ArUco con game_active==1
     t0 = time.time()
     last_goal_time = 0.0
 
@@ -166,6 +494,9 @@ def perception_process_2v2(control_pipe, viz_pipe, camera_id, shm_name,
                         ang = float(np.degrees(np.arctan2(vec[1], vec[0])))
                         robots_data[int(mid)] = {'x': cx, 'y': cy, 'angulo': ang}
                         detect_counts[int(mid)] = detect_counts.get(int(mid), 0) + 1
+                        if in_partido:
+                            partido_detect_counts[int(mid)] = (
+                                partido_detect_counts.get(int(mid), 0) + 1)
 
             # Pelota HSV
             hsv  = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
@@ -234,6 +565,11 @@ def perception_process_2v2(control_pipe, viz_pipe, camera_id, shm_name,
                 'ball_out': ball_out,
                 'goal_event': goal_event,
                 'timestamp': time.time(),
+                # Contadores acumulados para métricas (leídos por visualización)
+                'frame_idx': frame_count,
+                'partido_frames': partido_frames,
+                'partido_ball_det': partido_ball_det,
+                'partido_detect_counts': dict(partido_detect_counts),
             }
             for pipe in (control_pipe, viz_pipe):
                 try:
@@ -308,6 +644,8 @@ def visualization_process_2v2(perception_pipe, decision_pipe, keyboard_pipe,
     # La calibración interactiva vive en scripts/calibrate_behavior_thresholds.py.
     show_kick_point = True
 
+    recorder = _MatchRecorder()
+
     try:
         while True:
             now = time.time()
@@ -325,10 +663,12 @@ def visualization_process_2v2(perception_pipe, decision_pipe, keyboard_pipe,
                     robots_perc   = data.get('robots', {})
                     ball_pos_perc = data.get('ball_pos')
                     goal_event    = data.get('goal_event')
+                    recorder.on_perception(data)
                     if goal_event in ('red', 'blue'):
                         score[goal_event] += 1
                         last_goal_team = goal_event
                         goal_reset_viz = True
+                        recorder.on_goal(goal_event)
                         tablero_cmd = 2 if goal_event == 'red' else 3
                         try:
                             keyboard_pipe.send({'command': 'goal_scored', 'team': goal_event})
@@ -363,6 +703,7 @@ def visualization_process_2v2(perception_pipe, decision_pipe, keyboard_pipe,
                         except Exception:
                             pass
                     prev_robot_available = robot_available
+                    recorder.on_decision(data)
                 except Exception:
                     pass
 
@@ -683,6 +1024,11 @@ def visualization_process_2v2(perception_pipe, decision_pipe, keyboard_pipe,
     except KeyboardInterrupt:
         pass
     finally:
+        try:
+            out_path = save_metrics('match_2v2', recorder.summary(score))
+            log.info("Métricas del partido guardadas en %s", out_path)
+        except Exception as e:
+            log.error("No se pudieron guardar las métricas del partido: %s", e)
         shm.close()
         cv2.destroyAllWindows()
         log.info("Visualizacion 2v2 finalizada")
