@@ -132,6 +132,14 @@ def main() -> int:
         log.error("No se pudo conectar al transmisor en %s", args.port)
         return 1
 
+    # Drenar el banner de arranque del Arduino antes de medir: al abrir el
+    # puerto la placa se reinicia y emite su mensaje de bienvenida; sin vaciarlo
+    # los primeros readline() leen esas líneas en lugar de la confirmación 'OK'.
+    time.sleep(0.5)
+    while tx.serial.in_waiting:
+        tx.serial.readline()
+    tx.serial.reset_input_buffer()
+
     try:
         for label, cmd in COMMANDS:
             print(f"\n[{label} {LABELS_MEANING[label]}]")
