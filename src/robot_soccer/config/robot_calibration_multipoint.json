@@ -28,8 +28,8 @@
     "bias": 0.006
   },
   "2": {
-    "pwm_min": 18,
-    "pwm_max": 25,
+    "pwm_min": 23,
+    "pwm_max": 28,
     "deadzone_left_fwd": 0,
     "deadzone_left_rev": 0,
     "deadzone_right_fwd": 0,
