@@ -288,7 +288,8 @@ def planning_process(ctrl_to_plan_pipe, path_queue, goal_pos, clearance,
 
 def control_process(perc_pipe, ctrl_to_plan_pipe, path_queue,
                     viz_pipe, keyboard_pipe, robot_id, serial_port,
-                    goal_pos, static_obstacles, robot_obstacle_radius):
+                    goal_pos, static_obstacles, robot_obstacle_radius,
+                    n_intentos=1, nav_queue=None, attempt_timeout=60.0):
     """Sigue waypoints del path planner via PID y RF.
 
     Extrae robots obstaculos de la percepcion, los combina con static_obstacles
@@ -350,6 +351,13 @@ def control_process(perc_pipe, ctrl_to_plan_pipe, path_queue,
     ROBOT_LOST_TIMEOUT = 0.5  # s antes de detener motores por seguridad
     all_robots = []          # Ultimo listado completo de robots detectados
 
+    # --- Multi-intento ---
+    attempt_idx = 0          # cuantos intentos han terminado (0-based contador)
+    attempt_results = []
+    awaiting_reposition = False
+    attempt_start_time = None
+    plan_ever_found = False  # si el planner encontro ruta en el intento actual
+
     log.info("Control listo. Presiona ESPACIO en la ventana para iniciar.")
 
     try:
@@ -394,11 +402,27 @@ def control_process(perc_pipe, ctrl_to_plan_pipe, path_queue,
                     if command == 'exit':
                         running = False
                     elif command == 'toggle':
-                        active = not active
-                        goal_reached = False
-                        log.info("Control %s", "ACTIVADO" if active else "PAUSADO")
-                        if not active and robot_available:
-                            rf_controller.set_motors(firmware_id, 0, 0)
+                        if awaiting_reposition:
+                            if attempt_idx < n_intentos:
+                                awaiting_reposition = False
+                                active = True
+                                goal_reached = False
+                                current_path = []
+                                current_wp_idx = 0
+                                last_sent_pos = None
+                                plan_ever_found = False
+                                attempt_start_time = time.time()
+                                log.info("Intento %d/%d iniciado",
+                                         attempt_idx + 1, n_intentos)
+                        else:
+                            active = not active
+                            goal_reached = False
+                            log.info("Control %s", "ACTIVADO" if active else "PAUSADO")
+                            if not active and robot_available:
+                                rf_controller.set_motors(firmware_id, 0, 0)
+                            if active:
+                                attempt_start_time = time.time()
+                                plan_ever_found = False
                     elif command == 'replan':
                         force_replan = True
                         last_sent_pos = None
@@ -438,6 +462,7 @@ def control_process(perc_pipe, ctrl_to_plan_pipe, path_queue,
                         current_path = new_path
                         current_wp_idx = new_wp_idx
                         goal_reached = False
+                        plan_ever_found = True
                         controller._pid_state.pop(robot_id, None)
                         log.info("Ruta aceptada: %d wp desde idx %d (%s)",
                                  len(current_path), new_wp_idx, reason_log)
@@ -521,6 +546,25 @@ def control_process(perc_pipe, ctrl_to_plan_pipe, path_queue,
                         active = False
                         if robot_available:
                             rf_controller.set_motors(firmware_id, 0, 0)
+                        elapsed = (time.time() - attempt_start_time
+                                   if attempt_start_time else 0.0)
+                        nav_result = {
+                            'attempt': attempt_idx + 1,
+                            'outcome': 'success',
+                            'plan_found': plan_ever_found,
+                            'elapsed_s': round(elapsed, 2),
+                        }
+                        attempt_results.append(nav_result)
+                        if nav_queue is not None:
+                            try:
+                                nav_queue.put_nowait(nav_result)
+                            except Exception:
+                                pass
+                        attempt_idx += 1
+                        awaiting_reposition = True
+                        log.info("Intento %d/%d completado (exito). "
+                                 "Reposiciona el robot para continuar.",
+                                 attempt_idx, n_intentos)
                     else:
                         current_wp_idx += 1
                         # Resetear estado PID para el nuevo waypoint
@@ -532,6 +576,33 @@ def control_process(perc_pipe, ctrl_to_plan_pipe, path_queue,
             elif active and not robot_ok and robot_available:
                 # Robot perdido: detener por seguridad
                 rf_controller.set_motors(firmware_id, 0, 0)
+
+            # --- Timeout por intento ---
+            if (active and attempt_timeout is not None
+                    and attempt_start_time is not None
+                    and time.time() - attempt_start_time > attempt_timeout):
+                outcome = 'plan_failed' if not plan_ever_found else 'exec_failed'
+                elapsed = time.time() - attempt_start_time
+                nav_result = {
+                    'attempt': attempt_idx + 1,
+                    'outcome': outcome,
+                    'plan_found': plan_ever_found,
+                    'elapsed_s': round(elapsed, 2),
+                }
+                attempt_results.append(nav_result)
+                if nav_queue is not None:
+                    try:
+                        nav_queue.put_nowait(nav_result)
+                    except Exception:
+                        pass
+                active = False
+                if robot_available:
+                    rf_controller.set_motors(firmware_id, 0, 0)
+                attempt_idx += 1
+                awaiting_reposition = True
+                log.warning("Intento %d/%d: timeout (%.0f s) -> %s. "
+                            "Reposiciona el robot para continuar.",
+                            attempt_idx, n_intentos, elapsed, outcome)
 
             # --- Visualizacion ---
             if now - last_viz_time >= VIZ_INTERVAL_S:
@@ -571,6 +642,9 @@ def control_process(perc_pipe, ctrl_to_plan_pipe, path_queue,
                         'estado': estado,
                         'dist_to_goal': dist_to_goal,
                         'timestamp': now,
+                        'awaiting_reposition': awaiting_reposition,
+                        'attempt_idx': attempt_idx,
+                        'n_intentos': n_intentos,
                     })
                     last_viz_time = now
                 except Exception:
@@ -628,6 +702,9 @@ def visualization_process(perc_pipe, ctrl_pipe, keyboard_pipe,
     robot_available = False
     estado = "Esperando..."
     dist_to_goal = None
+    awaiting_reposition = False
+    attempt_idx = 0
+    n_intentos = 1
 
     window_name = "Test Path Planning 1 Robot"
     cv2.namedWindow(window_name)
@@ -665,6 +742,9 @@ def visualization_process(perc_pipe, ctrl_pipe, keyboard_pipe,
                     robot_available = data.get('robot_available', False)
                     estado = data.get('estado', '')
                     dist_to_goal = data.get('dist_to_goal')
+                    awaiting_reposition = data.get('awaiting_reposition', False)
+                    attempt_idx = data.get('attempt_idx', 0)
+                    n_intentos = data.get('n_intentos', 1)
                 except Exception:
                     pass
 
@@ -799,8 +879,29 @@ def visualization_process(perc_pipe, ctrl_pipe, keyboard_pipe,
                             f"robot_r={robot_obstacle_radius}px  delta={clearance}px",
                             (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (160, 160, 80), 1)
 
-                cv2.putText(frame,
-                            "ESPACIO=Start/Stop  R=Replan  ESC=Salir",
+                # Contador de intentos (solo si hay más de uno)
+                if n_intentos > 1:
+                    y += 18
+                    done = attempt_idx
+                    total = n_intentos
+                    if awaiting_reposition and done >= total:
+                        intent_txt = f"Sesion completa ({done}/{total})"
+                        intent_color = (0, 255, 0)
+                    else:
+                        running_n = done + (1 if not awaiting_reposition else 0)
+                        intent_txt = f"Intento {running_n}/{total}"
+                        intent_color = (0, 215, 255)
+                    cv2.putText(frame, intent_txt, (10, y),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.42, intent_color, 1)
+
+                # Instrucciones al pie — cambian segun estado
+                if awaiting_reposition and attempt_idx >= n_intentos:
+                    hint = "Sesion completa  ESC=Salir"
+                elif awaiting_reposition:
+                    hint = "Reposiciona el robot  ESPACIO=Continuar  ESC=Salir"
+                else:
+                    hint = "ESPACIO=Start/Stop  R=Replan  ESC=Salir"
+                cv2.putText(frame, hint,
                             (10, CAMERA_PERSPECTIVE_HEIGHT - 10),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.35, (180, 180, 180), 1)
 
@@ -882,6 +983,42 @@ def _save_planning_metrics(metrics_queue):
     log.info("Metricas guardadas en %s", out)
 
 
+def _save_nav_metrics(nav_queue, config_name, n_intentos, obstacles, goal_pos):
+    """Drena nav_queue y guarda JSON con resultados de navegacion por intento."""
+    results = []
+    deadline = time.time() + 1.0
+    while time.time() < deadline:
+        try:
+            results.append(nav_queue.get(timeout=0.05))
+        except queue.Empty:
+            break
+        except Exception:
+            break
+
+    if not results:
+        log.info("Sin resultados de navegacion; no se guarda JSON de nav")
+        return
+
+    successes   = sum(1 for r in results if r['outcome'] == 'success')
+    plan_failed = sum(1 for r in results if r['outcome'] == 'plan_failed')
+    exec_failed = sum(1 for r in results if r['outcome'] == 'exec_failed')
+
+    summary = {
+        'config_name':         config_name,
+        'n_intentos_planned':  n_intentos,
+        'n_intentos_executed': len(results),
+        'n_obstacles':         len(obstacles),
+        'goal_pos':            list(goal_pos),
+        'nav_success_count':   successes,
+        'nav_plan_failed':     plan_failed,
+        'nav_exec_failed':     exec_failed,
+        'nav_success_rate':    round(successes / len(results), 3),
+        'attempts':            results,
+    }
+    out = save_metrics('test_path_planning_nav', summary)
+    log.info("Metricas de navegacion guardadas en %s", out)
+
+
 # =============================================================================
 # MAIN
 # =============================================================================
@@ -918,6 +1055,12 @@ def main():
                             f'Radio (px) con que se modela cada robot detectado como obstáculo '
                             f'(default: {PATH_PLANNING_ROBOT_OBSTACLE_RADIUS})'
                         ))
+    parser.add_argument('--n-intentos', type=int, default=1,
+                        help='Numero de intentos de navegacion a registrar (default: 1).')
+    parser.add_argument('--config-name', type=str, default='sin_config',
+                        help='Etiqueta de configuracion guardada en el JSON (ej. sin_obstaculos).')
+    parser.add_argument('--timeout-intento', type=float, default=60.0,
+                        help='Segundos maximos por intento antes de registrar fallo (default: 60).')
     args = parser.parse_args()
 
     if args.camera_id is None:
@@ -995,6 +1138,9 @@ def main():
     # Queue para metricas del planner (no acotada, drenada al cierre)
     metrics_queue = multiprocessing.Queue()
 
+    # Queue para resultados de navegacion por intento
+    nav_queue = multiprocessing.Queue()
+
     processes = []
 
     p1 = multiprocessing.Process(
@@ -1017,7 +1163,8 @@ def main():
         target=control_process,
         args=(perc_to_ctrl_r, ctrl_to_plan_s, path_queue,
               ctrl_to_viz_s, viz_to_ctrl_r, robot_id, args.serial_port,
-              goal_pos, obstacles, args.robot_obstacle_radius),
+              goal_pos, obstacles, args.robot_obstacle_radius,
+              args.n_intentos, nav_queue, args.timeout_intento),
         name="Control"
     )
     processes.append(p3)
@@ -1065,6 +1212,8 @@ def main():
 
         # 3) Drenar AHORA que sabemos que no habra mas writes
         _save_planning_metrics(metrics_queue)
+        _save_nav_metrics(nav_queue, args.config_name,
+                          args.n_intentos, obstacles, goal_pos)
         metrics_saved = True
 
         # 4) Terminar el resto (perception/control/viz no escriben al metrics_queue)
@@ -1075,12 +1224,15 @@ def main():
     finally:
         if not metrics_saved:
             _save_planning_metrics(metrics_queue)
-        # Cerrar queue para evitar leaked-semaphore warnings al salir
-        try:
-            metrics_queue.close()
-            metrics_queue.join_thread()
-        except Exception:
-            pass
+            _save_nav_metrics(nav_queue, args.config_name,
+                              args.n_intentos, obstacles, goal_pos)
+        # Cerrar queues para evitar leaked-semaphore warnings al salir
+        for q in (metrics_queue, nav_queue):
+            try:
+                q.close()
+                q.join_thread()
+            except Exception:
+                pass
         try:
             shm.close()
             shm.unlink()

@@ -6,9 +6,9 @@ Sin hardware, sin cámara, sin RF. Ejecutar con:
     python scripts/metrics/metrics_behavior_sim.py
 
 Produce LOG/behavior_sim_<timestamp>.json con datos para:
-  - Subsección "Lógica difusa": salidas (estado_pelota, equipo_cercano, zona_pelota) por escenario
-  - Subsección "Asignación de roles": qué robot es atacante y por qué
-  - Subsección "Árboles de comportamiento": latencia de update() en ms
+  - Subsección "Asignación de roles": qué robot es atacante y cambios de rol
+  - Subsección "Coherencia de acción": acción seleccionada por rol en el ciclo 1
+  - Subsección "Lógica difusa" (inactiva): salidas fuzzy por escenario
 """
 
 import sys
@@ -16,6 +16,8 @@ import time
 import statistics
 import logging
 from pathlib import Path
+
+import numpy as np
 
 ROOT_DIR = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(ROOT_DIR / "src"))
@@ -88,15 +90,38 @@ def run_scenario(name, player_data, ball_pos):
     ]
     ball = Ball(ball_pos[0], ball_pos[1])
 
+    # Pre-asignar roles según distancia a la pelota antes de crear BehaviorManager.
+    # Sin esto, _update_roles asigna team_players[0] por defecto en el primer tick
+    # y el cooldown de 3 s bloquea la corrección durante los 50 ciclos siguientes
+    # (todos ejecutan en < 1 ms). Con la pre-asignación, el árbol correcto ya está
+    # activo en el ciclo 1 y la medición de coherencia de acción es válida.
+    red_players = [p for p in players if p.team == "red"]
+    dists_init = {
+        p.id: float(np.linalg.norm(np.array([p.x, p.y]) - np.array(ball_pos, dtype=float)))
+        for p in red_players
+    }
+    attacker_init_id = min(dists_init, key=dists_init.get)
+    for p in red_players:
+        p.set_rol(ROL_ATACANTE if p.id == attacker_init_id else ROL_DEFENSIVO)
+
     fuzzy = FuzzyRobotTeamManager(players, ball, team="red")
+    # La asignación dinámica de roles desplegada reside solo en
+    # BehaviorManager._update_roles() (reglas con prioridad). FuzzyRobotTeamManager
+    # arrastra el asignador de score ponderado previo (la alternativa difusa que esas
+    # reglas reemplazaron) y lo reaplica como efecto colateral al evaluar el contexto,
+    # sobrescribiendo el rol decidido por el gestor. Se neutraliza para que el rol
+    # medido refleje solo el algoritmo en uso; el contexto (posesion, proximidad,
+    # zona) que consume el árbol no depende de esta llamada.
+    fuzzy.role_assigner.assign_roles = lambda *a, **k: None
     bm = BehaviorManager(players, ball, team="red",
                          use_real_robots=False, serial_port="/dev/ttyUSB0")
 
     fuzzy_posesion, fuzzy_proximidad, fuzzy_zona = [], [], []
     role_history = []
     bt_times_ms = []
+    actions_cycle1 = {}
 
-    for _ in range(N_CYCLES):
+    for cycle in range(N_CYCLES):
         try:
             posesion, proximidad, zona = fuzzy.evaluar_ms_logic_difusse()
             fuzzy_posesion.append(posesion)
@@ -119,6 +144,12 @@ def run_scenario(name, player_data, ball_pos):
         roles = {p.id: p.rol for p in players if p.team == "red"}
         role_history.append(roles)
 
+        # Registrar acción seleccionada al término del primer ciclo completo
+        if cycle == 0:
+            for p in red_players:
+                bb = bm.blackboards.get(p.id)
+                actions_cycle1[p.id] = bb.last_action if bb else None
+
     # Contar cambios de rol
     role_changes = 0
     for i in range(1, len(role_history)):
@@ -130,9 +161,16 @@ def run_scenario(name, player_data, ball_pos):
         (pid for pid, rol in final_roles.items() if rol == ROL_ATACANTE), None
     )
 
-    # Distancias reales al finalizar (para interpretar la asignación)
-    red_players = [p for p in players if p.team == "red"]
     distances = {p.id: round(p.distance_to_ball(ball), 1) for p in red_players}
+
+    # Coherencia de acción: rol en ciclo 1 y acción seleccionada por el árbol
+    action_coherence = {
+        str(p.id): {
+            "role": "atacante" if p.rol == ROL_ATACANTE else "defensor",
+            "action_cycle1": actions_cycle1.get(p.id),
+        }
+        for p in red_players
+    }
 
     result = {
         "scenario": name,
@@ -160,6 +198,7 @@ def run_scenario(name, player_data, ball_pos):
             "update_time_max_ms": round(max(bt_times_ms), 4),
             "update_time_min_ms": round(min(bt_times_ms), 4),
         },
+        "action_coherence": action_coherence,
     }
 
     bm.shutdown()
@@ -174,24 +213,23 @@ def main():
 
     all_results = []
     for name, player_data, ball_pos in SCENARIOS:
-        print(f"\n[{name}] ", end="", flush=True)
+        print(f"\n[{name}]")
         try:
             result = run_scenario(name, player_data, ball_pos)
             all_results.append(result)
             ra = result["role_assignment"]
             ft = result["bt_performance"]["update_time_mean_ms"]
-            print(f"atacante=R{ra['final_attacker_id']}  "
-                  f"cambios_rol={ra['role_changes']}  "
-                  f"BT={ft:.3f}ms  "
-                  f"OK")
+            ac = result["action_coherence"]
+            for pid, v in ac.items():
+                print(f"  R{pid} ({v['role']:<8s}) → {v['action_cycle1']}")
+            print(f"  atacante=R{ra['final_attacker_id']}  cambios_rol={ra['role_changes']}  BT={ft:.3f}ms  OK")
         except Exception as e:
-            print(f"ERROR: {e}")
+            print(f"  ERROR: {e}")
 
     if not all_results:
         print("\nNo se generaron resultados.")
         return
 
-    # Resumen global de tiempos BT
     all_bt_means = [r["bt_performance"]["update_time_mean_ms"] for r in all_results]
     summary = {
         "n_scenarios": len(all_results),
