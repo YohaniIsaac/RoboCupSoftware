@@ -30,7 +30,7 @@ from robot_soccer.config import (
     ARUCO_MIN_OTSU_STD_DEV, ARUCO_POLYGONAL_APPROX_ACCURACY_RATE,
     # Corrección de paralaje y escala métrica
     CAMERA_PERSPECTIVE_WIDTH, CAMERA_PERSPECTIVE_HEIGHT,
-    CAMERA_HEIGHT_ABOVE_FIELD_CM, MARKER_HEIGHT_ABOVE_FIELD_CM,
+    PARALLAX_FACTOR, PARALLAX_CENTER_X, PARALLAX_CENTER_Y,
     FIELD_PHYSICAL_WIDTH_CM, FIELD_PHYSICAL_HEIGHT_CM,
 )
 
@@ -135,12 +135,12 @@ def deteccion_jugadores_aruco_tag(frame, detector, allowed_ids=None, draw=True):
             center_x = float(np.mean(corner_points[:, 0]))
             center_y = float(np.mean(corner_points[:, 1]))
 
-            # Corrección de paralaje: el marker está elevado sobre el campo.
-            # La cámara perspectiva desplaza objetos elevados hacia afuera del
-            # centro de la imagen. Se corrige proyectando al plano del campo.
-            _pf = MARKER_HEIGHT_ABOVE_FIELD_CM / CAMERA_HEIGHT_ABOVE_FIELD_CM
-            center_x = center_x - (center_x - CAMERA_PERSPECTIVE_WIDTH  / 2.0) * _pf
-            center_y = center_y - (center_y - CAMERA_PERSPECTIVE_HEIGHT / 2.0) * _pf
+            # Corrección de paralaje: el marker está elevado sobre el campo y la
+            # cámara desplaza los objetos elevados hacia afuera del nadir. Se
+            # corrige con un modelo radial cuyo factor y centro están calibrados
+            # empíricamente en config.py (PARALLAX_*); el centro no es el de la imagen.
+            center_x = center_x - (center_x - PARALLAX_CENTER_X) * PARALLAX_FACTOR
+            center_y = center_y - (center_y - PARALLAX_CENTER_Y) * PARALLAX_FACTOR
             center_x = int(center_x)
             center_y = int(center_y)
 

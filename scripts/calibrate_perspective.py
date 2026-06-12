@@ -40,6 +40,9 @@ from robot_soccer.config import (  # pylint: disable=wrong-import-position
     CAMERA_PERSPECTIVE_WIDTH,
     CAMERA_PERSPECTIVE_HEIGHT
 )
+from robot_soccer.utils.camera_undistort import (  # pylint: disable=wrong-import-position
+    load_intrinsics, undistort_frame,
+)
 
 # Constantes
 WINDOW_NAME = 'Calibracion_Perspectiva'  # Sin espacios ni caracteres especiales
@@ -271,6 +274,17 @@ def calibrate_perspective(camera_id=2):
         print("Error leyendo frame")
         cap.release()
         return
+
+    # Corregir distorsión de lente ANTES de elegir las esquinas, para que
+    # SRC_POINTS queden en el mismo espacio (sin distorsión) en que producción
+    # aplica la homografía (camera_feed.py: undistort -> warpPerspective).
+    # No-op si no existe camera_intrinsics.json.
+    K, D = load_intrinsics()
+    if K is not None:
+        current_frame = undistort_frame(current_frame, K, D)
+        print("Frame corregido por distorsión de lente (intrínsecos cargados).")
+    else:
+        print("Sin camera_intrinsics.json: se calibra sobre frame crudo.")
 
     print("Frame capturado - comenzando calibracion...")
     print("\nHaz click en las 4 esquinas de la cancha")

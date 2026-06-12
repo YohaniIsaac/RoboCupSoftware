@@ -288,10 +288,10 @@ CAMERA_PERSPECTIVE_ENABLED = True  # Habilitar/deshabilitar transformacion de pe
 # Puntos de origen (esquinas de la cancha en la imagen de la cámara)
 # Ajusta estos valores usando el script scripts/calibrate_perspective.py
 CAMERA_PERSPECTIVE_SRC_POINTS = [
-    (41, 10),      # Top-left (esquina superior izquierda)
-    (622, 14),     # Top-right (esquina superior derecha)
-    (627, 353),    # Bottom-right (esquina inferior derecha)
-    (49, 349)       # Bottom-left (esquina inferior izquierda)
+    (55, 24),      # Top-left (esquina superior izquierda)
+    (613, 27),     # Top-right (esquina superior derecha)
+    (620, 351),    # Bottom-right (esquina inferior derecha)
+    (56, 355)       # Bottom-left (esquina inferior izquierda)
 ]
 
 # Dimensiones de la imagen de salida (rectángulo destino)
@@ -303,11 +303,11 @@ FIELD_CAM = FieldGeometry(
     width=CAMERA_PERSPECTIVE_WIDTH,
     height=CAMERA_PERSPECTIVE_HEIGHT,
     goal_left_x=5,
-    goal_left_top_y=191,
-    goal_left_bottom_y=297,
-    goal_right_x=629,
-    goal_right_top_y=189,
-    goal_right_bottom_y=292,
+    goal_left_top_y=187,
+    goal_left_bottom_y=296,
+    goal_right_x=632,
+    goal_right_top_y=196,
+    goal_right_bottom_y=296,
     margin=15,
 )
 
@@ -513,8 +513,15 @@ KICK_POINT_ANGLE_OFFSET_DEG = 0.0  # ° — offset angular entre el eje del mark
 # objetos elevados hacia afuera del centro de la imagen respecto a su posición
 # real en el suelo. La corrección se aplica en player_tracking.py al calcular
 # el centro del marker.
-CAMERA_HEIGHT_ABOVE_FIELD_CM = 128.0  # cm — altura de la cámara sobre el plano del campo
-MARKER_HEIGHT_ABOVE_FIELD_CM = 8.5    # cm — altura del plano del marker ArUco sobre el campo
+CAMERA_HEIGHT_ABOVE_FIELD_CM = 128.0  # cm — altura física de la cámara (referencia; solvePnP ~124 cm)
+MARKER_HEIGHT_ABOVE_FIELD_CM = 8.5    # cm — altura física del marcador (referencia geométrica)
+# Corrección de paralaje desplegada (calibrada al tanteo con scripts/calibrate_parallax.py).
+# Modelo radial: c' = c - (c - centro) * factor. El centro NO coincide con el de la
+# imagen (320, 240): es el nadir efectivo de la cámara. El factor geométrico sería
+# h/H ≈ 0.066; el valor que minimiza el error de posición en todo el campo es 0.032.
+PARALLAX_FACTOR   = 0.032
+PARALLAX_CENTER_X = 333
+PARALLAX_CENTER_Y = 280
 FIELD_PHYSICAL_WIDTH_CM      = 150.0  # cm — ancho real del área de juego (lado largo)
 FIELD_PHYSICAL_HEIGHT_CM     = 88.0   # cm — alto real del área de juego (lado corto)
 # Nota: estas dimensiones corrigen la anisotropía del warpPerspective en el cómputo
