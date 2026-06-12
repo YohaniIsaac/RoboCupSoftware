@@ -167,3 +167,8 @@ test_*.txt
 
 # momentáneo
 *.md
+*.txt
+*.png
+
+# Métricas efímeras (regla del proyecto: no commitear JSON de LOG/)
+LOG/*_*.json
