@@ -512,26 +512,71 @@ def decision_process(
         log.info("Decision finalizada")
 
 
-def _assign_reset(team_players, pos_dict):
-    """Asigna posiciones de reset minimizando distancia total de viaje (2! permutaciones).
+def _segments_cross(a1, a2, b1, b2):
+    """True si los segmentos a1→a2 y b1→b2 se intersectan (test de orientación CCW)."""
+    def _ccw(p, q, r):
+        return (r[1] - p[1]) * (q[0] - p[0]) - (q[1] - p[1]) * (r[0] - p[0])
+    d1 = _ccw(b1, b2, a1)
+    d2 = _ccw(b1, b2, a2)
+    d3 = _ccw(a1, a2, b1)
+    d4 = _ccw(a1, a2, b2)
+    return ((d1 > 0) != (d2 > 0)) and ((d3 > 0) != (d4 > 0))
 
-    Evita el escenario donde un robot apunta a una posición ocupada por su compañero,
-    que hace que RRT* falle y el robot caiga a PID directo sin evasión de obstáculos.
+
+def _assign_reset(teams, pos_dict):
+    """Asigna posiciones de reset a TODOS los robots (ambos equipos) globalmente.
+
+    Cada robot solo recibe posiciones de su propio equipo (pos_dict define a qué
+    equipo pertenece cada posición vía el id), pero la permutación se elige
+    considerando los dos equipos a la vez: se minimiza primero el número de
+    cruces entre las trayectorias rectas robot→posición de todos los robots, y
+    como desempate la distancia total de viaje.
+
+    Evita el escenario donde dos robots — incluso de equipos distintos — quedan
+    con trayectorias enfrentadas: RRT* falla (el goal está ocupado por el otro
+    robot), el control cae a PID directo sin evasión y terminan chocando.
+
+    Args:
+        teams: lista de listas de Player, una por equipo.
+        pos_dict: {player_id: (x, y)} posiciones de reset.
+
+    Returns:
+        dict: {player_id: (x, y)} para todos los robots de todos los equipos.
     """
-    from itertools import permutations as _perms
-    ids = [p.id for p in team_players]
-    positions = [pos_dict[pid] for pid in ids]
-    best = {pid: pos for pid, pos in zip(ids, positions)}
-    best_cost = float('inf')
-    for perm in _perms(range(len(ids))):
-        cost = sum(
-            math.hypot(team_players[i].x - positions[perm[i]][0],
-                       team_players[i].y - positions[perm[i]][1])
-            for i in range(len(ids))
+    from itertools import permutations as _perms, product as _product
+    team_options = []
+    for players in teams:
+        ids = [p.id for p in players]
+        positions = [pos_dict[pid] for pid in ids]
+        team_options.append([
+            {ids[i]: positions[perm[i]] for i in range(len(ids))}
+            for perm in _perms(range(len(ids)))
+        ])
+
+    all_players = [p for players in teams for p in players]
+    best, best_key = None, None
+    for combo in _product(*team_options):
+        assignment = {}
+        for team_part in combo:
+            assignment.update(team_part)
+        segments = [((p.x, p.y), assignment[p.id]) for p in all_players]
+        crossings = sum(
+            1
+            for i in range(len(segments))
+            for j in range(i + 1, len(segments))
+            if _segments_cross(segments[i][0], segments[i][1],
+                               segments[j][0], segments[j][1])
         )
-        if cost < best_cost:
-            best_cost = cost
-            best = {ids[i]: positions[perm[i]] for i in range(len(ids))}
+        total_dist = sum(
+            math.hypot(p.x - assignment[p.id][0], p.y - assignment[p.id][1])
+            for p in all_players
+        )
+        key = (crossings, total_dist)
+        if best_key is None or key < best_key:
+            best_key, best = key, assignment
+    if best_key and best_key[0] > 0:
+        log.info("Asignación de reset: %d cruce(s) de trayectoria inevitable(s)",
+                 best_key[0])
     return best
 
 
@@ -935,8 +980,9 @@ def decision_process_2v2(
                         p.id: 'moving'
                         for bm in (bm_red, bm_blue) for p in bm.team_players
                     }
+                    assignment = _assign_reset(
+                        [bm_red.team_players, bm_blue.team_players], RESET_POS)
                     for bm in (bm_red, bm_blue):
-                        assignment = _assign_reset(bm.team_players, RESET_POS)
                         for p in bm.team_players:
                             rpos = assignment.get(p.id)
                             if rpos:
@@ -1002,8 +1048,9 @@ def decision_process_2v2(
                         p.id: 'moving'
                         for bm in (bm_red, bm_blue) for p in bm.team_players
                     }
+                    assignment = _assign_reset(
+                        [bm_red.team_players, bm_blue.team_players], RESET_POS)
                     for bm in (bm_red, bm_blue):
-                        assignment = _assign_reset(bm.team_players, RESET_POS)
                         for p in bm.team_players:
                             rpos = assignment.get(p.id)
                             if rpos:
