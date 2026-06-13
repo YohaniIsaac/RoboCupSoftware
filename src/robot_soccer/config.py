@@ -244,6 +244,14 @@ RRT_REPLAN_COOLDOWN_S    = 0.5   # s  — tiempo mínimo entre replans por posic
 RRT_OBSTACLE_MOVE_PX     = 25    # px — trigger replan si un obstáculo se mueve >N px
                                   # (bajado de 40→25: detectar movimiento antes de que el path quede inválido)
 
+# --- Goals/starts degenerados (dentro de un obstáculo inflado) ---
+# Si el goal solicitado cae dentro del radio inflado de un obstáculo (otro robot
+# parado encima), RRT* jamás puede conectar y el control caía a PID directo sin
+# evasión. El planner proyecta el goal al borde del obstáculo con este margen y
+# el robot espera ahí, replanificando periódicamente hasta que se despeje.
+RRT_GOAL_PROJECTION_MARGIN_PX = 6   # px — margen al proyectar goal/start fuera del obstáculo inflado
+RRT_HOLD_REPLAN_PERIOD_S      = 2.0 # s  — replan periódico mientras el goal real siga bloqueado
+
 # --- Umbral de llegada efectivo según proximidad de obstáculos ---
 # El umbral nominal de llegada (arrival_threshold por comando) se contrae
 # linealmente cuando hay otro robot cerca del target, para evitar que dos

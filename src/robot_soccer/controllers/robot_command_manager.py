@@ -15,6 +15,7 @@ from robot_soccer.config import (
     RRT_REPLAN_POSITION_PX,
     RRT_REPLAN_COOLDOWN_S,
     RRT_OBSTACLE_MOVE_PX,
+    RRT_HOLD_REPLAN_PERIOD_S,
     ROTATE_RECOMMAND_MIN_DEG,
     ROBOT_DETECTION_LOST_RAMPDOWN_S,
     ROBOT_MAX_LINEAR_SPEED,
@@ -124,6 +125,8 @@ class RobotCommandManager:
         # Estado de seguimiento de path por robot
         self._current_paths:  dict = {}  # player_id → [(x,y), ...]
         self._current_wp_idx: dict = {}  # player_id → int
+        self._path_projected: dict = {}  # player_id → bool: path termina antes del goal real
+        self._waiting_goal_clear: dict = {}  # player_id → True: goal bloqueado, sosteniendo posición
         self._last_sent_pos:  dict = {}  # player_id → (x,y)
         self._last_sent_goal: dict = {}  # player_id → (x,y)
         self._last_replan_t:  dict = {}  # player_id → float timestamp
@@ -289,9 +292,13 @@ class RobotCommandManager:
                                 else:
                                     self._current_paths[player_id]  = new_path
                                     self._current_wp_idx[player_id] = wp_idx
+                                    self._path_projected[player_id] = result.get('projected', False)
+                                    self._waiting_goal_clear.pop(player_id, None)
                                     self.controllers[player_id]._pid_state.pop(player_id, None)
-                                    log.info("R%d: path adoptado %d wp (desde idx %d)",
-                                             player_id, len(new_path), wp_idx)
+                                    log.info("R%d: path adoptado %d wp (desde idx %d)%s",
+                                             player_id, len(new_path), wp_idx,
+                                             " [goal proyectado]"
+                                             if self._path_projected[player_id] else "")
                         except Exception:
                             pass
 
@@ -326,6 +333,14 @@ class RobotCommandManager:
                                     self._ball_pos[1] - last_ball[1]) > RRT_OBSTACLE_MOVE_PX:
                                 if now - self._last_replan_t.get(player_id, 0) >= _replan_cd:
                                     need_replan = True   # pelota se movió significativamente
+
+                        # Goal bloqueado por obstáculo: replan periódico aunque nada
+                        # se mueva, para detectar cuándo el bloqueador despeja el goal.
+                        if (not need_replan
+                                and self._waiting_goal_clear.get(player_id)
+                                and now - self._last_replan_t.get(player_id, 0)
+                                >= RRT_HOLD_REPLAN_PERIOD_S):
+                            need_replan = True
 
                         if need_replan:
                             pipe = self._plan_pipes[player_id]
@@ -377,6 +392,7 @@ class RobotCommandManager:
                                     # Limpiar path siempre al terminar el último waypoint
                                     self._current_paths.pop(player_id, None)
                                     self._current_wp_idx.pop(player_id, None)
+                                    was_projected = self._path_projected.pop(player_id, False)
                                     # Solo completar la acción si este path apuntaba al goal actual.
                                     # Si el goal cambió (path obsoleto), mantener la acción activa
                                     # y dejar que el PID directo lleve al robot mientras llega el nuevo plan.
@@ -384,6 +400,17 @@ class RobotCommandManager:
                                     if dist_wp_to_goal < RRT_WAYPOINT_ARRIVAL_PX:
                                         del self.actions_in_progress[player_id]
                                         log.info("R%d: llegó al objetivo (último wp)", player_id)
+                                    elif was_projected:
+                                        # El goal real sigue bloqueado por un obstáculo:
+                                        # sostener posición aquí (sin PID directo, que
+                                        # embestiría al bloqueador) y replanificar
+                                        # periódicamente hasta que se despeje.
+                                        self._waiting_goal_clear[player_id] = True
+                                        if self.rf_controller:
+                                            self.rf_controller.set_motors(player.id + 1, 0, 0)
+                                        log.info("R%d: goal %s bloqueado — esperando a que "
+                                                 "se despeje a %.0fpx", player_id, goal,
+                                                 dist_wp_to_goal)
                                     else:
                                         log.debug("R%d: path obsoleto (last wp a %.0fpx del goal actual), "
                                                   "esperando nuevo plan", player_id, dist_wp_to_goal)
@@ -392,6 +419,13 @@ class RobotCommandManager:
                                     self.controllers[player_id]._pid_state.pop(player_id, None)
                                     log.debug("R%d: wp %d/%d alcanzado",
                                               player_id, wp_idx + 1, len(path))
+                        elif self._waiting_goal_clear.get(player_id):
+                            # Goal bloqueado: sostener posición hasta adoptar un path
+                            # nuevo. El PID directo embestiría al robot bloqueador.
+                            # Se reenvía stop cada frame (mismo patrón que detección
+                            # perdida) para que el robot no avance ante un comando suelto.
+                            if self.rf_controller:
+                                self.rf_controller.set_motors(player.id + 1, 0, 0)
                         else:
                             # Fallback: PID directo mientras llega el primer path
                             is_completed = self.controllers[player_id].move_to_position(
@@ -521,6 +555,9 @@ class RobotCommandManager:
             target_pos[0] - last_planned[0], target_pos[1] - last_planned[1]
         ) > RRT_WAYPOINT_ARRIVAL_PX:
             self._last_sent_goal.pop(player_id, None)  # forzar replan solo si cambio significativo
+            # La espera y el flag de proyección pertenecen al goal anterior
+            self._waiting_goal_clear.pop(player_id, None)
+            self._path_projected.pop(player_id, None)
 
         self.actions_in_progress[player_id] = {
             'type': 'move',
