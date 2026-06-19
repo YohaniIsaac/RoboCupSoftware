@@ -26,6 +26,7 @@ from robot_soccer.config import (
     CAPTURE_CONFIRM_DISTANCE_PX,
     CAPTURE_CREEP_SPEED_PWM,
     KICK_POINT_OFFSET_PX,
+    CONTACT_APPROACH_OVERSHOOT_PX,
     KICK_POINT_TOLERANCE_PX,
     KICK_POINT_ANGLE_OFFSET_DEG,
     KICK_FAIL_DETECT_WINDOW_S,
@@ -1737,16 +1738,19 @@ def _advance_to_contact_start(blackboard):
         )
         return NodeStatus.RUNNING
 
-    # Target geométricamente coherente con el kick_point:
-    # cuando el robot llegue a target_robot, su kick_point queda sobre la
-    # pelota. Se reemplaza el viejo overshoot "27 px más allá de la pelota"
-    # por target = ball - KICK_POINT_OFFSET * unit(goal - ball).
+    # Target del creep: el kick_point (donde el centro del robot deja el solenoide
+    # sobre la pelota) EXTENDIDO CONTACT_APPROACH_OVERSHOOT_PX hacia la pelota.
+    # Sin overshoot el target ES el kick_point exacto y STOP PREDICTIVO frena al
+    # robot ~ROBOT_POSITION_THRESHOLD antes con el heading congelado → kick_err >
+    # tolerancia → nunca hay contacto. Con overshoot el robot sigue avanzando y
+    # corrigiendo heading hasta que kick_err detecta el contacto (mismo principio
+    # que CAPTURE_OVERSHOOT_PX del dribbler).
     goal_to_ball = goal_pos - ball_pos
     dist_gtb = float(np.linalg.norm(goal_to_ball))
     if dist_gtb < 1.0:
         return NodeStatus.FAILURE
     unit_to_goal = goal_to_ball / dist_gtb
-    target_robot = ball_pos - KICK_POINT_OFFSET_PX * unit_to_goal
+    target_robot = ball_pos - (KICK_POINT_OFFSET_PX - CONTACT_APPROACH_OVERSHOOT_PX) * unit_to_goal
     target = (int(target_robot[0]), int(target_robot[1]))
 
     # Verificar corredor libre: ningún otro robot debe estar perpendicularmente
@@ -1927,7 +1931,7 @@ def _advance_to_contact_running(blackboard):
             dist_gtb = float(np.linalg.norm(goal_to_ball))
             if dist_gtb >= 1.0:
                 unit_to_goal = goal_to_ball / dist_gtb
-                target_robot = ball_pos - KICK_POINT_OFFSET_PX * unit_to_goal
+                target_robot = ball_pos - (KICK_POINT_OFFSET_PX - CONTACT_APPROACH_OVERSHOOT_PX) * unit_to_goal
                 target = (int(target_robot[0]), int(target_robot[1]))
                 blackboard.command_manager.move_robot_to(player_id, target, direct=True)
         return NodeStatus.RUNNING

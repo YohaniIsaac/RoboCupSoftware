@@ -533,6 +533,16 @@ KICK_POINT_ANGLE_OFFSET_DEG = 0.0  # ° — offset angular entre el eje del mark
                                     #      hasta que la cruz del kick_point coincida con la pelota.
                                     #      Positivo = sentido horario.
 
+# Overshoot del creep de advance_to_contact: el target se emite MÁS ALLÁ del
+# kick_point (hacia la pelota) por esta cantidad. Sin overshoot el target ES el
+# kick_point exacto y STOP PREDICTIVO frena al robot ~ROBOT_POSITION_THRESHOLD
+# antes, congelando el heading desalineado → kick_err > tolerancia → nunca hay
+# contacto. Con overshoot el robot sigue avanzando y corrigiendo heading hasta
+# que kick_err detecta el contacto. Análogo a CAPTURE_OVERSHOOT_PX del dribbler.
+# Debe superar ROBOT_POSITION_THRESHOLD; no tan grande que empuje la pelota antes
+# de detectar contacto (el creep es lento, pwm=CAPTURE_CREEP_SPEED_PWM).
+CONTACT_APPROACH_OVERSHOOT_PX = 15  # px — overshoot del target del creep pasado el kick_point
+
 # --- Corrección de paralaje por altura del marker ---
 # El marker ArUco está elevado sobre el campo. Una cámara perspectiva desplaza
 # objetos elevados hacia afuera del centro de la imagen respecto a su posición
