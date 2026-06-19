@@ -122,25 +122,29 @@ def planning_worker(ctrl_pipe, path_queue, clearance=None):
             # es un punto "ilustrativo" (defensa, behind_ball) en vez de uno
             # crítico (captura).
             arrival_px = data.get('arrival_px', RRT_WAYPOINT_ARRIVAL_PX)
+            # Clearance por-request (inflación dependiente del contexto): el caller
+            # envía un clearance reducido en la zona de disputa de la pelota, donde
+            # el global vuelve imposible maniobrar. Si no lo envía, se usa el global.
+            req_clearance = data.get('clearance', clearance)
 
             # Sanear requests degenerados: start atrapado en un obstáculo inflado
             # (robots en contacto) y/o goal dentro de uno (otro robot parado encima).
             # Sin esto RRT* quema iter_max sin solución y el control cae a PID
             # directo sin evasión.
             obstacles_eff = _release_start(
-                robot_pos, obstacles, clearance, RRT_GOAL_PROJECTION_MARGIN_PX)
+                robot_pos, obstacles, req_clearance, RRT_GOAL_PROJECTION_MARGIN_PX)
             plan_goal = _project_goal(
-                goal_pos, robot_pos, obstacles_eff, clearance, RRT_GOAL_PROJECTION_MARGIN_PX)
+                goal_pos, robot_pos, obstacles_eff, req_clearance, RRT_GOAL_PROJECTION_MARGIN_PX)
             projected = plan_goal != tuple(goal_pos)
             if projected:
                 log.info("Goal %s bloqueado por obstáculo → planificando a %s "
                          "(el robot esperará ahí a que se despeje)", goal_pos, plan_goal)
 
-            log.info("Planificando desde %s hacia %s | %d obstaculos...",
-                     robot_pos, plan_goal, len(obstacles_eff))
+            log.info("Planificando desde %s hacia %s | %d obstaculos | clearance=%d...",
+                     robot_pos, plan_goal, len(obstacles_eff), req_clearance)
             t0 = time.time()
             try:
-                rrt.setup(robot_pos, plan_goal, obstacles_eff, field=FIELD_CAM, clearance=clearance)
+                rrt.setup(robot_pos, plan_goal, obstacles_eff, field=FIELD_CAM, clearance=req_clearance)
                 rrt.planning()
             except Exception as e:
                 log.error("Error en RRT* planning: %s", e)

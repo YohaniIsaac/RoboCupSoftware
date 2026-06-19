@@ -1750,8 +1750,8 @@ def _advance_to_contact_start(blackboard):
 
     # Verificar corredor libre: ningún otro robot debe estar perpendicularmente
     # dentro del segmento robot→overshoot. La creep mode avanza en línea recta
-    # sin RRT*, por lo que sin este check colisionaría. Si está bloqueado, FAILURE
-    # → behind_ball reposiciona por flanco lateral.
+    # sin RRT* (move_robot_to con direct=True), por lo que sin este check
+    # colisionaría. Si está bloqueado, FAILURE → behind_ball reposiciona por flanco.
     seg = np.array([target[0] - player_pos[0], target[1] - player_pos[1]], dtype=float)
     seg_l2 = float(np.dot(seg, seg))
     if seg_l2 > 1.0:
@@ -1778,7 +1778,7 @@ def _advance_to_contact_start(blackboard):
     if controller:
         controller.max_linear_pwm_override = CAPTURE_CREEP_SPEED_PWM
 
-    blackboard.command_manager.move_robot_to(player_id, target)
+    blackboard.command_manager.move_robot_to(player_id, target, direct=True)
     blackboard.last_action = "advancing_to_contact"
     robot_status_logger.emit_event(
         player_id,
@@ -1860,7 +1860,7 @@ def _advance_to_contact_running(blackboard):
             norm = float(np.linalg.norm(away))
             unit = away / norm if norm > 1 else np.array([0.0, 1.0])
             press = ball_pos + unit * (CAPTURE_ACTIVATE_DISTANCE_PX + RIVAL_PRESS_MARGIN_PX)
-            blackboard.command_manager.move_robot_to(player_id, (int(press[0]), int(press[1])))
+            blackboard.command_manager.move_robot_to(player_id, (int(press[0]), int(press[1])), direct=True)
             return NodeStatus.RUNNING
         else:
             blackboard._rival_contact_start = None
@@ -1928,7 +1928,7 @@ def _advance_to_contact_running(blackboard):
                 unit_to_goal = goal_to_ball / dist_gtb
                 target_robot = ball_pos - KICK_POINT_OFFSET_PX * unit_to_goal
                 target = (int(target_robot[0]), int(target_robot[1]))
-                blackboard.command_manager.move_robot_to(player_id, target)
+                blackboard.command_manager.move_robot_to(player_id, target, direct=True)
         return NodeStatus.RUNNING
 
     # ──────────────────────────────

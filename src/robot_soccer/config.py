@@ -236,6 +236,16 @@ PATH_PLANNING_OBSTACLE_CLEARANCE = 60    # Margen de seguridad (px) añadido a c
 PATH_PLANNING_ROBOT_OBSTACLE_RADIUS = 45 # Radio (px) con que se modela cada robot como obstáculo
 PATH_PLANNING_BALL_OBSTACLE_RADIUS  = 10 # Radio (px) con que se modela la pelota como obstáculo
                                          # Zona exclusión = 10 + clearance(45) = 55px < BEHIND_BALL(60px)
+
+# --- Inflación dependiente del contexto (zona de disputa de la pelota) ---
+# Cerca de la pelota convergen varios robots y el contacto es OBLIGATORIO; el
+# clearance global infla cada robot a ~3x su tamaño real (45+60=105px) y vuelve
+# imposible maniobrar ahi. Cuando el goal cae dentro de PATH_PLANNING_CONTEST_RADIUS_PX
+# de la pelota se usa un clearance reducido, permitiendo aproximarse a disputar
+# sin que el planner proyecte el goal hacia atras. El contacto final lo cierra
+# advance_to_contact en modo directo (sin planner).
+PATH_PLANNING_CONTEST_RADIUS_PX = 90  # px — goal a <=N de la pelota => intencion de disputa
+PATH_PLANNING_CONTEST_CLEARANCE = 20  # px — clearance reducido en la zona de disputa
 RRT_WAYPOINT_ARRIVAL_PX  = 20    # px — umbral de llegada a waypoints intermedios
 RRT_REPLAN_POSITION_PX   = 80    # px — trigger replan si robot se aleja >N px del punto enviado
 RRT_REPLAN_COOLDOWN_S    = 0.5   # s  — tiempo mínimo entre replans por posición/obstáculo

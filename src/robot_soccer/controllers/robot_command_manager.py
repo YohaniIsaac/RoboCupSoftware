@@ -10,6 +10,9 @@ from robot_soccer.config import (
     CAPTURE_CREEP_SPEED_PWM,
     PATH_PLANNING_ROBOT_OBSTACLE_RADIUS,
     PATH_PLANNING_BALL_OBSTACLE_RADIUS,
+    PATH_PLANNING_OBSTACLE_CLEARANCE,
+    PATH_PLANNING_CONTEST_RADIUS_PX,
+    PATH_PLANNING_CONTEST_CLEARANCE,
     CAPTURE_ACTIVATE_DISTANCE_PX,
     RRT_WAYPOINT_ARRIVAL_PX,
     RRT_REPLAN_POSITION_PX,
@@ -230,7 +233,22 @@ class RobotCommandManager:
                     nominal_arrival = action.get('arrival_threshold')
                     player_id    = player.id
 
-                    if player_id in self._plan_pipes:
+                    if action.get('direct', False):
+                        # ── MODO DIRECTO (sin planner) ──────────────────────────────────
+                        # PID con steering directo al target, sin RRT*. Lo usa
+                        # advance_to_contact: el corredor ya fue validado por el BT y el
+                        # planner es contraproducente (proyectaría el target de contacto
+                        # fuera del radio inflado del rival/pelota y congelaría el avance,
+                        # impidiendo el kick). El estado de path/hold se limpia en move_robot_to.
+                        is_completed = self.controllers[player.id].move_to_position(
+                            player, target_pos, target_angle,
+                            arrival_threshold=nominal_arrival,
+                        )
+                        if is_completed:
+                            del self.actions_in_progress[player.id]
+                            log.info("Robot %i: Completado movimiento a %s (directo, sin planner)",
+                                     player.id, target_pos)
+                    elif player_id in self._plan_pipes:
                         # ── PATH PLANNING MODE ─────────────────────────────────────────
                         now     = time.time()
                         cur_pos = (int(player.x), int(player.y))
@@ -249,13 +267,21 @@ class RobotCommandManager:
                             target_pos, nominal_arrival, obs_dicts, player_id
                         )
 
-                        # Incluir pelota como obstáculo si el goal está lejos de ella
-                        # (excluir en fase de captura directa donde el robot DEBE llegar a la pelota)
+                        # Inflación dependiente del contexto + pelota como obstáculo.
+                        # Si el goal cae en la zona de disputa de la pelota se usa un
+                        # clearance reducido (varios robots convergen ahí y el contacto
+                        # es obligatorio; el global los infla a ~3x y bloquea el área).
+                        # En navegación normal se mantiene el clearance completo.
+                        # La pelota se incluye como obstáculo solo si el goal está lejos
+                        # de ella (en captura/contacto el robot DEBE llegar a la pelota).
+                        req_clearance = PATH_PLANNING_OBSTACLE_CLEARANCE
                         if self._ball_pos is not None:
                             dist_goal_ball = math.hypot(
                                 goal[0] - self._ball_pos[0],
                                 goal[1] - self._ball_pos[1],
                             )
+                            if dist_goal_ball <= PATH_PLANNING_CONTEST_RADIUS_PX:
+                                req_clearance = PATH_PLANNING_CONTEST_CLEARANCE
                             if dist_goal_ball > CAPTURE_ACTIVATE_DISTANCE_PX:
                                 obstacles.append([self._ball_pos[0], self._ball_pos[1],
                                                   PATH_PLANNING_BALL_OBSTACLE_RADIUS])
@@ -351,6 +377,7 @@ class RobotCommandManager:
                                     'robot_pos': cur_pos,
                                     'goal_pos':  goal,
                                     'obstacles': obstacles,
+                                    'clearance': req_clearance,
                                     'arrival_px': (effective_arrival
                                                    if effective_arrival is not None
                                                    else RRT_WAYPOINT_ARRIVAL_PX),
@@ -511,7 +538,7 @@ class RobotCommandManager:
                         self.rf_controller.set_motors(fw_id, speed, speed)
 
     def move_robot_to(self, player_id, target_pos, target_angle=None, speed_factor=1.0,
-                      arrival_threshold=None):
+                      arrival_threshold=None, direct=False):
         """Ordena a un robot moverse a una posición específica.
 
         Args:
@@ -525,6 +552,10 @@ class RobotCommandManager:
                 declarar el target alcanzado. Si None, se usa el del PID
                 (ROBOT_POSITION_THRESHOLD). El umbral efectivo se contrae
                 automáticamente si hay otros robots cerca del target.
+            direct (bool, optional): Si True, ignora el planner (RRT*) y va al
+                target con PID directo + steering. Para maniobras de corto alcance
+                ya validadas por el caller (p.ej. el creep de advance_to_contact),
+                donde el planner proyectaría/congelaría el avance. Defaults to False.
 
         Note:
             La acción se ejecuta de forma asíncrona. Use execute_commands()
@@ -539,13 +570,14 @@ class RobotCommandManager:
         # Esto evita que el BT (que tickea cada 100ms) interrumpa al PID
         # antes de que complete una rotación o movimiento.
         existing = self.actions_in_progress.get(player_id)
-        if existing and existing['type'] == 'move':
+        if (existing and existing['type'] == 'move'
+                and existing.get('direct', False) == direct):
             delta = np.linalg.norm(
                 np.array(existing['target_pos'][:2]) - np.array(target_pos[:2])
             )
             if delta < 20:
                 log.debug("[Guard:move] Robot %i: comando ignorado (mismo target, delta=%.1fpx)", player_id, delta)
-                return  # Mismo destino, dejar que el PID continúe
+                return  # Mismo destino y mismo modo, dejar que el PID continúe
         log.debug("[Guard:move] Robot %i: nuevo target aceptado → %s", player_id, target_pos)
 
         # Bug 2a: solo limpiar _last_sent_goal si el nuevo goal difiere significativamente del
@@ -559,14 +591,24 @@ class RobotCommandManager:
             self._waiting_goal_clear.pop(player_id, None)
             self._path_projected.pop(player_id, None)
 
+        if direct:
+            # Modo directo: descartar cualquier path/hold del planner para que el
+            # robot no siga un waypoint obsoleto ni sostenga posición durante el creep.
+            self._current_paths.pop(player_id, None)
+            self._current_wp_idx.pop(player_id, None)
+            self._waiting_goal_clear.pop(player_id, None)
+            self._path_projected.pop(player_id, None)
+
         self.actions_in_progress[player_id] = {
             'type': 'move',
             'target_pos': target_pos,
             'target_angle': target_angle,
             'speed_factor': speed_factor,
             'arrival_threshold': arrival_threshold,
+            'direct': direct,
         }
-        log.info("Robot %i: Ordenado movimiento a %s", player_id, target_pos)
+        log.info("Robot %i: Ordenado movimiento a %s%s", player_id, target_pos,
+                 " (directo)" if direct else "")
 
     def _effective_threshold(self, target_pos, nominal_threshold, obstacles, exclude_id):
         """Contrae el umbral nominal de llegada cuando hay obstáculos cerca del target.
