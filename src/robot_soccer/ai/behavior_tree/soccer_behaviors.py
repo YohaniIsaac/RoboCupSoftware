@@ -63,6 +63,7 @@ from robot_soccer.config import (
     BT_INTERCEPT_K_ANGLE_PX_DEG,
     BT_INTERCEPT_DEPTH_RATIO,
     BT_INTERCEPT_MIN_HOLD_S,
+    BT_INTERCEPT_DEADLOCK_TIMEOUT_S,
 )
 
 from .base import (
@@ -2018,12 +2019,17 @@ def should_yield_to_rival(blackboard) -> bool:
     """Devuelve True cuando un rival tiene ventaja clara para llegar primero a la pelota.
 
     Score por jugador: dist_to_ball + K * |heading_error_deg|. Compara mi score
-    con el menor score de los rivales detectados. Histéresis simétrica vía
-    blackboard._yielding_to_rival evita oscilación.
+    con el menor score de los rivales en rol ATACANTE (los únicos que realmente
+    disputarán la pelota; el defensor rival sostiene su posición). Histéresis
+    simétrica vía blackboard._yielding_to_rival evita oscilación.
 
-    Bypass: si ya estoy a < CAPTURE_ACTIVATE_DISTANCE_PX de la pelota, no ceder.
-    Ya estoy comprometido y advance_contact tiene su propia lógica reactiva de
-    yield a esa distancia.
+    Bypass 1: si ya estoy a < CAPTURE_ACTIVATE_DISTANCE_PX de la pelota, no ceder.
+    Ya estoy comprometido y advance_contact tiene su propia lógica reactiva.
+
+    Bypass 2 (anti-deadlock): si nadie disputa la pelota (ningún jugador a <
+    CAPTURE_ACTIVATE_DISTANCE_PX) durante BT_INTERCEPT_DEADLOCK_TIMEOUT_S, dejar
+    de ceder y atacar. Rompe la cesión mutua donde ambos atacantes se ceden y
+    nadie va por la pelota.
     """
     if not getattr(blackboard, 'opponents', None):
         return False
@@ -2034,13 +2040,36 @@ def should_yield_to_rival(blackboard) -> bool:
         return False
 
     my_dist = float(np.linalg.norm(ball_pos - my_pos))
+    now     = time.time()
 
-    # Bypass: comprometido en contacto → la lógica reactiva de advance_contact decide
+    # Bypass 1: comprometido en contacto → la lógica reactiva de advance_contact decide
     if my_dist < CAPTURE_ACTIVATE_DISTANCE_PX:
         if getattr(blackboard, '_yielding_to_rival', False):
-            blackboard._yielding_last_change_t = time.time()
+            blackboard._yielding_last_change_t = now
         blackboard._yielding_to_rival = False
+        blackboard._uncontested_since = None   # yo estoy disputando la pelota
         return False
+
+    # Disputa: ¿algún jugador (de cualquier equipo) está en contacto con la
+    # pelota? Si nadie lo está durante demasiado tiempo se rompe la cesión mutua.
+    contested = False
+    for other in list(blackboard.team_players) + list(blackboard.opponents):
+        if other.id == blackboard.player.id:
+            continue
+        op = np.array(other.get_position(), dtype=float)
+        if op[0] == 0 and op[1] == 0:
+            continue
+        if float(np.linalg.norm(ball_pos - op)) < CAPTURE_ACTIVATE_DISTANCE_PX:
+            contested = True
+            break
+    if contested:
+        blackboard._uncontested_since = None
+    elif getattr(blackboard, '_uncontested_since', None) is None:
+        blackboard._uncontested_since = now
+    deadlock_break = (
+        getattr(blackboard, '_uncontested_since', None) is not None
+        and (now - blackboard._uncontested_since) >= BT_INTERCEPT_DEADLOCK_TIMEOUT_S
+    )
 
     def _score(pos: np.ndarray, angle_deg: float) -> float:
         d = float(np.linalg.norm(ball_pos - pos))
@@ -2050,10 +2079,23 @@ def should_yield_to_rival(blackboard) -> bool:
         err = abs((ang_to_ball - angle_deg + 180) % 360 - 180)
         return d + BT_INTERCEPT_K_ANGLE_PX_DEG * err
 
+    # Solo ceder ante rivales en rol ATACANTE: el defensor rival no disputa la
+    # pelota, ceder ante él provoca un deadlock (cesión a una amenaza fantasma).
+    rival_attackers = [
+        o for o in blackboard.opponents
+        if getattr(o, 'rol', None) == ROL_ATACANTE
+    ]
+    if not rival_attackers:
+        # Ningún rival va por la pelota → ataco.
+        if getattr(blackboard, '_yielding_to_rival', False):
+            blackboard._yielding_to_rival      = False
+            blackboard._yielding_last_change_t = now
+        return False
+
     my_score = _score(my_pos, float(blackboard.player.angle))
 
     best_opp_score = float('inf')
-    for opp in blackboard.opponents:
+    for opp in rival_attackers:
         opp_pos = np.array(opp.get_position(), dtype=float)
         if opp_pos[0] == 0 and opp_pos[1] == 0:
             continue
@@ -2066,7 +2108,21 @@ def should_yield_to_rival(blackboard) -> bool:
 
     yielding    = getattr(blackboard, '_yielding_to_rival', False)
     last_change = getattr(blackboard, '_yielding_last_change_t', 0.0)
-    held_for    = time.time() - last_change
+    held_for    = now - last_change
+
+    # Anti-deadlock: si la pelota lleva demasiado tiempo sin que nadie la
+    # dispute, dejar de ceder y atacar. Tiene prioridad sobre el cooldown y la
+    # histéresis para garantizar que el deadlock siempre se rompa.
+    if deadlock_break:
+        if yielding:
+            blackboard._yielding_to_rival      = False
+            blackboard._yielding_last_change_t = now
+            robot_status_logger.emit_event(
+                blackboard.player.id,
+                "intercept DESEMPATE: pelota sin disputar "
+                f"{now - blackboard._uncontested_since:.1f}s -> ataco"
+            )
+        return False
 
     # Cooldown: no permitir cambiar de modo antes de BT_INTERCEPT_MIN_HOLD_S.
     # Evita oscilación cuando los scores cruzan la banda muerta entre ratios.
@@ -2076,7 +2132,7 @@ def should_yield_to_rival(blackboard) -> bool:
     if yielding:
         if my_score * BT_INTERCEPT_EXIT_RATIO < best_opp_score:
             blackboard._yielding_to_rival      = False
-            blackboard._yielding_last_change_t = time.time()
+            blackboard._yielding_last_change_t = now
             robot_status_logger.emit_event(
                 blackboard.player.id,
                 f"intercept SALIDA: my={my_score:.0f} opp={best_opp_score:.0f}"
@@ -2086,7 +2142,7 @@ def should_yield_to_rival(blackboard) -> bool:
 
     if best_opp_score * BT_INTERCEPT_ENTER_RATIO < my_score:
         blackboard._yielding_to_rival      = True
-        blackboard._yielding_last_change_t = time.time()
+        blackboard._yielding_last_change_t = now
         robot_status_logger.emit_event(
             blackboard.player.id,
             f"intercept ENTRADA: my={my_score:.0f} opp={best_opp_score:.0f}"

@@ -775,6 +775,16 @@ def decision_process_2v2(
                           and ball_out_active):
                         ball_out_active = False
                         log.info("PELOTA EN JUEGO: reanudando")
+                        # Reset del estado táctico arrastrado durante la pausa:
+                        # un atacante que venía cediendo reanudaría cediendo y
+                        # provocaría el deadlock de cesión mutua. Empezar limpio.
+                        for bm in (bm_red, bm_blue):
+                            for p in bm.team_players:
+                                _bb = bm.blackboards.get(p.id)
+                                if _bb is not None:
+                                    _bb._yielding_to_rival      = False
+                                    _bb._yielding_last_change_t = 0.0
+                                    _bb._uncontested_since      = None
                     elif ball_out_active and not game_running:
                         # Transición a init/reset mientras ball_out estaba activo → limpiar
                         ball_out_active = False

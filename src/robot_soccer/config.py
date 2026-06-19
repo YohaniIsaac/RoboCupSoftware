@@ -285,6 +285,13 @@ INTERCEPT_HOLD_ARRIVAL_PX  = 25  # px — interceptor en línea arco-pelota, tol
 # Equivale al modo "Match Once" de la solución estándar SSL (ZJUNlict).
 BT_INTERCEPT_MIN_HOLD_S = 0.8
 
+# Anti-deadlock de cesión mutua: si la pelota lleva este tiempo sin que ningún
+# jugador (de cualquier equipo) esté a < CAPTURE_ACTIVATE_DISTANCE_PX, el
+# atacante deja de ceder y va por la pelota. Rompe el caso en que ambos
+# atacantes se ceden mutuamente (cada uno cree que el rival llega primero) y
+# nadie disputa la pelota.
+BT_INTERCEPT_DEADLOCK_TIMEOUT_S = 2.0
+
 RESET_MOVE_FACTOR = 0.80         # fracción de pwm_max para movimiento de reset (flooreado en pwm_min)
 RESET_ANGLE       = {'red': 0.0, 'blue': 180.0}  # ángulo canónico de orientación (dirección de ataque)
 
