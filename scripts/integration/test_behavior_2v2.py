@@ -114,6 +114,7 @@ LOG_CHANNELS: dict = {
     'game_state':     True,   # flags partido:         {t, ev:'gs',  s, v}
     'position':       True,   # pos en snap: p=[x,y]
     'angle_in_snap':  True,   # ángulo en snap: a=float
+    'path_change':    True,   # nueva ruta RRT*:     {t, ev:'path', r, team, path, wp}
     'pwm':            False,  # PWM en snap: L=int, R=int  (debug controlador)
     'target_in_snap': False,  # target en snap: tgt=[x,y]
     'path_in_snap':   False,  # waypoints en snap: path=[[x,y],...]
@@ -197,6 +198,7 @@ class _MatchRecorder:
         self._tl_prev_ball_out:   bool = False
         self._tl_prev_goal_reset: bool = False
         self._tl_prev_init_phase: bool = False
+        self._tl_prev_path_sig:   dict = {}  # robot_id → (len, last_wp) para detectar replan
         # Percepción: contadores acumulados que publica el proceso de percepción
         self._perc_first = None        # (timestamp, frame_idx)
         self._perc_last = None
@@ -396,6 +398,14 @@ class _MatchRecorder:
                 if wp_idx is not None and 1 <= wp_idx < len(path):
                     st['tracking_mm'].append(
                         _cross_track_error_mm(pos, path[wp_idx - 1], path[wp_idx]))
+                if LOG_CHANNELS.get('path_change'):
+                    sig = (len(path), path[-1] if path else None)
+                    if sig != self._tl_prev_path_sig.get(rid):
+                        self._tl_prev_path_sig[rid] = sig
+                        self._tl(t_rel, 'path',
+                                 r=rid, team=p.get('team', ''),
+                                 path=[[round(w[0]), round(w[1])] for w in path],
+                                 wp=max(0, wp_idx) if path else 0)
 
     def _on_action_change(self, st, rid, action, t_rel):
         """Embudo de ataque y recuperaciones, contados por transición de acción."""
