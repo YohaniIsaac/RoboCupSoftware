@@ -25,6 +25,11 @@ from robot_soccer.config import (
     CAPTURE_OVERSHOOT_PX,
     CAPTURE_CONFIRM_DISTANCE_PX,
     CAPTURE_CREEP_SPEED_PWM,
+    CREEP_REGULATOR_ENABLED,
+    CREEP_DECEL_START_DIST_PX,
+    CREEP_DECEL_END_DIST_PX,
+    CREEP_PWM_FAR,
+    CREEP_PWM_NEAR,
     KICK_POINT_OFFSET_PX,
     CONTACT_APPROACH_OVERSHOOT_PX,
     KICK_POINT_TOLERANCE_PX,
@@ -1688,6 +1693,26 @@ def create_move_behind_ball_node():
 
 
 
+def _creep_cap_for_distance(dist):
+    """Cap de velocidad del creep según la distancia robot↔pelota (px).
+
+    Desaceleración PREDICTIVA: devuelve CREEP_PWM_FAR cuando el robot está lejos
+    (dist >= CREEP_DECEL_START_DIST_PX) y baja linealmente hasta CREEP_PWM_NEAR al
+    contacto (dist <= CREEP_DECEL_END_DIST_PX), de modo que el robot ya viene lento
+    antes de tocar la pelota y no la empuja. Si el regulador está deshabilitado,
+    devuelve el cap estático CAPTURE_CREEP_SPEED_PWM (comportamiento previo).
+    """
+    if not CREEP_REGULATOR_ENABLED:
+        return CAPTURE_CREEP_SPEED_PWM
+    if dist >= CREEP_DECEL_START_DIST_PX:
+        return CREEP_PWM_FAR
+    if dist <= CREEP_DECEL_END_DIST_PX:
+        return CREEP_PWM_NEAR
+    frac = (dist - CREEP_DECEL_END_DIST_PX) / (
+        CREEP_DECEL_START_DIST_PX - CREEP_DECEL_END_DIST_PX)
+    return int(round(CREEP_PWM_NEAR + (CREEP_PWM_FAR - CREEP_PWM_NEAR) * frac))
+
+
 def _advance_to_contact_start(blackboard):
     """on_start: inicia acercamiento con PID lento hacia la pelota.
 
@@ -1778,17 +1803,20 @@ def _advance_to_contact_start(blackboard):
                 )
                 return NodeStatus.FAILURE
 
-    # Activar PID con velocidad lineal limitada (creep mode con steering)
+    # Activar PID con velocidad lineal limitada (creep mode con steering).
+    # Cap por desaceleración predictiva según la distancia a la pelota.
     controller = blackboard.command_manager.controllers.get(player_id)
+    _cap = _creep_cap_for_distance(dist)
     if controller:
-        controller.max_linear_pwm_override = CAPTURE_CREEP_SPEED_PWM
+        controller.max_linear_pwm_override = _cap
+    robot_status_logger.update(player_id, creep_pwm=_cap)
 
     blackboard.command_manager.move_robot_to(player_id, target, direct=True)
     blackboard.last_action = "advancing_to_contact"
     robot_status_logger.emit_event(
         player_id,
         f"advance_contact CREEP INICIADO: dist={dist:.1f}px "
-        f"overshoot=({target[0]},{target[1]}) pwm={CAPTURE_CREEP_SPEED_PWM}"
+        f"overshoot=({target[0]},{target[1]}) pwm={_cap}"
     )
     return NodeStatus.RUNNING
 
@@ -1819,6 +1847,14 @@ def _advance_to_contact_running(blackboard):
     # FASE 1: Acercamiento (PID con velocidad limitada)
     # ──────────────────────────────
     if not contact_made:
+        # Desaceleración predictiva: actualizar el cap según la distancia a la pelota
+        # cada tick, de modo que el robot frene a medida que se acerca y no la empuje.
+        _cap = _creep_cap_for_distance(dist)
+        _ctrl = blackboard.command_manager.controllers.get(player_id)
+        if _ctrl:
+            _ctrl.max_linear_pwm_override = _cap
+        robot_status_logger.update(player_id, creep_pwm=_cap)
+
         # Rival ya en zona de contacto y más cerca que yo → ceder
         # Tie-break por error angular (mérito): cede el robot peor apuntado, no el de mayor ID.
         my_to_ball_deg = float(np.degrees(np.arctan2(
