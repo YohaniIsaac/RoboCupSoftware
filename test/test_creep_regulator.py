@@ -1,35 +1,54 @@
-"""Tests headless de la desaceleración predictiva del creep de captura.
+"""Tests headless del regulador de velocidad del creep de captura.
 
 Verifica:
-  - `_creep_cap_for_distance` (rampa por distancia robot↔pelota): cap alto lejos,
-    mínimo gentil al contacto, monótona, y fallback al cap estático con el flag off.
-  - El anti-atasco del creep en `move_to_position`: con cap activo y robot quieto,
-    el boost sube hasta CREEP_STALL_BOOST_MAX (no STUCK_BOOST_MAX) — garantiza
-    "lento pero sin parar" sin embestir.
-  - No-regresión: fuera del creep el STUCK sigue subiendo hasta STUCK_BOOST_MAX.
+  - Regulador por cámara (`_regulate_creep_speed`): el PWM base sube cuando el robot se
+    mueve menos del objetivo (no detectable) y baja cuando se mueve de más (empujaría),
+    acotado a [CREEP_BASE_MIN_PWM, ceiling]. Es el lazo cerrado sobre el desplazamiento
+    real inter-frame ("acercarse lo más lento que la cámara aún detecte").
+  - Desaturado inferior (anti-pivote): a velocidad base baja, la corrección ω no deja
+    una rueda bajo el piso de movimiento — ambas giran y el ángulo se corrige (recto,
+    no pivote).
+  - Flag off → cap estático CAPTURE_CREEP_SPEED_PWM (comportamiento previo).
+  - No-regresión: fuera del creep el STUCK normal sigue subiendo hasta STUCK_BOOST_MAX.
 
-Sin hardware (rf_controller=None). Los tests de integración monkeypatchean
-`time.monotonic` (que usa el bloque de detección de atasco).
+Sin hardware (rf_controller=None). Los tests monkeypatchean `time.monotonic` (que usa el
+regulador y el detector de atasco) para avanzar ventanas de forma determinista.
 """
 
+import logging
 import time
 
 import pytest
 
+import robot_soccer.controllers.differential_drive as dd
 from robot_soccer.controllers.differential_drive import DifferentialDriveController
+from robot_soccer.ai.behavior_tree.soccer_behaviors import _creep_ceiling_pwm
 import robot_soccer.ai.behavior_tree.soccer_behaviors as sb
-from robot_soccer.ai.behavior_tree.soccer_behaviors import _creep_cap_for_distance
 from robot_soccer.config import (
     CAPTURE_CREEP_SPEED_PWM,
-    CREEP_DECEL_START_DIST_PX,
-    CREEP_DECEL_END_DIST_PX,
-    CREEP_PWM_FAR,
-    CREEP_PWM_NEAR,
-    CREEP_STALL_WINDOW_S,
-    CREEP_STALL_BOOST_MAX,
+    CREEP_BASE_MIN_PWM,
+    CREEP_BASE_MAX_PWM,
+    CREEP_REG_WINDOW_S,
     STUCK_DETECTION_WINDOW_S,
     STUCK_BOOST_MAX,
 )
+
+
+@pytest.fixture(autouse=True)
+def _quiet_robot_logger():
+    """Silencia el logger de estado durante estos tests.
+
+    Otros tests del suite (test_behavior_commands, test_boardgame) reconfiguran el
+    logging global con `logging.basicConfig` a nivel de módulo; eso hace que los
+    eventos de `robot_status_logger` (emit/emit_event) se rendericen y, por una doble
+    formateo de esos handlers, revienten. Estos tests no asertan sobre logs, así que
+    bajar el nivel del logger los vuelve independientes del orden de ejecución.
+    """
+    lg = logging.getLogger("robot_soccer.utils.robot_logger")
+    prev = lg.level
+    lg.setLevel(logging.WARNING)
+    yield
+    lg.setLevel(prev)
 
 
 class FakeRobot:
@@ -46,57 +65,97 @@ class FakeRobot:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Rampa de desaceleración por distancia (_creep_cap_for_distance)
+# Ceiling del creep (helper del comportamiento)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def test_cap_far_is_fast():
-    assert _creep_cap_for_distance(CREEP_DECEL_START_DIST_PX + 50) == CREEP_PWM_FAR
+def test_ceiling_is_base_max_when_regulator_on():
+    assert _creep_ceiling_pwm() == CREEP_BASE_MAX_PWM
 
 
-def test_cap_at_contact_is_gentle():
-    assert _creep_cap_for_distance(CREEP_DECEL_END_DIST_PX - 5) == CREEP_PWM_NEAR
-
-
-def test_cap_decreases_as_robot_approaches():
-    far = _creep_cap_for_distance(CREEP_DECEL_START_DIST_PX)
-    mid = _creep_cap_for_distance(
-        (CREEP_DECEL_START_DIST_PX + CREEP_DECEL_END_DIST_PX) / 2.0)
-    near = _creep_cap_for_distance(CREEP_DECEL_END_DIST_PX)
-    # Más cerca → más lento (cap menor), y el punto medio queda dentro del rango.
-    assert near <= mid <= far
-    assert near == CREEP_PWM_NEAR and far == CREEP_PWM_FAR
-    assert CREEP_PWM_NEAR < mid < CREEP_PWM_FAR
-
-
-def test_cap_flag_off_uses_static(monkeypatch):
+def test_ceiling_is_static_cap_when_regulator_off(monkeypatch):
     monkeypatch.setattr(sb, 'CREEP_REGULATOR_ENABLED', False)
-    # Con el flag apagado, a cualquier distancia devuelve el cap estático previo.
-    assert _creep_cap_for_distance(CREEP_DECEL_END_DIST_PX) == CAPTURE_CREEP_SPEED_PWM
-    assert _creep_cap_for_distance(CREEP_DECEL_START_DIST_PX + 50) == CAPTURE_CREEP_SPEED_PWM
+    assert _creep_ceiling_pwm() == CAPTURE_CREEP_SPEED_PWM
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Anti-atasco en el creep (vía move_to_position, monkeypatch de time.monotonic)
+# Regulador por cámara (vía move_to_position, monkeypatch de time.monotonic)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def test_creep_antistall_boosts_to_creep_max(monkeypatch):
+def test_regulator_raises_base_when_not_moving(monkeypatch):
     clock = {'t': 0.0}
     monkeypatch.setattr(time, 'monotonic', lambda: clock['t'])
 
     ctrl = DifferentialDriveController(rf_controller=None)
-    ctrl.max_linear_pwm_override = CREEP_PWM_NEAR  # creep mode activo
+    ctrl.max_linear_pwm_override = CREEP_BASE_MAX_PWM  # creep mode (ceiling/gate)
     robot = FakeRobot(robot_id=0, x=100.0, y=100.0, angle=0.0)
-    target = (300, 100)  # recto al frente → modo lineal, no rotación
+    target = (300, 100)  # recto al frente y lejos → modo lineal, no llega
     pid_st = ctrl._get_pid_state(0)
 
-    # Robot atascado a lo largo de varias ventanas de creep → el boost sube,
-    # pero acotado a CREEP_STALL_BOOST_MAX (no embiste).
-    for _ in range(15):
-        ctrl.move_to_position(robot, target)
-        clock['t'] += CREEP_STALL_WINDOW_S + 0.05
+    ctrl.move_to_position(robot, target)  # inicializa: base = mínimo
+    assert pid_st['creep_base_pwm'] == CREEP_BASE_MIN_PWM
 
-    assert pid_st['stuck_boost'] == CREEP_STALL_BOOST_MAX
-    assert CREEP_STALL_BOOST_MAX < STUCK_BOOST_MAX  # acotado por debajo del STUCK normal
+    # Robot quieto a lo largo de varias ventanas → la cámara no detecta movimiento
+    # → el base sube hasta el ceiling.
+    for _ in range(12):
+        clock['t'] += CREEP_REG_WINDOW_S + 0.05
+        ctrl.move_to_position(robot, target)
+
+    assert pid_st['creep_base_pwm'] == CREEP_BASE_MAX_PWM
+
+
+def test_regulator_lowers_base_when_moving_fast(monkeypatch):
+    clock = {'t': 0.0}
+    monkeypatch.setattr(time, 'monotonic', lambda: clock['t'])
+
+    ctrl = DifferentialDriveController(rf_controller=None)
+    ctrl.max_linear_pwm_override = CREEP_BASE_MAX_PWM
+    robot = FakeRobot(robot_id=0, x=100.0, y=100.0, angle=0.0)
+    target = (2000, 100)  # muy lejos → nunca llega mientras avanza
+    pid_st = ctrl._get_pid_state(0)
+
+    ctrl.move_to_position(robot, target)        # activa el creep
+    pid_st['creep_base_pwm'] = CREEP_BASE_MAX_PWM  # partir del techo para verlo bajar
+
+    # Desplazamiento grande por ventana (> objetivo+banda) → el base baja al mínimo.
+    for _ in range(12):
+        clock['t'] += CREEP_REG_WINDOW_S + 0.05
+        robot.x += 20.0
+        ctrl.move_to_position(robot, target)
+
+    assert pid_st['creep_base_pwm'] == CREEP_BASE_MIN_PWM
+
+
+def test_bottom_desaturation_keeps_both_wheels_alive():
+    """Con base baja y error de rumbo, la rueda interior no cae bajo el piso (no pivote)."""
+    ctrl = DifferentialDriveController(rf_controller=None)
+    ctrl.max_linear_pwm_override = CREEP_BASE_MAX_PWM  # creep mode
+    # Pequeño error angular (~8.5°, < umbral de rotación 30°) → modo lineal con ω≠0.
+    robot = FakeRobot(robot_id=0, x=0.0, y=0.0, angle=0.0)
+    target = (200, 30)
+
+    ctrl.move_to_position(robot, target)
+    left, right = ctrl._last_pwm[0]
+
+    # Ambas ruedas por encima del piso de movimiento (ninguna muerta).
+    assert min(left, right) >= CREEP_BASE_MIN_PWM
+    # La corrección angular se conserva (diferencial ≠ 0): corrige sin pivotear.
+    assert left != right
+
+
+def test_flag_off_uses_static_cap(monkeypatch):
+    """Con el regulador apagado, el cap es el estático y no hay desaturado inferior."""
+    monkeypatch.setattr(dd, 'CREEP_REGULATOR_ENABLED', False)
+
+    ctrl = DifferentialDriveController(rf_controller=None)
+    ctrl.max_linear_pwm_override = CAPTURE_CREEP_SPEED_PWM  # cap estático previo
+    robot = FakeRobot(robot_id=0, x=0.0, y=0.0, angle=0.0)
+    target = (200, 0)  # alineado → ω≈0 → ambas ruedas al cap estático
+
+    ctrl.move_to_position(robot, target)
+    left, right = ctrl._last_pwm[0]
+
+    assert left == CAPTURE_CREEP_SPEED_PWM
+    assert right == CAPTURE_CREEP_SPEED_PWM
 
 
 def test_stuck_detection_unchanged_outside_creep(monkeypatch):

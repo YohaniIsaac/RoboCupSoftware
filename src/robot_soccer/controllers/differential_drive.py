@@ -29,10 +29,12 @@ from robot_soccer.config import (
     STUCK_BOOST_DECAY,
     STUCK_AUTO_KICK,
     CREEP_REGULATOR_ENABLED,
-    CREEP_STALL_WINDOW_S,
-    CREEP_STALL_PX,
-    CREEP_STALL_BOOST_INCREMENT,
-    CREEP_STALL_BOOST_MAX,
+    CREEP_BASE_MIN_PWM,
+    CREEP_BASE_MAX_PWM,
+    CREEP_TARGET_DISP_PX,
+    CREEP_DISP_DEADBAND_PX,
+    CREEP_REG_WINDOW_S,
+    CREEP_BASE_STEP_PWM,
 )
 
 log = logging.getLogger(__name__)
@@ -174,11 +176,13 @@ class DifferentialDriveController:
         self.stuck_boost_max             = STUCK_BOOST_MAX
         self.stuck_boost_decay           = STUCK_BOOST_DECAY
 
-        # Parámetros del anti-atasco del creep de captura (ver bloque STUCK)
-        self.creep_stall_window_s        = CREEP_STALL_WINDOW_S
-        self.creep_stall_px              = CREEP_STALL_PX
-        self.creep_stall_boost_increment = CREEP_STALL_BOOST_INCREMENT
-        self.creep_stall_boost_max       = CREEP_STALL_BOOST_MAX
+        # Parámetros del regulador de velocidad del creep por cámara (ver bloque STUCK)
+        self.creep_base_min_pwm    = CREEP_BASE_MIN_PWM
+        self.creep_base_max_pwm    = CREEP_BASE_MAX_PWM
+        self.creep_target_disp_px  = CREEP_TARGET_DISP_PX
+        self.creep_disp_deadband_px = CREEP_DISP_DEADBAND_PX
+        self.creep_reg_window_s    = CREEP_REG_WINDOW_S
+        self.creep_base_step_pwm   = CREEP_BASE_STEP_PWM
 
     def _get_robot_speed_limits(self, robot_id):
         """Obtiene límites de velocidad PWM desde la calibración JSON del robot.
@@ -249,6 +253,12 @@ class DifferentialDriveController:
                 'stuck_ref_y': None,
                 'stuck_window_start': 0.0, # timestamp de inicio de la ventana actual
                 'stuck_auto_kicked': False, # True cuando auto-kick fue disparado en esta ventana
+                # Regulador de velocidad del creep por cámara (modo creep)
+                'creep_base_pwm': CREEP_BASE_MIN_PWM,  # PWM base regulado del creep
+                'creep_ref_x': None,        # posición de referencia de la ventana del regulador
+                'creep_ref_y': None,
+                'creep_window_start': 0.0,  # timestamp de inicio de la ventana del regulador
+                'creep_active': False,      # True mientras el gate de creep está activo
                 # Histéresis de llegada: una vez declarado arrived, no reactivar movimiento
                 # mientras dist < 2× position_threshold. Evita ping-pong por overshoot
                 # inercial cuando la calibración del robot tiene rango PWM estrecho.
@@ -555,11 +565,16 @@ class DifferentialDriveController:
                 v_raw, distance,
                 min_speed=robot_min_speed, max_speed=robot_max_speed)
 
-            # Override de velocidad lineal (creep mode para captura de balón). El cap
-            # lo fija el comportamiento (advance_to_contact) según la distancia a la
-            # pelota: rápido lejos, gentil al contacto (desaceleración predictiva).
+            # Override de velocidad lineal (creep mode para captura de balón).
+            # max_linear_pwm_override es el ceiling/gate del creep (lo fija
+            # advance_to_contact). Con el regulador activo, el cap efectivo es el base
+            # regulado por cámara (creep_base_pwm, ver bloque STUCK); con flag off se
+            # usa el ceiling estático (comportamiento previo).
             if self.max_linear_pwm_override is not None:
-                v = min(v, self.max_linear_pwm_override)
+                if CREEP_REGULATOR_ENABLED:
+                    v = min(v, state['creep_base_pwm'])
+                else:
+                    v = min(v, self.max_linear_pwm_override)
             if self.detection_pwm_cap is not None:
                 v = min(v, self.detection_pwm_cap)
 
@@ -580,8 +595,18 @@ class DifferentialDriveController:
 
             # Clipear al rango calibrado del robot
             if self.max_linear_pwm_override is not None:
-                # Creep mode: piso en 0 (no en robot_min_speed) para que
-                # la corrección angular funcione a velocidades bajas
+                # Creep mode: desaturado INFERIOR — si la corrección ω hundiría la
+                # rueda interior bajo el piso de movimiento (CREEP_BASE_MIN_PWM), subir
+                # AMBAS ruedas lo justo para que la interior quede en el piso,
+                # conservando la diferencia ω. Así las dos giran y el ángulo se corrige
+                # sobre la marcha sin pivotear (espejo del desaturado superior de abajo).
+                if CREEP_REGULATOR_ENABLED and v > 0:
+                    _floor = self.creep_base_min_pwm
+                    _lo = min(left_speed, right_speed)
+                    if _lo < _floor:
+                        _bump = _floor - _lo
+                        left_speed += _bump
+                        right_speed += _bump
                 left_speed = max(0, min(robot_max_speed, left_speed))
                 right_speed = max(0, min(robot_max_speed, right_speed))
             else:
@@ -624,82 +649,140 @@ class DifferentialDriveController:
                 min_spd=robot_min_speed, max_spd=robot_max_speed,
                 left=left_speed, right=right_speed)
 
-        # === STUCK DETECTION (anti-atasco) ===
-        # Congelada en rotación pura: al girar en el sitio la posición no cambia,
-        # lo que se interpretaba como atasco y disparaba un boost de PWM espurio.
-        # En el creep de captura (max_linear_pwm_override activo) se usan parámetros
-        # más sensibles a atasco REAL (ventana larga, umbral bajo) y un boost acotado,
-        # para no embestir la pelota; el auto-kick queda inhibido porque
-        # auto_kick_enabled es False durante el creep.
+        # === ANTI-ATASCO / REGULADOR DE VELOCIDAD ===
+        # Fuera del creep: STUCK normal (boost aditivo + auto-kick), congelado en
+        # rotación pura (al girar en el sitio la posición no cambia → boost espurio).
+        # En el creep de captura (max_linear_pwm_override activo): regulador de velocidad
+        # por cámara (lazo cerrado sobre el desplazamiento real) que fija creep_base_pwm
+        # — sin boost aditivo; el auto-kick no aplica (auto_kick_enabled False en creep).
         _pid_st = self._get_pid_state(robot.id)
         _now = time.monotonic()
         _creep_mode = CREEP_REGULATOR_ENABLED and self.max_linear_pwm_override is not None
+
         if _creep_mode:
-            _stall_window = self.creep_stall_window_s
-            _stall_thr    = self.creep_stall_px
-            _stall_incr   = self.creep_stall_boost_increment
-            _stall_max    = self.creep_stall_boost_max
+            self._regulate_creep_speed(robot, _pid_st, _now)
         else:
-            _stall_window = self.stuck_detection_window_s
-            _stall_thr    = self.stuck_movement_threshold_px
-            _stall_incr   = self.stuck_boost_increment
-            _stall_max    = self.stuck_boost_max
-        if distance > self.position_threshold and not _pid_st['in_rotation_mode']:
-            if _pid_st['stuck_ref_x'] is None:
-                _pid_st['stuck_ref_x'] = robot.x
-                _pid_st['stuck_ref_y'] = robot.y
-                _pid_st['stuck_window_start'] = _now
-            elif _now - _pid_st['stuck_window_start'] >= _stall_window:
-                _moved = math.sqrt(
-                    (robot.x - _pid_st['stuck_ref_x'])**2 +
-                    (robot.y - _pid_st['stuck_ref_y'])**2
-                )
-                if _moved < _stall_thr:
-                    _pid_st['stuck_boost'] = min(
-                        _pid_st['stuck_boost'] + _stall_incr,
-                        _stall_max
+            # Dejar el base regulado listo para el próximo creep.
+            _pid_st['creep_active'] = False
+            _pid_st['creep_base_pwm'] = self.creep_base_min_pwm
+            # --- STUCK normal ---
+            if distance > self.position_threshold and not _pid_st['in_rotation_mode']:
+                if _pid_st['stuck_ref_x'] is None:
+                    _pid_st['stuck_ref_x'] = robot.x
+                    _pid_st['stuck_ref_y'] = robot.y
+                    _pid_st['stuck_window_start'] = _now
+                elif _now - _pid_st['stuck_window_start'] >= self.stuck_detection_window_s:
+                    _moved = math.sqrt(
+                        (robot.x - _pid_st['stuck_ref_x'])**2 +
+                        (robot.y - _pid_st['stuck_ref_y'])**2
                     )
-                    robot_status_logger.update(robot.id, stuck_boost=_pid_st['stuck_boost'])
-                    robot_status_logger.emit_event(
-                        robot.id,
-                        "STUCK: boost=%d/%d PWM (moved=%.1fpx)" % (
-                            _pid_st['stuck_boost'], _stall_max, _moved
+                    if _moved < self.stuck_movement_threshold_px:
+                        _pid_st['stuck_boost'] = min(
+                            _pid_st['stuck_boost'] + self.stuck_boost_increment,
+                            self.stuck_boost_max
                         )
-                    )
-                    # Auto-kick al alcanzar el boost máximo (solo durante move_with_ball;
-                    # en el creep auto_kick_enabled es False, así que nunca dispara).
-                    if (STUCK_AUTO_KICK and self.auto_kick_enabled
-                            and _pid_st['stuck_boost'] >= _stall_max):
+                        robot_status_logger.update(robot.id, stuck_boost=_pid_st['stuck_boost'])
                         robot_status_logger.emit_event(
                             robot.id,
-                            "AUTO-KICK: stuck_boost max=%d PWM — disparando" % _stall_max
+                            "STUCK: boost=%d/%d PWM (moved=%.1fpx)" % (
+                                _pid_st['stuck_boost'], self.stuck_boost_max, _moved
+                            )
                         )
-                        if self.rf_controller:
-                            self.rf_controller.kick(robot.id + 1, 1.0)
-                        _pid_st['stuck_auto_kicked'] = True
-                        _pid_st['stuck_boost'] = 0
-                        _pid_st['stuck_ref_x'] = robot.x
-                        _pid_st['stuck_ref_y'] = robot.y
-                        _pid_st['stuck_window_start'] = _now
-                        robot_status_logger.update(robot.id, stuck_boost=0)
-                        self._send_motor_commands(robot, left_speed, right_speed)
-                        return False
-                else:
-                    _pid_st['stuck_boost'] = max(
-                        0, _pid_st['stuck_boost'] - self.stuck_boost_decay
-                    )
-                    robot_status_logger.update(robot.id, stuck_boost=_pid_st['stuck_boost'])
-                _pid_st['stuck_ref_x'] = robot.x
-                _pid_st['stuck_ref_y'] = robot.y
-                _pid_st['stuck_window_start'] = _now
-        else:
-            _pid_st['stuck_ref_x'] = None
-            _pid_st['stuck_window_start'] = 0.0
-            _pid_st['stuck_boost'] = max(0, _pid_st['stuck_boost'] - self.stuck_boost_decay)
-            robot_status_logger.update(robot.id, stuck_boost=_pid_st['stuck_boost'])
+                        # Auto-kick al alcanzar el boost máximo (solo durante move_with_ball).
+                        if (STUCK_AUTO_KICK and self.auto_kick_enabled
+                                and _pid_st['stuck_boost'] >= self.stuck_boost_max):
+                            robot_status_logger.emit_event(
+                                robot.id,
+                                "AUTO-KICK: stuck_boost max=%d PWM — disparando" % self.stuck_boost_max
+                            )
+                            if self.rf_controller:
+                                self.rf_controller.kick(robot.id + 1, 1.0)
+                            _pid_st['stuck_auto_kicked'] = True
+                            _pid_st['stuck_boost'] = 0
+                            _pid_st['stuck_ref_x'] = robot.x
+                            _pid_st['stuck_ref_y'] = robot.y
+                            _pid_st['stuck_window_start'] = _now
+                            robot_status_logger.update(robot.id, stuck_boost=0)
+                            self._send_motor_commands(robot, left_speed, right_speed)
+                            return False
+                    else:
+                        _pid_st['stuck_boost'] = max(
+                            0, _pid_st['stuck_boost'] - self.stuck_boost_decay
+                        )
+                        robot_status_logger.update(robot.id, stuck_boost=_pid_st['stuck_boost'])
+                    _pid_st['stuck_ref_x'] = robot.x
+                    _pid_st['stuck_ref_y'] = robot.y
+                    _pid_st['stuck_window_start'] = _now
+            else:
+                _pid_st['stuck_ref_x'] = None
+                _pid_st['stuck_window_start'] = 0.0
+                _pid_st['stuck_boost'] = max(0, _pid_st['stuck_boost'] - self.stuck_boost_decay)
+                robot_status_logger.update(robot.id, stuck_boost=_pid_st['stuck_boost'])
 
         self._send_motor_commands(robot, left_speed, right_speed)
         return False
+
+    def _regulate_creep_speed(self, robot, _pid_st, _now):
+        """Regula la velocidad base del creep con lazo cerrado sobre la cámara.
+
+        Mide el desplazamiento real (px) del robot en una ventana y ajusta
+        creep_base_pwm hacia un desplazamiento objetivo: si se movió MENOS del objetivo
+        (no avanza / no es detectable) sube el base; si se movió MÁS (rápido, empujaría
+        la pelota) lo baja; dentro de la banda muerta lo mantiene. Acotado a
+        [CREEP_BASE_MIN_PWM, ceiling]. Encuentra solo el mínimo detectable por
+        robot/batería/piso. No aplica boost aditivo (stuck_boost=0): el regulador
+        gobierna toda la velocidad del creep. Congela la medición en rotación pura
+        (al girar la posición casi no cambia).
+        """
+        # Al entrar al creep: arrancar gentil (base = mínimo) e iniciar la ventana.
+        if not _pid_st['creep_active']:
+            _pid_st['creep_active'] = True
+            _pid_st['creep_base_pwm'] = self.creep_base_min_pwm
+            _pid_st['creep_ref_x'] = robot.x
+            _pid_st['creep_ref_y'] = robot.y
+            _pid_st['creep_window_start'] = _now
+
+        _pid_st['stuck_boost'] = 0  # el regulador gobierna la velocidad; sin boost aditivo
+
+        # Congelar la medición mientras rota en el sitio (la posición no representa avance).
+        if _pid_st['in_rotation_mode']:
+            _pid_st['creep_ref_x'] = robot.x
+            _pid_st['creep_ref_y'] = robot.y
+            _pid_st['creep_window_start'] = _now
+            robot_status_logger.update(robot.id, creep_pwm=_pid_st['creep_base_pwm'])
+            return
+
+        if _pid_st['creep_ref_x'] is None:
+            _pid_st['creep_ref_x'] = robot.x
+            _pid_st['creep_ref_y'] = robot.y
+            _pid_st['creep_window_start'] = _now
+        elif _now - _pid_st['creep_window_start'] >= self.creep_reg_window_s:
+            _moved = math.sqrt(
+                (robot.x - _pid_st['creep_ref_x'])**2 +
+                (robot.y - _pid_st['creep_ref_y'])**2
+            )
+            _target  = self.creep_target_disp_px
+            _band    = self.creep_disp_deadband_px
+            _ceiling = min(int(self.max_linear_pwm_override), self.creep_base_max_pwm)
+            if _moved < _target - _band:
+                _pid_st['creep_base_pwm'] = min(
+                    _pid_st['creep_base_pwm'] + self.creep_base_step_pwm, _ceiling)
+            elif _moved > _target + _band:
+                _pid_st['creep_base_pwm'] = max(
+                    _pid_st['creep_base_pwm'] - self.creep_base_step_pwm,
+                    self.creep_base_min_pwm)
+            # dentro de banda: mantener
+            robot_status_logger.emit_event(
+                robot.id,
+                "CREEP REG: base=%d PWM (moved=%.1fpx, obj=%d)" % (
+                    _pid_st['creep_base_pwm'], _moved, _target
+                )
+            )
+            _pid_st['creep_ref_x'] = robot.x
+            _pid_st['creep_ref_y'] = robot.y
+            _pid_st['creep_window_start'] = _now
+
+        robot_status_logger.update(robot.id, creep_pwm=_pid_st['creep_base_pwm'])
 
     def _log_periodic(self, robot, now, mode, **kwargs):
         """Actualiza el status logger con datos del controlador (rotacion o movimiento)."""

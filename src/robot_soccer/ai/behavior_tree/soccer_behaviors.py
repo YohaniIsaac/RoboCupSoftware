@@ -26,10 +26,7 @@ from robot_soccer.config import (
     CAPTURE_CONFIRM_DISTANCE_PX,
     CAPTURE_CREEP_SPEED_PWM,
     CREEP_REGULATOR_ENABLED,
-    CREEP_DECEL_START_DIST_PX,
-    CREEP_DECEL_END_DIST_PX,
-    CREEP_PWM_FAR,
-    CREEP_PWM_NEAR,
+    CREEP_BASE_MAX_PWM,
     KICK_POINT_OFFSET_PX,
     CONTACT_APPROACH_OVERSHOOT_PX,
     KICK_POINT_TOLERANCE_PX,
@@ -1693,24 +1690,14 @@ def create_move_behind_ball_node():
 
 
 
-def _creep_cap_for_distance(dist):
-    """Cap de velocidad del creep según la distancia robot↔pelota (px).
+def _creep_ceiling_pwm():
+    """Ceiling (gate) de velocidad lineal a fijar como max_linear_pwm_override en el creep.
 
-    Desaceleración PREDICTIVA: devuelve CREEP_PWM_FAR cuando el robot está lejos
-    (dist >= CREEP_DECEL_START_DIST_PX) y baja linealmente hasta CREEP_PWM_NEAR al
-    contacto (dist <= CREEP_DECEL_END_DIST_PX), de modo que el robot ya viene lento
-    antes de tocar la pelota y no la empuja. Si el regulador está deshabilitado,
-    devuelve el cap estático CAPTURE_CREEP_SPEED_PWM (comportamiento previo).
+    Con el regulador activo, el controlador regula la base por debajo de este techo a
+    partir del desplazamiento que ve la cámara (ver _regulate_creep_speed). Con el flag
+    apagado, el techo ES el cap estático (comportamiento previo, sin regulación).
     """
-    if not CREEP_REGULATOR_ENABLED:
-        return CAPTURE_CREEP_SPEED_PWM
-    if dist >= CREEP_DECEL_START_DIST_PX:
-        return CREEP_PWM_FAR
-    if dist <= CREEP_DECEL_END_DIST_PX:
-        return CREEP_PWM_NEAR
-    frac = (dist - CREEP_DECEL_END_DIST_PX) / (
-        CREEP_DECEL_START_DIST_PX - CREEP_DECEL_END_DIST_PX)
-    return int(round(CREEP_PWM_NEAR + (CREEP_PWM_FAR - CREEP_PWM_NEAR) * frac))
+    return CREEP_BASE_MAX_PWM if CREEP_REGULATOR_ENABLED else CAPTURE_CREEP_SPEED_PWM
 
 
 def _advance_to_contact_start(blackboard):
@@ -1803,20 +1790,21 @@ def _advance_to_contact_start(blackboard):
                 )
                 return NodeStatus.FAILURE
 
-    # Activar PID con velocidad lineal limitada (creep mode con steering).
-    # Cap por desaceleración predictiva según la distancia a la pelota.
+    # Activar PID en modo creep: max_linear_pwm_override = ceiling (gate del creep).
+    # El controlador regula la velocidad base por debajo de este techo con un lazo
+    # cerrado sobre el desplazamiento que ve la cámara (ver _regulate_creep_speed),
+    # manteniendo la corrección angular activa. El base regulado se observa en `cv=`.
     controller = blackboard.command_manager.controllers.get(player_id)
-    _cap = _creep_cap_for_distance(dist)
+    _ceiling = _creep_ceiling_pwm()
     if controller:
-        controller.max_linear_pwm_override = _cap
-    robot_status_logger.update(player_id, creep_pwm=_cap)
+        controller.max_linear_pwm_override = _ceiling
 
     blackboard.command_manager.move_robot_to(player_id, target, direct=True)
     blackboard.last_action = "advancing_to_contact"
     robot_status_logger.emit_event(
         player_id,
         f"advance_contact CREEP INICIADO: dist={dist:.1f}px "
-        f"overshoot=({target[0]},{target[1]}) pwm={_cap}"
+        f"overshoot=({target[0]},{target[1]}) ceiling={_ceiling}"
     )
     return NodeStatus.RUNNING
 
@@ -1847,13 +1835,12 @@ def _advance_to_contact_running(blackboard):
     # FASE 1: Acercamiento (PID con velocidad limitada)
     # ──────────────────────────────
     if not contact_made:
-        # Desaceleración predictiva: actualizar el cap según la distancia a la pelota
-        # cada tick, de modo que el robot frene a medida que se acerca y no la empuje.
-        _cap = _creep_cap_for_distance(dist)
+        # Modo creep: re-asegurar el ceiling/gate cada tick (el controlador regula la
+        # velocidad base por debajo de él con lazo cerrado sobre la cámara; `cv=` lo
+        # emite el controlador en _regulate_creep_speed).
         _ctrl = blackboard.command_manager.controllers.get(player_id)
         if _ctrl:
-            _ctrl.max_linear_pwm_override = _cap
-        robot_status_logger.update(player_id, creep_pwm=_cap)
+            _ctrl.max_linear_pwm_override = _creep_ceiling_pwm()
 
         # Rival ya en zona de contacto y más cerca que yo → ceder
         # Tie-break por error angular (mérito): cede el robot peor apuntado, no el de mayor ID.

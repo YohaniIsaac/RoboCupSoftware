@@ -541,7 +541,7 @@ KICK_POINT_ANGLE_OFFSET_DEG = 0.0  # ° — offset angular entre el eje del mark
 # que kick_err detecta el contacto. Análogo a CAPTURE_OVERSHOOT_PX del dribbler.
 # Debe superar ROBOT_POSITION_THRESHOLD; no tan grande que empuje la pelota antes
 # de detectar contacto (el creep es lento, pwm=CAPTURE_CREEP_SPEED_PWM).
-CONTACT_APPROACH_OVERSHOOT_PX = 15  # px — overshoot del target del creep pasado el kick_point
+CONTACT_APPROACH_OVERSHOOT_PX = 10  # px — overshoot del target del creep pasado el kick_point
 
 # --- Corrección de paralaje por altura del marker ---
 # El marker ArUco está elevado sobre el campo. Una cámara perspectiva desplaza
@@ -717,28 +717,22 @@ STUCK_BOOST_MAX = 12  # PWM — boost máximo acumulado (hard cap)
 STUCK_BOOST_DECAY = 5             # PWM — reducción por ventana con movimiento
 STUCK_AUTO_KICK = True  # Si True, dispara kick al llegar a STUCK_BOOST_MAX
 
-# --- Desaceleración predictiva del creep de captura (advance_to_contact) ---
-# El cap de velocidad fijo (CAPTURE_CREEP_SPEED_PWM) hacía que el robot llegara a
-# la pelota a velocidad de crucero y la empujara. Ahora el cap se reduce según la
-# distancia REAL robot↔pelota: rápido lejos, mínimo gentil al contacto. Es
-# PREDICTIVO (no reactivo): el robot ya viene lento antes de tocar, así no empuja.
-# Lo calcula el comportamiento (_advance_to_contact_*), que conoce la pelota.
-# Calibrar CREEP_PWM_FAR/NEAR en hardware observando el campo `cv=` del [STATUS].
+# --- Regulador de velocidad del creep de captura por cámara (advance_to_contact) ---
+# El cap fijo/por-distancia hacía que el robot llegara a la pelota demasiado rápido y
+# la empujara. Ahora la velocidad base del creep se regula con un LAZO CERRADO sobre el
+# desplazamiento REAL medido por la cámara (px por ventana): si se mueve menos del
+# objetivo (no avanza / no es detectable) sube el base; si se mueve más (rápido,
+# empujaría) lo baja; dentro de banda muerta lo mantiene. Así encuentra solo el mínimo
+# detectable por robot/batería/piso — lo más lento que la cámara aún ve como movimiento.
+# Lo aplica el controlador (DifferentialDriveController) en modo creep; el base regulado
+# se observa en el campo `cv=` del [STATUS]. Calibrar en hardware.
 CREEP_REGULATOR_ENABLED = True  # False → cap estático CAPTURE_CREEP_SPEED_PWM (comportamiento previo)
-CREEP_DECEL_START_DIST_PX = 60  # px — dist robot↔pelota donde arranca el creep (=BEHIND_BALL_APPROACH_PX): cap=FAR
-CREEP_DECEL_END_DIST_PX   = 33  # px — dist de contacto (≈KICK_POINT_OFFSET_PX): cap=NEAR (gentil)
-CREEP_PWM_FAR  = 20  # PWM — cap lejos de la pelota (aproximación moderada)
-CREEP_PWM_NEAR = 12  # PWM — cap al contacto (gentil; el anti-atasco lo nudges si se traba)
-
-# --- Anti-atasco del creep (cierre de lazo sobre desplazamiento real inter-frame) ---
-# Complementa la desaceleración: si el robot se queda REALMENTE quieto (≈0 px en una
-# ventana larga, distinguible del ruido ArUco) le da un empujoncito aditivo acotado,
-# garantizando "lento pero sin parar". Reutiliza el mecanismo de STUCK (gateado por
-# rotación); el auto-kick queda inhibido en el creep (auto_kick_enabled=False).
-CREEP_STALL_WINDOW_S        = 0.5  # s  — ventana de detección de atasco en creep (> ruido)
-CREEP_STALL_PX              = 4     # px — desplazamiento bajo el cual se considera atasco real
-CREEP_STALL_BOOST_INCREMENT = 2     # PWM — empujoncito aditivo por ventana atascada
-CREEP_STALL_BOOST_MAX       = 10    # PWM — boost máximo en creep (acotado, no embestir)
+CREEP_BASE_MIN_PWM   = 16   # PWM — base más lenta y piso de rueda para el desaturado inferior
+CREEP_BASE_MAX_PWM   = 30   # PWM — ceiling del base (techo del regulador y gate del creep)
+CREEP_TARGET_DISP_PX = 5    # px — desplazamiento objetivo por ventana (> piso de ruido ArUco ~3-5)
+CREEP_DISP_DEADBAND_PX = 2  # px — banda muerta alrededor del objetivo para no oscilar
+CREEP_REG_WINDOW_S   = 0.4  # s  — ventana de medición de desplazamiento (~8 frames @ 20 FPS)
+CREEP_BASE_STEP_PWM  = 2    # PWM — ajuste del base por ventana
 
 # =============================================================================
 # Parámetros de Control PID
