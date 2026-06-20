@@ -717,6 +717,24 @@ STUCK_BOOST_MAX = 12  # PWM — boost máximo acumulado (hard cap)
 STUCK_BOOST_DECAY = 5             # PWM — reducción por ventana con movimiento
 STUCK_AUTO_KICK = True  # Si True, dispara kick al llegar a STUCK_BOOST_MAX
 
+# --- Regulador dinámico de velocidad del creep de captura (advance_to_contact) ---
+# Durante el creep de aproximación a la pelota, el cap de velocidad fijo
+# (CAPTURE_CREEP_SPEED_PWM) es open-loop sobre PWM: la velocidad real varía con
+# batería, fricción y asimetría L/R, y cuando el robot supera la stiction empuja
+# la pelota. Este regulador cierra el lazo sobre el desplazamiento REAL medido por
+# cámara (px por ventana): mantiene una banda objetivo bajando el cap si el robot
+# se mueve demasiado (empujaría la pelota) y subiéndolo si está lento/atascado.
+# Solo actúa cuando max_linear_pwm_override está activo (advance_to_contact); no
+# toca el STUCK/auto-kick ni las rutas de dribbler. Calibrar la banda y el máximo
+# en hardware observando el campo `cv=` del [STATUS] durante la captura.
+CREEP_REGULATOR_ENABLED = True  # False → cap estático CAPTURE_CREEP_SPEED_PWM (comportamiento previo)
+CREEP_REGULATOR_WINDOW_S = 0.3  # s  — ventana de medición (~7-8 frames @ 25 FPS)
+CREEP_TARGET_DISPLACEMENT_MIN_PX = 6   # px — bajo esto (lento/atascado) → sube cap. Debe superar el ruido ArUco/HSV (~3-5 px)
+CREEP_TARGET_DISPLACEMENT_MAX_PX = 14  # px — sobre esto (rápido, empuja) → baja cap
+CREEP_PWM_STEP = 2   # PWM — ajuste del cap por ventana (rate-limited)
+CREEP_PWM_MIN = 0    # PWM — piso del cap (0 = coasting permitido)
+CREEP_PWM_MAX = 45   # PWM — techo del cap (sobre dead zone 30, bajo min movement 50)
+
 # =============================================================================
 # Parámetros de Control PID
 # =============================================================================

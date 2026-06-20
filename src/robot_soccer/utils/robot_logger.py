@@ -95,6 +95,7 @@ FIELD_DEFS: list[FieldDef] = [
     FieldDef("ball_err",  "Dball=",  _fmt_angle, enabled=True),
     FieldDef("goal_err",  "Dgoal=",  _fmt_angle, enabled=True),
     FieldDef("stuck_boost", "sb=",  _fmt_stuck, enabled=True),
+    FieldDef("creep_pwm",   "cv=",  _fmt_count, enabled=True),
     FieldDef("left_pwm",  "L=",      _fmt_pwm,   enabled=True),
     FieldDef("right_pwm", "R=",      _fmt_pwm,   enabled=True),
     FieldDef("rrt_len",   "rrt=",    _fmt_count, enabled=True),
@@ -117,6 +118,7 @@ class RobotStatus:
     ball_err:  Optional[float] = None  # error angular hacia la pelota (grados)
     goal_err:  Optional[float] = None  # error angular hacia el arco (grados)
     stuck_boost: Optional[int]  = None  # boost anti-atasco activo (0=libre, max=kick)
+    creep_pwm:  Optional[int]   = None  # cap de velocidad regulado del creep de captura (PWM)
     left_pwm:  Optional[int]   = None  # PWM motor izquierdo (-255..255)
     right_pwm: Optional[int]   = None  # PWM motor derecho (-255..255)
     rrt_len:   Optional[int]   = None  # waypoints restantes en path actual (0=PID directo)

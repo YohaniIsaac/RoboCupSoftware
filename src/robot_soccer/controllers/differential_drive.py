@@ -28,6 +28,13 @@ from robot_soccer.config import (
     STUCK_BOOST_MAX,
     STUCK_BOOST_DECAY,
     STUCK_AUTO_KICK,
+    CREEP_REGULATOR_ENABLED,
+    CREEP_REGULATOR_WINDOW_S,
+    CREEP_TARGET_DISPLACEMENT_MIN_PX,
+    CREEP_TARGET_DISPLACEMENT_MAX_PX,
+    CREEP_PWM_STEP,
+    CREEP_PWM_MIN,
+    CREEP_PWM_MAX,
 )
 
 log = logging.getLogger(__name__)
@@ -168,6 +175,14 @@ class DifferentialDriveController:
         self.stuck_boost_max             = STUCK_BOOST_MAX
         self.stuck_boost_decay           = STUCK_BOOST_DECAY
 
+        # Parámetros del regulador dinámico de velocidad del creep de captura
+        self.creep_regulator_window_s          = CREEP_REGULATOR_WINDOW_S
+        self.creep_target_displacement_min_px  = CREEP_TARGET_DISPLACEMENT_MIN_PX
+        self.creep_target_displacement_max_px  = CREEP_TARGET_DISPLACEMENT_MAX_PX
+        self.creep_pwm_step                    = CREEP_PWM_STEP
+        self.creep_pwm_min                     = CREEP_PWM_MIN
+        self.creep_pwm_max                     = CREEP_PWM_MAX
+
     def _get_robot_speed_limits(self, robot_id):
         """Obtiene límites de velocidad PWM desde la calibración JSON del robot.
 
@@ -237,6 +252,11 @@ class DifferentialDriveController:
                 'stuck_ref_y': None,
                 'stuck_window_start': 0.0, # timestamp de inicio de la ventana actual
                 'stuck_auto_kicked': False, # True cuando auto-kick fue disparado en esta ventana
+                # Regulador dinámico de velocidad del creep de captura
+                'creep_pwm': None,         # cap de velocidad regulado (None = usar override estático)
+                'creep_ref_x': None,       # posición de referencia al inicio de la ventana
+                'creep_ref_y': None,
+                'creep_window_start': 0.0, # timestamp de inicio de la ventana del regulador
                 # Histéresis de llegada: una vez declarado arrived, no reactivar movimiento
                 # mientras dist < 2× position_threshold. Evita ping-pong por overshoot
                 # inercial cuando la calibración del robot tiene rango PWM estrecho.
@@ -244,6 +264,62 @@ class DifferentialDriveController:
                 'last_target_pos': None,
             }
         return self._pid_state[robot_id]
+
+    def _regulate_creep_speed(self, robot, _pid_st, _now):
+        """Regulador bidireccional de velocidad para el creep de captura.
+
+        Cierra el lazo sobre el desplazamiento REAL del robot (px medidos por cámara)
+        en lugar de confiar en el PWM open-loop. Mide el desplazamiento por ventana
+        temporal y ajusta el cap de velocidad lineal (``_pid_st['creep_pwm']``) para
+        mantener una banda objetivo:
+
+          - desplazamiento > MAX (rápido → empujaría la pelota): baja el cap (hasta 0,
+            coasting permitido).
+          - desplazamiento < MIN (lento o atascado): sube el cap para vencer la stiction.
+          - dentro de banda: mantiene.
+
+        Solo se invoca durante el creep (``max_linear_pwm_override`` activo, i.e.
+        advance_to_contact). Reemplaza al STUCK durante esa fase, por lo que mantiene
+        ``stuck_boost`` en 0 (sin boost aditivo). El cap se consume en move_to_position
+        con fallback a ``max_linear_pwm_override`` (CAPTURE_CREEP_SPEED_PWM) en el
+        primer tick.
+        """
+        # El regulador gobierna la velocidad durante el creep: sin boost aditivo STUCK.
+        if _pid_st['stuck_boost'] != 0:
+            _pid_st['stuck_boost'] = 0
+            robot_status_logger.update(robot.id, stuck_boost=0)
+
+        # Entrada al creep: baseline = override estático + ventana fresca.
+        if _pid_st['creep_ref_x'] is None:
+            _pid_st['creep_pwm'] = self.max_linear_pwm_override
+            _pid_st['creep_ref_x'] = robot.x
+            _pid_st['creep_ref_y'] = robot.y
+            _pid_st['creep_window_start'] = _now
+            robot_status_logger.update(robot.id, creep_pwm=_pid_st['creep_pwm'])
+            return
+
+        # Aún no se cierra la ventana de medición: mantener el cap actual.
+        if _now - _pid_st['creep_window_start'] < self.creep_regulator_window_s:
+            return
+
+        _moved = math.sqrt(
+            (robot.x - _pid_st['creep_ref_x'])**2 +
+            (robot.y - _pid_st['creep_ref_y'])**2
+        )
+        if _moved > self.creep_target_displacement_max_px:
+            _pid_st['creep_pwm'] = max(
+                self.creep_pwm_min, _pid_st['creep_pwm'] - self.creep_pwm_step
+            )
+        elif _moved < self.creep_target_displacement_min_px:
+            _pid_st['creep_pwm'] = min(
+                self.creep_pwm_max, _pid_st['creep_pwm'] + self.creep_pwm_step
+            )
+        # else: dentro de banda → mantener.
+
+        _pid_st['creep_ref_x'] = robot.x
+        _pid_st['creep_ref_y'] = robot.y
+        _pid_st['creep_window_start'] = _now
+        robot_status_logger.update(robot.id, creep_pwm=_pid_st['creep_pwm'])
 
     def _calculate_rotation_compensation(self, robot_id):
         """Calcula factores de compensación para asimetría en rotación.
@@ -543,9 +619,14 @@ class DifferentialDriveController:
                 v_raw, distance,
                 min_speed=robot_min_speed, max_speed=robot_max_speed)
 
-            # Override de velocidad lineal (creep mode para captura de balón)
+            # Override de velocidad lineal (creep mode para captura de balón).
+            # Si el regulador dinámico ya ajustó un cap (creep_pwm), se usa ese; si
+            # no (1er tick o regulador deshabilitado), cae al override estático.
             if self.max_linear_pwm_override is not None:
-                v = min(v, self.max_linear_pwm_override)
+                _creep_cap = state.get('creep_pwm')
+                if _creep_cap is None:
+                    _creep_cap = self.max_linear_pwm_override
+                v = min(v, _creep_cap)
             if self.detection_pwm_cap is not None:
                 v = min(v, self.detection_pwm_cap)
 
@@ -610,12 +691,21 @@ class DifferentialDriveController:
                 min_spd=robot_min_speed, max_spd=robot_max_speed,
                 left=left_speed, right=right_speed)
 
-        # === STUCK DETECTION ===
+        # === REGULACIÓN DEL CREEP / STUCK DETECTION ===
         # Congelada en rotación pura: al girar en el sitio la posición no cambia,
         # lo que se interpretaba como atasco y disparaba un boost de PWM espurio.
         _pid_st = self._get_pid_state(robot.id)
         _now = time.monotonic()
-        if distance > self.position_threshold and not _pid_st['in_rotation_mode']:
+        # Durante el creep de captura (advance_to_contact setea max_linear_pwm_override)
+        # el regulador dinámico gobierna la velocidad; el STUCK queda inhibido para no
+        # solaparse. Fuera del creep se limpia su estado para re-inicializar en la
+        # próxima captura, y el STUCK corre con su lógica intacta.
+        _creep_mode = CREEP_REGULATOR_ENABLED and self.max_linear_pwm_override is not None
+        if _creep_mode:
+            self._regulate_creep_speed(robot, _pid_st, _now)
+        else:
+            _pid_st['creep_ref_x'] = None
+        if not _creep_mode and distance > self.position_threshold and not _pid_st['in_rotation_mode']:
             if _pid_st['stuck_ref_x'] is None:
                 _pid_st['stuck_ref_x'] = robot.x
                 _pid_st['stuck_ref_y'] = robot.y
@@ -663,7 +753,7 @@ class DifferentialDriveController:
                 _pid_st['stuck_ref_x'] = robot.x
                 _pid_st['stuck_ref_y'] = robot.y
                 _pid_st['stuck_window_start'] = _now
-        else:
+        elif not _creep_mode:
             _pid_st['stuck_ref_x'] = None
             _pid_st['stuck_window_start'] = 0.0
             _pid_st['stuck_boost'] = max(0, _pid_st['stuck_boost'] - self.stuck_boost_decay)
