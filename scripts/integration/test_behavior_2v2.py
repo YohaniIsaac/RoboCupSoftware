@@ -103,6 +103,24 @@ ROBOT_COLORS = {
 TEAM_COLOR = {'red': (60, 60, 220), 'blue': (220, 80, 60)}
 ROL_LABELS = {'atacante': 'A', 'defensor': 'D'}
 
+# ---------------------------------------------------------------------------
+# Timeline log: canales y cadencia
+# Poner un canal en False lo excluye completamente del timeline.
+# _SNAP_EVERY_N: un 'snap' cada N llamadas a on_decision (~1 snap/s a 25 Hz).
+# ---------------------------------------------------------------------------
+LOG_CHANNELS: dict = {
+    'bt_state':       True,   # cambios de acción BT:  {t, ev:'bt',  r, team, bt}
+    'rol_change':     True,   # cambios de rol:        {t, ev:'rol', r, team, rol}
+    'game_state':     True,   # flags partido:         {t, ev:'gs',  s, v}
+    'position':       True,   # pos en snap: p=[x,y]
+    'angle_in_snap':  True,   # ángulo en snap: a=float
+    'pwm':            False,  # PWM en snap: L=int, R=int  (debug controlador)
+    'target_in_snap': False,  # target en snap: tgt=[x,y]
+    'path_in_snap':   False,  # waypoints en snap: path=[[x,y],...]
+}
+_SNAP_EVERY_N  = 25    # ~1 snap/s a 25 Hz de decisión
+_TIMELINE_CAP  = 2000
+
 
 # =============================================================================
 # Captura de métricas del partido (observación pura sobre los pipes)
@@ -174,6 +192,11 @@ class _MatchRecorder:
         self.ball_out_events = 0
         self.goals = []
         self.events = []               # cronología compacta (cap 800)
+        self._timeline: list = []      # cronología debuggeable (ver LOG_CHANNELS)
+        self._snap_counter: int = 0
+        self._tl_prev_ball_out:   bool = False
+        self._tl_prev_goal_reset: bool = False
+        self._tl_prev_init_phase: bool = False
         # Percepción: contadores acumulados que publica el proceso de percepción
         self._perc_first = None        # (timestamp, frame_idx)
         self._perc_last = None
@@ -208,6 +231,41 @@ class _MatchRecorder:
     def _event(self, t_rel, kind, **extra):
         if len(self.events) < 800:
             self.events.append({'t': round(t_rel, 2), 'event': kind, **extra})
+
+    def _tl(self, t_rel: float, ev: str, **extra) -> None:
+        if len(self._timeline) < _TIMELINE_CAP:
+            entry = {'t': round(t_rel, 2), 'ev': ev}
+            entry.update(extra)
+            self._timeline.append(entry)
+
+    def _record_snap(self, data: dict, t_rel: float) -> None:
+        players = data.get('players') or {}
+        robots_snap: dict = {}
+        for rid in ALL_IDS:
+            p = players.get(rid)
+            if p is None or p.get('pos') is None:
+                continue
+            rob: dict = {
+                'bt':  p.get('last_action'),
+                'rol': ROL_LABELS.get(p.get('rol'), '?'),
+            }
+            if LOG_CHANNELS.get('position'):
+                pos = p['pos']
+                rob['p'] = [round(pos[0]), round(pos[1])]
+            if LOG_CHANNELS.get('angle_in_snap') and p.get('angle_deg') is not None:
+                rob['a'] = round(p['angle_deg'], 1)
+            if LOG_CHANNELS.get('pwm'):
+                rob['L'] = p.get('left_pwm')
+                rob['R'] = p.get('right_pwm')
+            if LOG_CHANNELS.get('target_in_snap') and p.get('target'):
+                rob['tgt'] = [round(p['target'][0]), round(p['target'][1])]
+            if LOG_CHANNELS.get('path_in_snap') and p.get('path'):
+                rob['path'] = [[round(w[0]), round(w[1])] for w in p['path']]
+            robots_snap[str(rid)] = rob
+        ball_pos = data.get('ball_pos')
+        self._tl(t_rel, 'snap',
+                 ball=list(ball_pos) if ball_pos else None,
+                 robots=robots_snap)
 
     def on_goal(self, team):
         t_rel = 0.0 if self.t0 is None else time.time() - self.t0
@@ -254,6 +312,18 @@ class _MatchRecorder:
             self._event(t_rel, 'ball_out')
         self._prev_ball_out = ball_out
 
+        # --- Timeline: game_state ---
+        if LOG_CHANNELS.get('game_state'):
+            for _fld, _attr in (
+                ('ball_out',   '_tl_prev_ball_out'),
+                ('goal_reset', '_tl_prev_goal_reset'),
+                ('init_phase', '_tl_prev_init_phase'),
+            ):
+                _val = bool(data.get(_fld))
+                if _val != getattr(self, _attr):
+                    self._tl(t_rel, 'gs', s=_fld, v=int(_val))
+                    setattr(self, _attr, _val)
+
         dt = None
         if self._in_play and in_play and self._prev_ts is not None:
             dt = ts - self._prev_ts
@@ -268,6 +338,12 @@ class _MatchRecorder:
                 st['pos_prev'] = None
         self._in_play = in_play
         self._prev_ts = ts
+
+        # --- Timeline: snap periódico (todas las fases, no solo in_play) ---
+        self._snap_counter += 1
+        if self._snap_counter % _SNAP_EVERY_N == 0:
+            self._record_snap(data, t_rel)
+
         if not in_play:
             return
 
@@ -285,6 +361,10 @@ class _MatchRecorder:
                 st['role_changes'] += 1
                 self._event(t_rel, 'role_change', robot=rid,
                             from_rol=st['rol_prev'], to_rol=rol)
+                if LOG_CHANNELS.get('rol_change'):
+                    self._tl(t_rel, 'rol',
+                             r=rid, team=p.get('team', ''),
+                             rol=ROL_LABELS.get(rol, '?'))
             st['rol_prev'] = rol
 
             if action is not None and dt is not None:
@@ -294,6 +374,10 @@ class _MatchRecorder:
                     st['action_entries'][action] = st['action_entries'].get(action, 0) + 1
                 self._on_action_change(st, rid, action, t_rel)
                 st['action_prev'] = action
+                if LOG_CHANNELS.get('bt_state') and action is not None:
+                    self._tl(t_rel, 'bt',
+                             r=rid, team=p.get('team', ''),
+                             bt=action)
 
             if has_ball and dt is not None:
                 st['has_ball_s'] += dt
@@ -407,6 +491,8 @@ class _MatchRecorder:
                 {a for st in self.robots.values() for a in st['action_entries']}),
             'per_robot': per_robot,
             'events': self.events,
+            'timeline': self._timeline,
+            'log_channels': {k: v for k, v in LOG_CHANNELS.items() if v},
             'notes': [
                 'Métricas acotadas a tramos con ambos equipos activos (sin init, reset post-gol ni pelota fuera).',
                 'Muestreo por estados de decisión (~25 Hz); el BT publica cambios cada ~100 ms, ninguna acción queda sin muestrear.',

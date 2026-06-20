@@ -1185,6 +1185,8 @@ def decision_process_2v2(
                                 except Exception:
                                     pass
                             path, wp_idx = bm.command_manager.get_path_state(p.id)
+                            ctrl = bm.command_manager.controllers.get(p.id)
+                            lp, rp = ctrl._last_pwm.get(p.id, (None, None)) if ctrl else (None, None)
                             players_viz[p.id] = {
                                 'pos': (p.x, p.y) if p.id in players_initialized else None,
                                 'angle_deg': p.angle if p.id in players_initialized else None,
@@ -1195,6 +1197,8 @@ def decision_process_2v2(
                                 'path': path,
                                 'wp_idx': wp_idx,
                                 'team': p.team,
+                                'left_pwm': lp,
+                                'right_pwm': rp,
                             }
                     viz_state_pipe.send({
                         'players': players_viz,

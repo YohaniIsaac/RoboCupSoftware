@@ -105,6 +105,7 @@ class DifferentialDriveController:
 
         # Estado PID por robot (evita corrupción con múltiples robots)
         self._pid_state = {}  # {robot_id: dict con estado PID}
+        self._last_pwm: dict = {}  # {robot_id: (left_pwm, right_pwm)} — último PWM enviado
 
         # Constantes para PID (configurables desde config.py)
         # Valores iniciales se cargan desde config, pero pueden ser sobrescritos
@@ -1153,6 +1154,7 @@ class DifferentialDriveController:
 
         # Registrar PWM final en el status logger (incluye boost y dribble)
         robot_status_logger.update(robot.id, left_pwm=left_speed_pwm, right_pwm=right_speed_pwm)
+        self._last_pwm[robot.id] = (left_speed_pwm, right_speed_pwm)
 
         # Si tenemos controlador RF, enviar comandos PWM directamente
         if self.rf_controller:
