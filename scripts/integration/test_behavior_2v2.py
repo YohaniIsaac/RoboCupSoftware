@@ -491,8 +491,6 @@ class _MatchRecorder:
                 {a for st in self.robots.values() for a in st['action_entries']}),
             'per_robot': per_robot,
             'events': self.events,
-            'timeline': self._timeline,
-            'log_channels': {k: v for k, v in LOG_CHANNELS.items() if v},
             'notes': [
                 'Métricas acotadas a tramos con ambos equipos activos (sin init, reset post-gol ni pelota fuera).',
                 'Muestreo por estados de decisión (~25 Hz); el BT publica cambios cada ~100 ms, ninguna acción queda sin muestrear.',
@@ -501,6 +499,18 @@ class _MatchRecorder:
                 'decision_cadence_ms: intervalo entre estados publicados por el proceso de decisión (throttle nominal 40 ms) bajo carga real.',
                 'partido_frames/tasas de detección: contadores del proceso de percepción acotados por game_active (incluyen tramos de pelota fuera).',
             ],
+        }
+
+    def timeline_data(self, score) -> dict:
+        """Cronología compacta para debug — archivo separado del de métricas."""
+        return {
+            'teams': {'red': list(TEAM_RED_IDS), 'blue': list(TEAM_BLUE_IDS)},
+            'score': dict(score),
+            'duration_active_s': round(self.active_s, 1),
+            'log_channels': {k: v for k, v in LOG_CHANNELS.items() if v},
+            'snap_every_n_decisions': _SNAP_EVERY_N,
+            'n_entries': len(self._timeline),
+            'timeline': self._timeline,
         }
 
 
@@ -1113,6 +1123,8 @@ def visualization_process_2v2(perception_pipe, decision_pipe, keyboard_pipe,
         try:
             out_path = save_metrics('match_2v2', recorder.summary(score))
             log.info("Métricas del partido guardadas en %s", out_path)
+            tl_path = save_metrics('timeline_2v2', recorder.timeline_data(score))
+            log.info("Timeline de debug guardado en %s", tl_path)
         except Exception as e:
             log.error("No se pudieron guardar las métricas del partido: %s", e)
         shm.close()
