@@ -14,8 +14,8 @@
     "pwm_max": 32,
     "deadzone_left_fwd": 0,
     "deadzone_left_rev": 0,
-    "deadzone_right_fwd": 18,
-    "deadzone_right_rev": 18,
+    "deadzone_right_fwd": 0,
+    "deadzone_right_rev": 0,
     "bias": 0.022
   },
   "1": {
