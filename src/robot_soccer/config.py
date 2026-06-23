@@ -244,7 +244,12 @@ PATH_PLANNING_BALL_OBSTACLE_RADIUS  = 10 # Radio (px) con que se modela la pelot
 # de la pelota se usa un clearance reducido, permitiendo aproximarse a disputar
 # sin que el planner proyecte el goal hacia atras. El contacto final lo cierra
 # advance_to_contact en modo directo (sin planner).
-PATH_PLANNING_CONTEST_RADIUS_PX = 90  # px — goal a <=N de la pelota => intencion de disputa
+PATH_PLANNING_CONTEST_RADIUS_PX = 120 # px — goal a <=N de la pelota => intencion de disputa.
+                                      # Cubre el staging behind-ball: hasta BEHIND_BALL_APPROACH_PX(60)
+                                      # + BALL_INTERCEPT_MAX_PX(60) = 120px de la pelota cuando la
+                                      # predicción de intercepción adelanta el punto. Con 90 el punto
+                                      # predicho quedaba con clearance completo (60) y un compañero
+                                      # estático (defensor) lo inflaba hasta bloquearlo → deadlock.
 PATH_PLANNING_CONTEST_CLEARANCE = 20  # px — clearance reducido en la zona de disputa
 RRT_WAYPOINT_ARRIVAL_PX  = 20    # px — umbral de llegada a waypoints intermedios
 RRT_REPLAN_POSITION_PX   = 80    # px — trigger replan si robot se aleja >N px del punto enviado
@@ -261,6 +266,10 @@ RRT_OBSTACLE_MOVE_PX     = 25    # px — trigger replan si un obstáculo se mue
 # el robot espera ahí, replanificando periódicamente hasta que se despeje.
 RRT_GOAL_PROJECTION_MARGIN_PX = 6   # px — margen al proyectar goal/start fuera del obstáculo inflado
 RRT_HOLD_REPLAN_PERIOD_S      = 2.0 # s  — replan periódico mientras el goal real siga bloqueado
+RRT_WAITING_GOAL_CLEAR_TIMEOUT_S = 3.0 # s — si el goal sigue bloqueado tras N s de espera, el
+                                       # bloqueador no es transitorio (p.ej. un compañero estático):
+                                       # se abandona la espera y se libera la acción para que el BT
+                                       # reevalúe, en vez de sostener (0,0) indefinidamente.
 
 # --- Umbral de llegada efectivo según proximidad de obstáculos ---
 # El umbral nominal de llegada (arrival_threshold por comando) se contrae

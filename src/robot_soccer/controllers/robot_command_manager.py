@@ -19,6 +19,7 @@ from robot_soccer.config import (
     RRT_REPLAN_COOLDOWN_S,
     RRT_OBSTACLE_MOVE_PX,
     RRT_HOLD_REPLAN_PERIOD_S,
+    RRT_WAITING_GOAL_CLEAR_TIMEOUT_S,
     ROTATE_RECOMMAND_MIN_DEG,
     ROBOT_DETECTION_LOST_RAMPDOWN_S,
     ROBOT_MAX_LINEAR_SPEED,
@@ -130,6 +131,7 @@ class RobotCommandManager:
         self._current_wp_idx: dict = {}  # player_id → int
         self._path_projected: dict = {}  # player_id → bool: path termina antes del goal real
         self._waiting_goal_clear: dict = {}  # player_id → True: goal bloqueado, sosteniendo posición
+        self._waiting_since: dict = {}  # player_id → float: t en que empezó a esperar goal despejado
         self._last_sent_pos:  dict = {}  # player_id → (x,y)
         self._last_sent_goal: dict = {}  # player_id → (x,y)
         self._last_replan_t:  dict = {}  # player_id → float timestamp
@@ -320,6 +322,7 @@ class RobotCommandManager:
                                     self._current_wp_idx[player_id] = wp_idx
                                     self._path_projected[player_id] = result.get('projected', False)
                                     self._waiting_goal_clear.pop(player_id, None)
+                                    self._waiting_since.pop(player_id, None)
                                     self.controllers[player_id]._pid_state.pop(player_id, None)
                                     log.info("R%d: path adoptado %d wp (desde idx %d)%s",
                                              player_id, len(new_path), wp_idx,
@@ -433,6 +436,9 @@ class RobotCommandManager:
                                         # embestiría al bloqueador) y replanificar
                                         # periódicamente hasta que se despeje.
                                         self._waiting_goal_clear[player_id] = True
+                                        # setdefault: marca el inicio del hold una sola vez; los
+                                        # ciclos de replan posteriores no reinician el timer de timeout.
+                                        self._waiting_since.setdefault(player_id, now)
                                         if self.rf_controller:
                                             self.rf_controller.set_motors(player.id + 1, 0, 0)
                                         log.info("R%d: goal %s bloqueado — esperando a que "
@@ -451,7 +457,22 @@ class RobotCommandManager:
                             # nuevo. El PID directo embestiría al robot bloqueador.
                             # Se reenvía stop cada frame (mismo patrón que detección
                             # perdida) para que el robot no avance ante un comando suelto.
-                            if self.rf_controller:
+                            waiting_since = self._waiting_since.get(player_id, now)
+                            if now - waiting_since > RRT_WAITING_GOAL_CLEAR_TIMEOUT_S:
+                                # El bloqueador no se despeja (p.ej. un compañero estático
+                                # parado sobre la zona de staging): abandonar la espera y
+                                # liberar la acción para que el BT reevalúe con estado fresco,
+                                # en vez de sostener (0,0) indefinidamente.
+                                self._waiting_goal_clear.pop(player_id, None)
+                                self._waiting_since.pop(player_id, None)
+                                self._last_sent_goal.pop(player_id, None)  # forzar replan limpio
+                                self.actions_in_progress.pop(player_id, None)
+                                if self.rf_controller:
+                                    self.rf_controller.set_motors(player.id + 1, 0, 0)
+                                log.warning("R%d: goal bloqueado >%.1fs sin despejarse → "
+                                            "abandonando espera (BT reevaluará)",
+                                            player_id, RRT_WAITING_GOAL_CLEAR_TIMEOUT_S)
+                            elif self.rf_controller:
                                 self.rf_controller.set_motors(player.id + 1, 0, 0)
                         else:
                             # Fallback: PID directo mientras llega el primer path
