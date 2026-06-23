@@ -2308,18 +2308,18 @@ def create_defender_tree():
     defensive_behavior.add_children(
         ConditionNode(is_ball_in_defensive_zone, "PelotaEnZonaDefensiva"),
         SelectorNode("AccionDefensiva").add_children(
-            # Capturar la pelota si está libre
-            SequenceNode("CapturarPelotaDefensiva").add_children(
-                ConditionNode(is_ball_free, "PelotaLibre"),
-                create_move_to_ball_node(),
-                ActionNode(capture_ball, "CapturarPelota"),
-            ),
             # Bloquear rival si tiene la pelota
             SequenceNode("BloquearRival").add_children(
                 ConditionNode(is_ball_in_opponent_possession, "PelotaEnPosesionRival"),
                 ActionNode(block_opponent, "BloquearOponente"),
             ),
-            # Posicionarse para defender la portería
+            # Posicionarse para defender la portería.
+            # El defensor NO persigue la pelota libre: se quitó la rama
+            # CapturarPelotaDefensiva (move_to_ball + capture). El role-switcher ya
+            # promueve al robot más cercano a ATACANTE para perseguir; el que queda
+            # defensor cubre la portería. Evita que ambos robots del equipo converjan
+            # sobre la pelota (dejando la portería sola) y la congestión en la zona de
+            # disputa que disparaba el hold-with-stop del planner.
             ActionNode(position_to_defend_goal, "DefenderPorteria"),
         ),
     )
