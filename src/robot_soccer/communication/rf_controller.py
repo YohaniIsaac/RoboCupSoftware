@@ -191,7 +191,10 @@ class RFController:
         # PRIORIDAD ALTA: Detención (0, 0)
         if is_stop_command:
             success = self.serial_manager.send_priority_command(command, priority='high')
-            log.info("🚨 ALTA prioridad (detención) para Robot %i", robot_id - 1)
+            # El stop se reenvía cada frame por seguridad (timeout firmware), pero la
+            # transición a detenido ya se loguea una vez arriba (⏹️ DETENIDO con guard
+            # last_cmd != (0,0)). A debug para no inundar INFO con un robot detenido/perdido.
+            log.debug("🚨 ALTA prioridad (detención) para Robot %i", robot_id - 1)
 
         # PRIORIDAD MEDIA: Entrada a rampa (desaceleración >15%)
         elif is_decelerating and not is_stop_command:
