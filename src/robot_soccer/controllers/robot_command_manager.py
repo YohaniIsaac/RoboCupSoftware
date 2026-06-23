@@ -277,6 +277,11 @@ class RobotCommandManager:
                         # La pelota se incluye como obstáculo solo si el goal está lejos
                         # de ella (en captura/contacto el robot DEBE llegar a la pelota).
                         req_clearance = PATH_PLANNING_OBSTACLE_CLEARANCE
+                        # Goal de disputa: el target está sobre/junto a la pelota (move_to_ball,
+                        # behind_ball pegado). El contacto ES el objetivo, así que un goal
+                        # proyectado por congestión NO debe disparar el hold-with-stop (que
+                        # congelaría al robot a media persecución); se conduce directo al balón.
+                        is_contest_goal = False
                         if self._ball_pos is not None:
                             dist_goal_ball = math.hypot(
                                 goal[0] - self._ball_pos[0],
@@ -284,6 +289,7 @@ class RobotCommandManager:
                             )
                             if dist_goal_ball <= PATH_PLANNING_CONTEST_RADIUS_PX:
                                 req_clearance = PATH_PLANNING_CONTEST_CLEARANCE
+                                is_contest_goal = True
                             if dist_goal_ball > CAPTURE_ACTIVATE_DISTANCE_PX:
                                 obstacles.append([self._ball_pos[0], self._ball_pos[1],
                                                   PATH_PLANNING_BALL_OBSTACLE_RADIUS])
@@ -430,7 +436,7 @@ class RobotCommandManager:
                                     if dist_wp_to_goal < RRT_WAYPOINT_ARRIVAL_PX:
                                         del self.actions_in_progress[player_id]
                                         log.info("R%d: llegó al objetivo (último wp)", player_id)
-                                    elif was_projected:
+                                    elif was_projected and not is_contest_goal:
                                         # El goal real sigue bloqueado por un obstáculo:
                                         # sostener posición aquí (sin PID directo, que
                                         # embestiría al bloqueador) y replanificar
@@ -444,6 +450,15 @@ class RobotCommandManager:
                                         log.info("R%d: goal %s bloqueado — esperando a que "
                                                  "se despeje a %.0fpx", player_id, goal,
                                                  dist_wp_to_goal)
+                                    elif was_projected:
+                                        # Goal de disputa proyectado por congestión: NO sostener
+                                        # con (0,0). El contacto con la pelota ES el objetivo, así
+                                        # que se mantiene la acción y, con el path ya limpio, el
+                                        # fallback de PID directo conduce al robot hacia el balón.
+                                        self._waiting_goal_clear.pop(player_id, None)
+                                        self._waiting_since.pop(player_id, None)
+                                        log.debug("R%d: goal de disputa %s proyectado — avanzando "
+                                                  "directo al balón (sin hold)", player_id, goal)
                                     else:
                                         log.debug("R%d: path obsoleto (last wp a %.0fpx del goal actual), "
                                                   "esperando nuevo plan", player_id, dist_wp_to_goal)
