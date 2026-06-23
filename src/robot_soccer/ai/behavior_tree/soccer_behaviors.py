@@ -51,6 +51,7 @@ from robot_soccer.config import (
     SETTLE_ESCAPE_FACTOR,
     ADVANCE_MAX_TIME_S,
     ADVANCE_BALL_DRIFT_DEG,
+    ADVANCE_CONTACT_ALIGN_DEG,
     DEFENDER_WAIT_MAX_S,
     POST_KICK_COOLDOWN_S,
     PATH_PLANNING_ROBOT_OBSTACLE_RADIUS,
@@ -1945,6 +1946,20 @@ def _advance_to_contact_running(blackboard):
                 f"advance_contact CONTACTO: kick_err={kick_err:.1f}px asentando {CONTACT_SETTLE_TIME_S:.2f}s..."
             )
             return NodeStatus.RUNNING
+
+        # Anti-arrastre: ya pegado a la pelota pero la nariz no apunta a ella dentro de
+        # ADVANCE_CONTACT_ALIGN_DEG → el contacto (kick_err < tol) es geométricamente
+        # imposible y seguir steereando al overshoot haría pivotar al robot junto a la
+        # pelota, empujándola. Abortar a re-stage; circle_ball realinea limpio antes de
+        # volver a avanzar (en vez de pivotar in situ hasta la deriva de 50°).
+        if dist <= CAPTURE_ACTIVATE_DISTANCE_PX and my_head_err > ADVANCE_CONTACT_ALIGN_DEG:
+            _clear_advance_state(blackboard, player_id)
+            robot_status_logger.emit_event(
+                player_id,
+                f"advance_contact DESALINEADO {my_head_err:.0f}° pegado a la pelota "
+                f"(dist={dist:.0f}px) -> re-stage"
+            )
+            return NodeStatus.FAILURE
 
         # Recalcular target sólo cuando aún no estamos en zona fina de captura.
         # Una vez dentro, el PID cierra la distancia con el target ya emitido

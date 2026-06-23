@@ -539,9 +539,13 @@ KICK_POINT_OFFSET_PX    = 30  # px — distancia centro robot → punto donde el
                               #      (calibrar físicamente: medir desde marker ArUco hasta
                               #      el punto de impacto del solenoide cuando el robot está
                               #      en posición ideal de kick).
-KICK_POINT_TOLERANCE_PX = 6   # px — radio aceptable bola ↔ kick_point para confirmar contacto.
-                              #      Debe estar por encima del piso de ruido de detección
-                              #      (~3-5 px ArUco/HSV); 6 da margen sin volver el gate laxo.
+KICK_POINT_TOLERANCE_PX = 12  # px — radio aceptable bola ↔ kick_point para confirmar contacto.
+                              #      Debe ser > CONTACT_APPROACH_OVERSHOOT_PX (10): en reposo sobre
+                              #      el target de overshoot (pelota − 20·û_arco) el kick_point queda
+                              #      ~10px pasado la pelota aun perfectamente alineado, así que con 6
+                              #      el contacto sólo se captaba en una ventana de tránsito estrecha
+                              #      que el creep lento se saltaba → nunca disparaba. 12 capta el
+                              #      reposo y el tránsito. Sigue dentro del radio de la pelota.
 KICK_POINT_ANGLE_OFFSET_DEG = 0.0  # ° — offset angular entre el eje del marker ArUco y el eje
                                     #      real del solenoide (desalineación mecánica). Calibrar
                                     #      con el robot en múltiples orientaciones en el centro
@@ -645,6 +649,12 @@ ADVANCE_ESCAPE_FACTOR  = 1.5   # factor — margen de escape durante avance al c
 SETTLE_ESCAPE_FACTOR   = 2.0   # factor — margen de escape durante asentamiento
 ADVANCE_MAX_TIME_S     = 7.0   # s  — timeout en acercamiento sin lograr contacto (margen extra para distancias largas a creep)
 ADVANCE_BALL_DRIFT_DEG = 50.0  # °  — deriva máx. del ángulo a pelota desde inicio del avance
+# Anti-arrastre: si el robot ya está pegado a la pelota (dist <= CAPTURE_ACTIVATE)
+# pero su nariz NO apunta a la pelota dentro de este umbral, abortar el avance ANTES
+# de pivotar junto a ella (el pivote la empuja y deriva). Re-stagea por circle_ball
+# limpio. Geométricamente el contacto (kick_err < tol) es imposible si el error de
+# heading a la pelota supera ~atan(tol/offset)=atan(12/30)≈22°; 25 da un pequeño margen.
+ADVANCE_CONTACT_ALIGN_DEG = 25.0  # ° — error máx. heading→pelota pegado a la pelota antes de re-stage
 
 # Parámetros del yield cuando el rival tiene la pelota.
 # RIVAL_HOLD_YIELD_S: cuánto tiempo el atacante cedente mantiene posición de press
