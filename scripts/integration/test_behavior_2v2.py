@@ -68,6 +68,7 @@ from robot_soccer.config import (
     FIELD_CAM,
     BALL_OUT_MARGIN_PX,
     RESET_POS,
+    KICKOFF_BALL_CENTER_TOL_PX,
     KICK_POINT_OFFSET_PX,
     KICK_POINT_TOLERANCE_PX,
     FIELD_PHYSICAL_WIDTH_CM,
@@ -737,6 +738,9 @@ def visualization_process_2v2(perception_pipe, decision_pipe, keyboard_pipe,
     score          = {'red': 0, 'blue': 0}
     last_goal_team = None
     goal_reset_viz = False   # True → esperando SPACE tras gol
+    kickoff_conceding_viz     = None   # equipo que toma el saque (recibió el gol)
+    kickoff_ready_viz         = False  # robots en posición + pelota al centro
+    kickoff_ball_centered_viz = False  # pelota repuesta cerca del centro
     ball_out_viz   = False   # True → pelota fuera de límites
     pre_init_viz   = True    # True → robots quietos, esperando ESPACIO1
     init_phase_viz = False   # True → robots organizándose (entre ESPACIO1 y ESPACIO2)
@@ -800,6 +804,9 @@ def visualization_process_2v2(perception_pipe, decision_pipe, keyboard_pipe,
                     init_phase_viz    = data.get('init_phase', False)
                     init_ready_viz    = data.get('init_ready', False)
                     ball_detected_viz = data.get('ball_detected', False)
+                    kickoff_conceding_viz     = data.get('kickoff_conceding')
+                    kickoff_ready_viz         = data.get('kickoff_ready', False)
+                    kickoff_ball_centered_viz = data.get('kickoff_ball_centered', False)
                     if not data.get('goal_reset', False):
                         goal_reset_viz = False   # decision confirmó salida del reset
                     if robot_available and not prev_robot_available:
@@ -1064,11 +1071,33 @@ def visualization_process_2v2(perception_pipe, decision_pipe, keyboard_pipe,
                     gy = (banner_y1 + banner_y2 + gh) // 2
                     cv2.putText(frame, goal_label, ((w - gw) // 2, gy),
                                 cv2.FONT_HERSHEY_SIMPLEX, 2.0, text_col, 4, cv2.LINE_AA)
-                    sub_text = "Presiona ESPACIO para continuar"
+                    # Línea de saque: el equipo que recibió el gol saca (ventaja estilo SSL)
+                    if kickoff_conceding_viz in ('red', 'blue'):
+                        ko_text = ("SAQUE: ROJO" if kickoff_conceding_viz == 'red'
+                                   else "SAQUE: AZUL")
+                        ko_col  = (TEAM_COLOR[kickoff_conceding_viz])
+                        (kw, _), _ = cv2.getTextSize(ko_text, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)
+                        cv2.putText(frame, ko_text, ((w - kw) // 2, gy + 34),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, ko_col, 2, cv2.LINE_AA)
+                    # Instrucción según estado: pelota al centro → listo → SPACE
+                    if kickoff_ready_viz:
+                        sub_text = "LISTO — presiona ESPACIO para reanudar"
+                        sub_col  = (0, 255, 0)
+                    elif not kickoff_ball_centered_viz:
+                        sub_text = "Coloca la pelota en el centro del campo"
+                        sub_col  = (0, 200, 255)
+                    else:
+                        sub_text = "Robots posicionandose..."
+                        sub_col  = (220, 220, 220)
                     (sw, _), _ = cv2.getTextSize(sub_text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 1)
                     cv2.putText(frame, sub_text, ((w - sw) // 2, banner_y2 + 24),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (220, 220, 220), 1, cv2.LINE_AA)
-                    # Marcadores X en posiciones de reset
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, sub_col, 1, cv2.LINE_AA)
+                    # Referencia de colocación: círculo + cruz en el centro del campo
+                    cx_f, cy_f = FIELD_CAM.center
+                    center_col = (0, 255, 0) if kickoff_ball_centered_viz else (0, 200, 255)
+                    cv2.circle(frame, (cx_f, cy_f), KICKOFF_BALL_CENTER_TOL_PX, center_col, 1, cv2.LINE_AA)
+                    cv2.drawMarker(frame, (cx_f, cy_f), center_col, cv2.MARKER_CROSS, 16, 2)
+                    # Marcadores X en posiciones de reset (media-formación base)
                     for rid, rpos in RESET_POS.items():
                         rc  = TEAM_COLOR['red'] if rid in TEAM_RED_IDS else TEAM_COLOR['blue']
                         rx, ry = rpos
@@ -1103,12 +1132,18 @@ def visualization_process_2v2(perception_pipe, decision_pipe, keyboard_pipe,
                     pass
                 break
             elif key == ord(' '):
-                goal_reset_viz = False
+                # No limpiar goal_reset_viz aquí: la decisión solo reanuda si el saque
+                # está listo (pelota al centro + robots en posición). El banner se oculta
+                # cuando la decisión confirma la salida del reset (data['goal_reset']=False).
                 try:
                     keyboard_pipe.send({'command': 'toggle'})
-                    # Enviar señal tablero sólo cuando el partido arranca de verdad
-                    # (desde init_ready) o cuando se toggle durante juego activo
-                    if init_ready_viz or (not pre_init_viz and not init_phase_viz):
+                    # Enviar señal tablero (reanudar reloj) sólo cuando el juego arranca
+                    # de verdad. Tras un gol, sólo si el saque está listo (la decisión
+                    # también rechaza el toggle si no lo está).
+                    if goal_reset_viz:
+                        if kickoff_ready_viz:
+                            keyboard_pipe.send({'command': 'tablero', 'cmd': 1})
+                    elif init_ready_viz or (not pre_init_viz and not init_phase_viz):
                         keyboard_pipe.send({'command': 'tablero', 'cmd': 1})
                 except Exception:
                     pass

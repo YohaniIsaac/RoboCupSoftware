@@ -304,6 +304,13 @@ BT_INTERCEPT_DEADLOCK_TIMEOUT_S = 2.0
 RESET_MOVE_FACTOR = 0.80         # fracción de pwm_max para movimiento de reset (flooreado en pwm_min)
 RESET_ANGLE       = {'red': 0.0, 'blue': 180.0}  # ángulo canónico de orientación (dirección de ataque)
 
+# --- Saque (kickoff) estilo SSL tras un gol ---
+# El equipo que RECIBIÓ el gol toma el saque (ventaja), igual que en fútbol:
+# uno de sus robots se ubica detrás de la pelota (centro) listo para atacar; el
+# equipo que anotó se repliega a su mitad (RESET_POS, ya fuera del círculo central).
+KICKOFF_STAGING_OFFSET_PX  = 70  # px — distancia del sacador detrás de la pelota (centro del campo)
+KICKOFF_BALL_CENTER_TOL_PX = 60  # px — la pelota se considera "repuesta al centro" si está a <= N del centro
+
 # ==========================================
 # Configuración de la simulación
 # ==========================================

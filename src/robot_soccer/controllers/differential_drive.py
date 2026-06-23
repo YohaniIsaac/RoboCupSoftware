@@ -142,6 +142,7 @@ class DifferentialDriveController:
         # pero ANTES de combinar con omega. Así la corrección angular sigue activa.
         self.max_linear_pwm_override = None
         self.detection_pwm_cap = None  # cap impuesto por pérdida de detección de cámara
+        self.linear_pwm_cap = None     # cap duro de v lineal (reset/saque); NO activa el creep mode
         self.auto_kick_enabled = False  # solo True durante move_with_ball; gate del AUTO-KICK por stuck
 
         # Factor multiplicador de PWM con posesión de pelota (dribbler activo).
@@ -577,6 +578,11 @@ class DifferentialDriveController:
                     v = min(v, self.max_linear_pwm_override)
             if self.detection_pwm_cap is not None:
                 v = min(v, self.detection_pwm_cap)
+            # Cap de reset/saque: limita la velocidad lineal por el camino normal de
+            # movimiento (con desaturado superior estándar), sin enganchar el regulador
+            # de creep como haría max_linear_pwm_override.
+            if self.linear_pwm_cap is not None:
+                v = min(v, self.linear_pwm_cap)
 
             # Guardar términos PID lineales para logging combinado
             p_v_stored = p_v

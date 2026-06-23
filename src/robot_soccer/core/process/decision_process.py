@@ -36,8 +36,11 @@ from robot_soccer.config import (
     RESET_POS,
     RESET_MOVE_FACTOR,
     RESET_ANGLE,
+    KICKOFF_STAGING_OFFSET_PX,
+    KICKOFF_BALL_CENTER_TOL_PX,
     BALL_FRESHNESS_TIMEOUT_S,
     BALL_OUT_DEBOUNCE_FRAMES,
+    ROBOT_DETECTION_LOST_RAMPDOWN_S,
 )
 
 log = logging.getLogger(__name__)
@@ -580,6 +583,43 @@ def _assign_reset(teams, pos_dict):
     return best
 
 
+def _kickoff_targets(scoring_team, team_red_ids, team_blue_ids):
+    """Posiciones de saque estilo SSL tras un gol.
+
+    El equipo que RECIBIÓ el gol (conceding) toma el saque, igual que en fútbol:
+    uno de sus robots se ubica detrás de la pelota (centro del campo) listo para
+    atacar; el otro queda en su media-formación (RESET_POS). El equipo que anotó
+    se repliega a RESET_POS (ya en su mitad, fuera del círculo central).
+
+    Qué robot concreto del equipo que saca va al staging lo decide _assign_reset
+    (minimiza cruces de trayectoria y distancia).
+
+    Args:
+        scoring_team: 'red' | 'blue' — equipo que anotó (None → reset simétrico).
+        team_red_ids, team_blue_ids: list[int] — ids de cada equipo.
+
+    Returns:
+        (targets, conceding): dict {player_id: (x, y)} para los 4 robots y el
+        equipo que toma el saque ('red'|'blue'|None).
+    """
+    targets = dict(RESET_POS)
+    if scoring_team not in ('red', 'blue'):
+        return targets, None  # sin info de quién anotó → formación simétrica
+    conceding = 'blue' if scoring_team == 'red' else 'red'
+    cx, cy = FIELD_CAM.center
+    # Sacador detrás de la pelota según la dirección de ataque del que saca:
+    # rojo ataca +x (arco derecho) → detrás = lado -x; azul ataca -x → detrás = lado +x.
+    if conceding == 'red':
+        staging    = (cx - KICKOFF_STAGING_OFFSET_PX, cy)
+        kicker_ids = team_red_ids
+    else:
+        staging    = (cx + KICKOFF_STAGING_OFFSET_PX, cy)
+        kicker_ids = team_blue_ids
+    if kicker_ids:
+        targets[kicker_ids[0]] = staging
+    return targets, conceding
+
+
 def decision_process_2v2(
     perception_pipe,
     viz_state_pipe,
@@ -693,6 +733,10 @@ def decision_process_2v2(
     goal_reset_active   = False   # pausa post-gol — robots navegan a reset positions
     reset_move_issued   = False   # move emitido (reset post-gol)
     reset_robot_phase   = {}      # id → 'moving' | 'orienting' | 'done'
+    scored_team         = None    # equipo que anotó el último gol ('red'|'blue')
+    kickoff_conceding   = None    # equipo que toma el saque (recibió el gol)
+    kickoff_ball_centered = False # pelota repuesta cerca del centro del campo
+    kickoff_ready       = False   # robots detectados en posición + pelota al centro
     pre_init            = True    # esperando ESPACIO1: robots quietos, aún no organizan
     init_phase          = False   # True desde ESPACIO1: robots organizándose
     init_ready          = False   # True cuando robots llegaron y están orientados
@@ -803,6 +847,12 @@ def decision_process_2v2(
                         game_active.value   = 0
                         reset_move_issued   = False
                         reset_robot_phase   = {}
+                        scored_team         = cmd.get('team')
+                        kickoff_conceding   = ('blue' if scored_team == 'red'
+                                               else 'red' if scored_team == 'blue'
+                                               else None)
+                        kickoff_ready       = False
+                        kickoff_ball_centered = False
                         active_red = active_blue = False
                         for bm in (bm_red, bm_blue):
                             for p in bm.team_players:
@@ -840,22 +890,48 @@ def decision_process_2v2(
                                         ctrl = bm.command_manager.controllers.get(p.id)
                                         if ctrl:
                                             ctrl.max_linear_pwm_override = None
+                                            ctrl.linear_pwm_cap = None
                                         bm.command_manager.actions_in_progress.pop(p.id, None)
                                     bm.command_manager.replan_cooldown_s_override = None
                                 log.info("┌─────────────────────────────────────────────────────┐")
                                 log.info("│ ► COMIENZA PARTIDO (robots en posición)              │")
                                 log.info("└─────────────────────────────────────────────────────┘")
                         elif goal_reset_active:
-                            goal_reset_active = False
-                            game_active.value = 1
-                            active_red = active_blue = True
-                            for bm in (bm_red, bm_blue):
-                                for p in bm.team_players:
-                                    ctrl = bm.command_manager.controllers.get(p.id)
-                                    if ctrl:
-                                        ctrl.max_linear_pwm_override = None
-                                    bm.command_manager.actions_in_progress.pop(p.id, None)
-                            log.info("Reanudando partido tras gol")
+                            if not kickoff_ready:
+                                if not kickoff_ball_centered:
+                                    log.info("Saque aún no listo: coloca la pelota en el centro del campo")
+                                else:
+                                    pendientes = [p.id for bm in (bm_red, bm_blue)
+                                                  for p in bm.team_players
+                                                  if reset_robot_phase.get(p.id) != 'done']
+                                    no_detect = [pid for pid in pendientes
+                                                 if now - player_map[pid].last_seen_t
+                                                 >= ROBOT_DETECTION_LOST_RAMPDOWN_S]
+                                    if no_detect:
+                                        log.info("Saque aún no listo: robot(s) %s sin detección — "
+                                                 "reubícalos manualmente", no_detect)
+                                    else:
+                                        log.info("Saque aún no listo: robots posicionándose %s", pendientes)
+                            else:
+                                goal_reset_active = False
+                                game_active.value = 1
+                                active_red = active_blue = True
+                                for bm in (bm_red, bm_blue):
+                                    for p in bm.team_players:
+                                        ctrl = bm.command_manager.controllers.get(p.id)
+                                        if ctrl:
+                                            ctrl.max_linear_pwm_override = None
+                                            ctrl.linear_pwm_cap = None
+                                        bm.command_manager.actions_in_progress.pop(p.id, None)
+                                        # Limpiar estado táctico arrastrado del pre-gol para que
+                                        # el sacador no ceda al instante (mismo reset que PELOTA EN JUEGO).
+                                        _bb = bm.blackboards.get(p.id)
+                                        if _bb is not None:
+                                            _bb._yielding_to_rival      = False
+                                            _bb._yielding_last_change_t = 0.0
+                                            _bb._uncontested_since      = None
+                                log.info("Reanudando partido tras gol (saque para %s)",
+                                         kickoff_conceding or "?")
                         else:
                             new_state = not (active_red or active_blue)
                             active_red = active_blue = new_state
@@ -998,7 +1074,7 @@ def decision_process_2v2(
                             if rpos:
                                 ctrl = bm.command_manager.controllers.get(p.id)
                                 if ctrl:
-                                    ctrl.max_linear_pwm_override = ctrl.compute_reset_pwm(p.id, RESET_MOVE_FACTOR)
+                                    ctrl.linear_pwm_cap = ctrl.compute_reset_pwm(p.id, RESET_MOVE_FACTOR)
                                 bm.command_manager.move_robot_to(p.id, rpos)
                     log.info("Fase inicial: moviendo robots a posiciones de inicio (RRT*)")
 
@@ -1058,37 +1134,51 @@ def decision_process_2v2(
                         p.id: 'moving'
                         for bm in (bm_red, bm_blue) for p in bm.team_players
                     }
+                    kickoff_targets, kickoff_conceding = _kickoff_targets(
+                        scored_team, team_red_ids, team_blue_ids)
                     assignment = _assign_reset(
-                        [bm_red.team_players, bm_blue.team_players], RESET_POS)
+                        [bm_red.team_players, bm_blue.team_players], kickoff_targets)
                     for bm in (bm_red, bm_blue):
                         for p in bm.team_players:
                             rpos = assignment.get(p.id)
                             if rpos:
                                 ctrl = bm.command_manager.controllers.get(p.id)
                                 if ctrl:
-                                    ctrl.max_linear_pwm_override = ctrl.compute_reset_pwm(p.id, RESET_MOVE_FACTOR)
+                                    ctrl.linear_pwm_cap = ctrl.compute_reset_pwm(p.id, RESET_MOVE_FACTOR)
                                 bm.command_manager.move_robot_to(p.id, rpos)
-                    log.info("Reset: moviendo robots a posiciones iniciales (%.0f%% pwm_max, RRT*)",
-                             RESET_MOVE_FACTOR * 100)
+                    log.info("Saque tras gol: equipo %s saca desde el centro; %s se repliega "
+                             "(%.0f%% pwm_max, RRT*)",
+                             kickoff_conceding or "?", scored_team or "?", RESET_MOVE_FACTOR * 100)
 
-                # Paso 2: por robot — cuando llega, orientar hacia la pelota
+                # Paso 2: por robot — al llegar, orientar a su dirección de ataque
+                # (RESET_ANGLE). Con la pelota repuesta al centro, el sacador (detrás
+                # del centro) queda mirando a la pelota; orientar al ángulo canónico
+                # evita apuntar a una pelota que aún esté en la esquina antes del saque.
                 if reset_move_issued:
-                    ball_fresh_reset = (ball_initialized
-                                        and time.time() - ball_last_seen_t < BALL_FRESHNESS_TIMEOUT_S)
                     for bm in (bm_red, bm_blue):
                         for p in bm.team_players:
                             phase = reset_robot_phase.get(p.id)
                             action = bm.command_manager.actions_in_progress.get(p.id)
                             if phase == 'moving' and action is None:
-                                if ball_fresh_reset:
-                                    angle = math.degrees(math.atan2(ball.y - p.y, ball.x - p.x))
-                                else:
-                                    angle = RESET_ANGLE[bm.team]
+                                angle = RESET_ANGLE[bm.team]
                                 bm.command_manager.rotate_robot_to(p.id, angle)
                                 reset_robot_phase[p.id] = 'orienting'
-                                log.info("Reset robot %d en posición → orientando (%.1f°)", p.id, angle)
+                                log.info("Saque robot %d en posición → orientando (%.1f°)", p.id, angle)
                             elif phase == 'orienting' and action is None:
                                 reset_robot_phase[p.id] = 'done'
+
+                # Gate de saque listo: pelota repuesta al centro + todos los robots
+                # ACTUALMENTE detectados en posición. Un robot perdido (detección stale)
+                # se excluye para no colgar el saque; el operador lo reubica a mano.
+                cx, cy = FIELD_CAM.center
+                kickoff_ball_centered = (
+                    ball_initialized
+                    and math.hypot(ball.x - cx, ball.y - cy) <= KICKOFF_BALL_CENTER_TOL_PX
+                )
+                _present = [p for bm in (bm_red, bm_blue) for p in bm.team_players
+                            if now - p.last_seen_t < ROBOT_DETECTION_LOST_RAMPDOWN_S]
+                kickoff_ready = bool(_present) and kickoff_ball_centered and all(
+                    reset_robot_phase.get(p.id) == 'done' for p in _present)
 
                 # Ejecutar subfase activa
                 for bm in (bm_red, bm_blue):
@@ -1212,6 +1302,10 @@ def decision_process_2v2(
                         'pre_init': pre_init,
                         'init_ready': init_ready,
                         'ball_detected': ball_initialized,
+                        'goal_scored_team': scored_team,
+                        'kickoff_conceding': kickoff_conceding,
+                        'kickoff_ball_centered': kickoff_ball_centered,
+                        'kickoff_ready': kickoff_ready,
                         'timestamp': now,
                     })
                     last_viz_time = now
