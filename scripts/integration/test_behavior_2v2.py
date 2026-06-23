@@ -1165,13 +1165,19 @@ def visualization_process_2v2(perception_pipe, decision_pipe, keyboard_pipe,
     except KeyboardInterrupt:
         pass
     finally:
+        # Guardar cada JSON de forma independiente: si el cálculo/serialización de
+        # uno falla, el otro igual se escribe (antes un fallo en summary dejaba sin
+        # timeline, y viceversa).
         try:
             out_path = save_metrics('match_2v2', recorder.summary(score))
             log.info("Métricas del partido guardadas en %s", out_path)
+        except Exception as e:
+            log.error("No se pudieron guardar las métricas del partido: %s", e)
+        try:
             tl_path = save_metrics('timeline_2v2', recorder.timeline_data(score))
             log.info("Timeline de debug guardado en %s", tl_path)
         except Exception as e:
-            log.error("No se pudieron guardar las métricas del partido: %s", e)
+            log.error("No se pudo guardar el timeline de debug: %s", e)
         shm.close()
         cv2.destroyAllWindows()
         log.info("Visualizacion 2v2 finalizada")
@@ -1262,6 +1268,13 @@ def main():
             proc.join()
     except KeyboardInterrupt:
         log.info("Interrumpido por usuario")
+        # Los procesos hijos también reciben el SIGINT (mismo grupo de terminal) y
+        # guardan sus JSON (match + timeline) en su propio finally. Esperarlos primero:
+        # si se los termina de inmediato, la Visualización puede morir entre el guardado
+        # del match y el del timeline y quedaría un solo JSON. Forzar terminate sólo si
+        # no salen tras el plazo.
+        for proc in processes:
+            proc.join(timeout=8)
         for proc in processes:
             if proc.is_alive():
                 proc.terminate()
