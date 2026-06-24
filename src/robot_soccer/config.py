@@ -172,6 +172,15 @@ BT_SUPPORT_DISTANCE_RATIO = 0.133
 BT_DEFENDER_WAIT_RATIO = 0.20
 BT_DEFENDER_STAND_DIST_RATIO = 0.20  # distancia del sweeper desde el arco propio (fracción del ancho del campo)
 DEFENDER_WAIT_MAX_S = 5.0  # s — timeout máximo de espera del defensor
+
+# --- Cesión del defensor al atacante aliado (prioridad del atacante) ---
+# Cuando el atacante aliado se acerca demasiado al defensor, el defensor le cede el
+# paso retrocediendo en línea recta (sin girar), evitando el choque entre aliados.
+# El atacante tiene prioridad de movimiento. Histéresis START/CLEAR para no oscilar.
+# Distancias centro-a-centro (radio físico del robot ~30 px → contacto ~60 px).
+DEFENDER_YIELD_START_PX   = 70  # px — atacante más cerca que esto → empezar a retroceder
+DEFENDER_YIELD_CLEAR_PX   = 95  # px — atacante más lejos que esto → dejar de ceder
+DEFENDER_YIELD_REVERSE_PWM = 30  # PWM — velocidad de retroceso recto (ambas ruedas, negativo)
 BT_DRIBBLE_SPACING_RATIO = 0.08
 BT_DRIBBLE_GOAL_RATIO = 0.133
 BT_DEFENSIVE_ARRIVAL_RATIO = 0.05   # 32px — umbral de llegada al punto defensivo

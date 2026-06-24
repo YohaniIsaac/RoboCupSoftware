@@ -54,6 +54,9 @@ from robot_soccer.config import (
     ADVANCE_BALL_DRIFT_DEG,
     ADVANCE_CONTACT_ALIGN_DEG,
     DEFENDER_WAIT_MAX_S,
+    DEFENDER_YIELD_START_PX,
+    DEFENDER_YIELD_CLEAR_PX,
+    DEFENDER_YIELD_REVERSE_PWM,
     POST_KICK_COOLDOWN_S,
     PATH_PLANNING_ROBOT_OBSTACLE_RADIUS,
     PATH_PLANNING_OBSTACLE_CLEARANCE,
@@ -1012,6 +1015,71 @@ def block_opponent(blackboard):
     return NodeStatus.RUNNING
 
 
+def _defender_yield_to_attacker(blackboard):
+    """Cede el paso al atacante aliado retrocediendo recto (sin girar).
+
+    Si el atacante aliado se acerca a menos de DEFENDER_YIELD_START_PX, el defensor
+    retrocede en línea recta (PWM negativo igual en ambas ruedas, sin rotar) para no
+    estorbar y evitar el choque entre aliados: el atacante tiene prioridad de
+    movimiento. Histéresis START/CLEAR para no oscilar.
+
+    Solo retrocede si el atacante está del lado de la nariz (retroceder lo aleja) y
+    si la posición proyectada sigue dentro del campo (guard de borde vía clamp); de
+    lo contrario no cede y el caller sigue con la lógica defensiva normal.
+
+    Returns:
+        NodeStatus.RUNNING si está cediendo; None si no aplica.
+    """
+    attacker = None
+    for teammate in blackboard.team_players:
+        if teammate.id != blackboard.player.id and teammate.rol == ROL_ATACANTE:
+            attacker = teammate
+            break
+
+    def _stop_yield():
+        if getattr(blackboard, '_yielding_to_ally', False):
+            blackboard._yielding_to_ally = False
+            blackboard.command_manager.actions_in_progress.pop(blackboard.player.id, None)
+        return None
+
+    if attacker is None:
+        return _stop_yield()
+
+    me   = np.array(blackboard.player.get_position(), dtype=float)
+    rel  = np.array(attacker.get_position(), dtype=float) - me
+    dist = float(np.linalg.norm(rel))
+
+    # Histéresis: arrancar a START, soltar recién pasado CLEAR.
+    yielding  = getattr(blackboard, '_yielding_to_ally', False)
+    threshold = DEFENDER_YIELD_CLEAR_PX if yielding else DEFENDER_YIELD_START_PX
+    if dist >= threshold or dist < 1.0:
+        return _stop_yield()
+
+    # Retroceder solo ayuda si el atacante está del lado de la nariz (dot>0): así el
+    # retroceso lo aleja. Si está detrás, retroceder lo embestiría → no ceder.
+    rad = np.radians(blackboard.player.angle)
+    fwd = np.array([np.cos(rad), np.sin(rad)])
+    if float(fwd @ rel) <= 0.0:
+        return _stop_yield()
+
+    # Guard de borde: si al retroceder un radio de robot la posición sale del campo
+    # (clamp la modifica), no retroceder (evita encajarse contra pared/arco propio).
+    back_pt = me - fwd * float(PATH_PLANNING_ROBOT_OBSTACLE_RADIUS)
+    if tuple(blackboard.field.clamp(back_pt)) != (int(back_pt[0]), int(back_pt[1])):
+        return _stop_yield()
+
+    blackboard._yielding_to_ally = True
+    blackboard.command_manager.creep_forward(
+        blackboard.player.id, speed=-DEFENDER_YIELD_REVERSE_PWM
+    )
+    blackboard.last_action = "yielding_to_attacker"
+    robot_status_logger.emit_event(
+        blackboard.player.id,
+        f"defensor CEDE: atacante a {dist:.0f}px -> retroceso recto"
+    )
+    return NodeStatus.RUNNING
+
+
 def move_to_defensive_position(blackboard):
     """Mover el jugador a una posición defensiva estratégica.
 
@@ -1034,6 +1102,12 @@ def move_to_defensive_position(blackboard):
             "No command manager found in blackboard. Action may not work properly."
         )
         return NodeStatus.FAILURE
+
+    # PRIORIDAD 0: ceder el paso al atacante aliado si está muy cerca (retroceso
+    # recto). Evita el choque entre aliados dando prioridad de movimiento al atacante.
+    _yield = _defender_yield_to_attacker(blackboard)
+    if _yield is not None:
+        return _yield
 
     ball_pos = blackboard.ball.get_position()
     player_pos = blackboard.player.get_position()
