@@ -765,8 +765,14 @@ CREEP_BASE_MIN_PWM   = 16   # PWM — base más lenta y piso de rueda para el de
 CREEP_BASE_MAX_PWM   = 30   # PWM — ceiling del base (techo del regulador y gate del creep)
 CREEP_TARGET_DISP_PX = 5    # px — desplazamiento objetivo por ventana (> piso de ruido ArUco ~3-5)
 CREEP_DISP_DEADBAND_PX = 2  # px — banda muerta alrededor del objetivo para no oscilar
-CREEP_REG_WINDOW_S   = 0.4  # s  — ventana de medición de desplazamiento (~8 frames @ 20 FPS)
-CREEP_BASE_STEP_PWM  = 2    # PWM — ajuste del base por ventana
+# Ventana de medición + paso del ajuste gobiernan qué tan rápido sube el PWM base.
+# Antes (0.4 s, +2): ~5 PWM/s — al vencer la fricción estática el robot daba un
+# tirón a PWM alto y empujaba la pelota. Ahora (0.6 s, +1): ~1.7 PWM/s, rampa 3x
+# más suave; rompe la fricción más cerca del umbral real (tirón menor) y la ventana
+# más larga da una señal de desplazamiento más limpia frente al jitter de ArUco
+# (menos subidas espurias justo al lado de la pelota).
+CREEP_REG_WINDOW_S   = 0.6  # s  — ventana de medición de desplazamiento (~12 frames @ 20 FPS)
+CREEP_BASE_STEP_PWM  = 1    # PWM — ajuste del base por ventana
 
 # =============================================================================
 # Parámetros de Control PID
