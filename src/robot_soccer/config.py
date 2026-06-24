@@ -539,13 +539,16 @@ KICK_POINT_OFFSET_PX    = 30  # px — distancia centro robot → punto donde el
                               #      (calibrar físicamente: medir desde marker ArUco hasta
                               #      el punto de impacto del solenoide cuando el robot está
                               #      en posición ideal de kick).
-KICK_POINT_TOLERANCE_PX = 12  # px — radio aceptable bola ↔ kick_point para confirmar contacto.
-                              #      Debe ser > CONTACT_APPROACH_OVERSHOOT_PX (10): en reposo sobre
-                              #      el target de overshoot (pelota − 20·û_arco) el kick_point queda
-                              #      ~10px pasado la pelota aun perfectamente alineado, así que con 6
-                              #      el contacto sólo se captaba en una ventana de tránsito estrecha
-                              #      que el creep lento se saltaba → nunca disparaba. 12 capta el
-                              #      reposo y el tránsito. Sigue dentro del radio de la pelota.
+KICK_POINT_TOLERANCE_PX = 10  # px — tolerancia LATERAL: desvío máx. de la pelota respecto al eje
+                              #      de la nariz para confirmar contacto (no un radio simétrico; el
+                              #      avance longitudinal lo gobierna CONTACT_REACH_MARGIN_PX). 10px ≈
+                              #      ~19.5° de error de heading a la distancia de impacto: cubre un
+                              #      staging de 15° con margen y queda bajo el aborto de 25°.
+CONTACT_REACH_MARGIN_PX = 4   # px — margen longitudinal: el solenoide se considera que ALCANZÓ la
+                              #      pelota cuando L (avance de la pelota sobre la nariz) <=
+                              #      KICK_POINT_OFFSET_PX + este margen (=34). Evita el disparo "corto"
+                              #      (p.ej. L=42, kick_point 12px antes de la pelota) y deja que el
+                              #      overshoot empuje hasta que la pelota frene al robot (~L=30).
 KICK_POINT_ANGLE_OFFSET_DEG = 0.0  # ° — offset angular entre el eje del marker ArUco y el eje
                                     #      real del solenoide (desalineación mecánica). Calibrar
                                     #      con el robot en múltiples orientaciones en el centro

@@ -30,6 +30,7 @@ from robot_soccer.config import (
     KICK_POINT_OFFSET_PX,
     CONTACT_APPROACH_OVERSHOOT_PX,
     KICK_POINT_TOLERANCE_PX,
+    CONTACT_REACH_MARGIN_PX,
     KICK_POINT_ANGLE_OFFSET_DEG,
     KICK_FAIL_DETECT_WINDOW_S,
     KICK_SUCCESS_MIN_PX,
@@ -1306,6 +1307,32 @@ def _path_near_ball(p1, p2, ball, threshold=35):
     return bool(np.linalg.norm(closest - b) < threshold)
 
 
+def _kick_contact(player_pos, player_angle_deg, ball_pos):
+    """Contacto direccional con la pelota para confirmar que se puede patear.
+
+    Descompone la posición de la pelota relativa al robot en el eje de la nariz:
+      L = avance de la pelota a lo largo de la nariz (positivo = pelota delante).
+      D = desvío lateral de la pelota respecto al eje de la nariz.
+
+    Hay contacto cuando el solenoide (a KICK_POINT_OFFSET_PX) ALCANZÓ la pelota —
+    L <= KICK_POINT_OFFSET_PX + CONTACT_REACH_MARGIN_PX, es decir NO corto (esto
+    obliga a completar el overshoot: el robot empuja hasta que la pelota lo frena
+    ~L=30) — y la pelota está centrada (D < KICK_POINT_TOLERANCE_PX). A diferencia
+    de un radio simétrico |pelota − kick_point|, distingue "corto" (no patear) de
+    "alcanzado/pasado" (patear).
+
+    Returns:
+        (ok, L, D): bool de contacto y las componentes longitudinal/lateral (px).
+    """
+    rad = np.radians(player_angle_deg + KICK_POINT_ANGLE_OFFSET_DEG)
+    u   = np.array([np.cos(rad), np.sin(rad)])
+    rel = np.asarray(ball_pos, dtype=float) - np.asarray(player_pos, dtype=float)
+    L   = float(rel @ u)
+    D   = float(np.linalg.norm(rel - L * u))
+    ok  = (0.0 < L <= KICK_POINT_OFFSET_PX + CONTACT_REACH_MARGIN_PX) and (D < KICK_POINT_TOLERANCE_PX)
+    return ok, L, D
+
+
 def _clear_advance_state(blackboard, player_id):
     """Limpia estado del avance al contacto: para motores, desactiva creep PID."""
     blackboard.command_manager.actions_in_progress.pop(player_id, None)
@@ -1731,23 +1758,17 @@ def _advance_to_contact_start(blackboard):
         np.arctan2(ball_pos[1] - player_pos[1], ball_pos[0] - player_pos[0])
     ))
 
-    # ¿Ya en contacto desde el inicio? Gate por kick_point: la pelota debe
-    # estar a la altura del punto de impacto del solenoide, no sólo cerca
-    # del centro del robot.
-    heading_rad = np.radians(blackboard.player.angle + KICK_POINT_ANGLE_OFFSET_DEG)
-    kick_point  = np.array([
-        player_pos[0] + KICK_POINT_OFFSET_PX * np.cos(heading_rad),
-        player_pos[1] + KICK_POINT_OFFSET_PX * np.sin(heading_rad),
-    ])
-    kick_err = float(np.linalg.norm(ball_pos - kick_point))
-    if kick_err < KICK_POINT_TOLERANCE_PX:
+    # ¿Ya en contacto desde el inicio? Gate direccional: el solenoide debe haber
+    # ALCANZADO la pelota (no quedar corto) y la pelota centrada en la nariz.
+    contact_ok, _L, _D = _kick_contact(player_pos, blackboard.player.angle, ball_pos)
+    if contact_ok:
         blackboard._contact_made         = True
         blackboard._contact_settle_start = time.time()
         blackboard.player._has_ball      = True
         blackboard.last_action           = "settling_contact"
         robot_status_logger.emit_event(
             player_id,
-            f"advance_contact CONTACTO INMEDIATO: kick_err={kick_err:.1f}px"
+            f"advance_contact CONTACTO INMEDIATO: L={_L:.1f}px D={_D:.1f}px"
         )
         return NodeStatus.RUNNING
 
@@ -1927,15 +1948,12 @@ def _advance_to_contact_running(blackboard):
             )
             return NodeStatus.FAILURE
 
-        # Contacto alcanzado: gate por kick_point (la pelota debe estar
-        # delante del robot a la altura del solenoide, no sólo cerca).
-        heading_rad = np.radians(blackboard.player.angle + KICK_POINT_ANGLE_OFFSET_DEG)
-        kick_point  = np.array([
-            player_pos[0] + KICK_POINT_OFFSET_PX * np.cos(heading_rad),
-            player_pos[1] + KICK_POINT_OFFSET_PX * np.sin(heading_rad),
-        ])
-        kick_err = float(np.linalg.norm(ball_pos - kick_point))
-        if kick_err < KICK_POINT_TOLERANCE_PX:
+        # Contacto alcanzado: gate direccional — el solenoide ALCANZÓ la pelota
+        # (L <= offset + margen, no corto) y la pelota centrada en la nariz. Así
+        # el overshoot empuja hasta que la pelota frena al robot y recién ahí se
+        # confirma → asienta → patea (disparo real, no al vacío 12px antes).
+        contact_ok, _L, _D = _kick_contact(player_pos, blackboard.player.angle, ball_pos)
+        if contact_ok:
             _clear_advance_state(blackboard, player_id)
             blackboard._contact_made         = True
             blackboard._contact_settle_start = time.time()
@@ -1943,7 +1961,7 @@ def _advance_to_contact_running(blackboard):
             blackboard.last_action           = "settling_contact"
             robot_status_logger.emit_event(
                 player_id,
-                f"advance_contact CONTACTO: kick_err={kick_err:.1f}px asentando {CONTACT_SETTLE_TIME_S:.2f}s..."
+                f"advance_contact CONTACTO: L={_L:.1f}px D={_D:.1f}px asentando {CONTACT_SETTLE_TIME_S:.2f}s..."
             )
             return NodeStatus.RUNNING
 
