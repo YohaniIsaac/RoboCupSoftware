@@ -727,8 +727,13 @@ CIRCLE_BALL_ACTIVATE_DISTANCE_PX = 55
 # Radio del arco. Igual a BEHIND_BALL_APPROACH_PX para que el final del arco
 # coincida exactamente con behind_pos (transición sin discontinuidades al exit).
 CIRCLE_BALL_RADIUS_PX = 60
-# Avance angular por tick. 15° a 19 FPS → ~1.3 s por vuelta completa.
-CIRCLE_BALL_STEP_ANGLE_DEG = 15.0
+# Avance angular por waypoint del arco. La cuerda entre waypoints consecutivos
+# (2·R·sin(step/2) = 31 px a R=60) DEBE superar el guard de de-duplicación de
+# move_robot_to (20 px) y el umbral de llegada (BEHIND_BALL_ARRIVAL_PX=15): con
+# 15° la cuerda era 15.7 px < ambos, el robot llegaba a un waypoint y el siguiente
+# quedaba dentro del guard → cada comando se ignoraba → freeze al alinear. 30°
+# garantiza progreso real por salto. El PID interpola entre waypoints (sigue suave).
+CIRCLE_BALL_STEP_ANGLE_DEG = 30.0
 # Tolerancia para salir del estado 'circle' y cambiar a 'direct'. Más laxo que
 # BEHIND_BALL_ALIGN_TOLERANCE_DEG (15°) porque después viene el approach final.
 CIRCLE_BALL_EXIT_TOLERANCE_DEG = 30.0

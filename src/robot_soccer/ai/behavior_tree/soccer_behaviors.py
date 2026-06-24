@@ -1532,9 +1532,13 @@ def _move_behind_ball_start(blackboard):
                 f"behind_ball CIRCLE INICIO: dist={dist_to_ball:.0f}px "
                 f"err_ang={ang_err:.0f}° -> ({target[0]},{target[1]})"
             )
+            # direct=True: el arco es una maniobra geométrica de corto alcance que
+            # NO debe pasar por RRT* (la pelota, a CIRCLE_BALL_RADIUS_PX, es obstáculo
+            # y el planner proyecta/retiene el waypoint → freeze). PID directo: la
+            # acción se borra al llegar a cada waypoint, habilitando el siguiente.
             blackboard.command_manager.move_robot_to(
                 blackboard.player.id, target,
-                arrival_threshold=BEHIND_BALL_ARRIVAL_PX,
+                arrival_threshold=BEHIND_BALL_ARRIVAL_PX, direct=True,
             )
             blackboard.last_action = "circle_ball"
             return NodeStatus.RUNNING
@@ -1654,9 +1658,11 @@ def _move_behind_ball_running(blackboard):
 
         lookahead = np.array(blackboard.field.clamp(lookahead.astype(int)), dtype=float)
         target = (int(lookahead[0]), int(lookahead[1]))
+        # direct=True: arco sin RRT* (ver CIRCLE INICIO). Evita que el planner
+        # proyecte el waypoint pegado a la pelota y retenga al robot (freeze).
         blackboard.command_manager.move_robot_to(
             player_id, target,
-            arrival_threshold=BEHIND_BALL_ARRIVAL_PX,
+            arrival_threshold=BEHIND_BALL_ARRIVAL_PX, direct=True,
         )
         blackboard.last_action = "circle_ball"
         return NodeStatus.RUNNING
