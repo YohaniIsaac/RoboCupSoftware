@@ -616,6 +616,12 @@ FIELD_PHYSICAL_HEIGHT_CM     = 88.0   # cm — alto real del área de juego (lad
 # retroceder (kick desalineado) o re-avanzar (fallo mecánico).
 KICK_FAIL_DETECT_WINDOW_S = 0.5  # s — ventana tras el kick para evaluar éxito
 KICK_SUCCESS_MIN_PX       = 25   # px — desplazamiento mínimo de la bola que indica kick exitoso
+# Gracia (debounce) antes de declarar 'fallo mecánico': behind_ball evalúa el resultado del
+# kick ~0.11s después de disparar, pero la cámara (~24 FPS + lag) tarda 1-2 frames en reflejar
+# el vuelo de la pelota. Dentro de esta gracia, 'bola aún alineada/sin moverse' es AMBIGUO
+# (kick exitoso sin registrar aún vs. fallo real); el log lo marca como pendiente, no como
+# fallo. No cambia la acción (reintentar avance es correcto en ambos casos).
+KICK_FAIL_GRACE_S         = 0.2  # s — antes de esto, no etiquetar 'fallo mecánico' (vuelo sin registrar)
 
 # Velocidad PWM para el acercamiento lento hacia la pelota (sin dribbler).
 # Se envía directamente a los motores sin PID.

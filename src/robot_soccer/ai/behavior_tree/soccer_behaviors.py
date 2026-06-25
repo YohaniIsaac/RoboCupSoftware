@@ -34,6 +34,7 @@ from robot_soccer.config import (
     CONTACT_REACH_MARGIN_PX,
     KICK_POINT_ANGLE_OFFSET_DEG,
     KICK_FAIL_DETECT_WINDOW_S,
+    KICK_FAIL_GRACE_S,
     KICK_SUCCESS_MIN_PX,
     BEHIND_BALL_ARRIVAL_PX,
     DEFENSIVE_POS_ARRIVAL_PX,
@@ -1557,11 +1558,20 @@ def _move_behind_ball_start(blackboard):
                 # Sub-caso (2): saltar retroceso y dejar que advance_contact reintente.
                 # No setear phase='retreat'; caer al flujo normal de behind_ball.
                 blackboard._ball_pos_at_kick = None  # consumido
-                robot_status_logger.emit_event(
-                    blackboard.player.id,
-                    f"behind_ball KICK FALLO MECANICO: "
-                    f"bola alineada (kick_err={err_now:.0f}px) -> reintentar avance"
-                )
+                # Debounce del veredicto: a <KICK_FAIL_GRACE_S del kick, 'bola aún alineada'
+                # es AMBIGUO — la cámara tarda 1-2 frames en reflejar el vuelo, así que puede
+                # ser un disparo exitoso todavía sin registrar (no un fallo mecánico). La
+                # acción (reintentar avance) es la correcta en ambos casos: si voló, on_running
+                # lo detecta (PELOTA MOVIDA) y persigue. Solo el log distingue, para no marcar
+                # 'fallo' prematuro (lo observado: kick exitoso etiquetado FALLO MECANICO).
+                if secs_since_kick < KICK_FAIL_GRACE_S:
+                    msg = (f"behind_ball POST-KICK: bola aún alineada "
+                           f"(kick_err={err_now:.0f}px, {secs_since_kick:.2f}s, vuelo sin "
+                           f"registrar aún) -> reintentar avance")
+                else:
+                    msg = (f"behind_ball KICK FALLO MECANICO: bola alineada "
+                           f"(kick_err={err_now:.0f}px) -> reintentar avance")
+                robot_status_logger.emit_event(blackboard.player.id, msg)
             # Sub-caso (3) cae al bloque RETROCESO de abajo.
 
     # Fase RETROCESO: si acabamos de patear y la pelota sigue pegada al robot,
