@@ -501,10 +501,10 @@ MOTOR_MAX_PWM = 127              # PWM máximo absoluto del motor (límite firmw
 # las velocidades efectivas pueden reducirse ~20-40%.
 #
 # Perfil: LEJOS → velocidad constante MIN, RAMPA → desacelera de MIN a NEAR_MIN
-ROBOT_MIN_ROTATION_SPEED = 50  # Velocidad cuando LEJOS del objetivo (PWM, >= MOTOR_MIN_MOVEMENT_PWM)
-ROBOT_MAX_ROTATION_SPEED = 65  # Velocidad máxima de rotación (PWM)
+ROBOT_MIN_ROTATION_SPEED = 50  # [SIN USO] rotate_to_angle pasa el rango del JSON; default inalcanzable de _apply_rotation_profile
+ROBOT_MAX_ROTATION_SPEED = 65  # [SIN USO] idem ROBOT_MIN_ROTATION_SPEED (default inalcanzable)
 ROBOT_ROTATION_ARRIVAL_ANGLE_DEG = 25.0  # Ángulo donde empieza rampa de desaceleración (grados)
-ROBOT_ROTATION_NEAR_MIN = 45  # Velocidad mínima EN LA RAMPA (PWM, debe ser <= MIN y >= dead zone)
+ROBOT_ROTATION_NEAR_MIN = 45  # [SIN USO] self.rotation_near_min no tiene ningún lector
 
 # --- Velocidades de Movimiento Lineal (en PWM: 0-127) ---
 # Todos los valores deben superar MOTOR_MIN_MOVEMENT_PWM (50) para garantizar
@@ -514,7 +514,7 @@ ROBOT_ROTATION_NEAR_MIN = 45  # Velocidad mínima EN LA RAMPA (PWM, debe ser <= 
 ROBOT_MIN_LINEAR_SPEED = 55  # Velocidad cuando LEJOS (PWM, >= MOTOR_MIN_MOVEMENT_PWM)
 ROBOT_MAX_LINEAR_SPEED = 80  # Velocidad máxima de movimiento (PWM)
 ROBOT_LINEAR_ARRIVAL_DISTANCE = 51  # Distancia donde empieza rampa de desaceleración (píxeles)
-ROBOT_LINEAR_NEAR_MIN = 50  # Velocidad mínima EN LA RAMPA (PWM, debe ser <= MIN y >= dead zone)
+ROBOT_LINEAR_NEAR_MIN = 50  # [SIN USO] self.linear_near_min no tiene ningún lector
 
 # --- Umbral de Inicio de Movimiento Lineal ---
 # Ángulo máximo donde el robot puede comenzar a moverse linealmente mientras corrige

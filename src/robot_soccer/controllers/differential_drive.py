@@ -129,13 +129,13 @@ class DifferentialDriveController:
         self.min_motor_speed = ROBOT_MIN_LINEAR_SPEED  # MIN cuando LEJOS (PWM)
         self.max_smooth_speed = ROBOT_MAX_LINEAR_SPEED  # MAX (PWM)
         self.distance_near = ROBOT_LINEAR_ARRIVAL_DISTANCE  # Donde empieza rampa (px)
-        self.linear_near_min = ROBOT_LINEAR_NEAR_MIN  # MIN en la rampa (PWM)
+        self.linear_near_min = ROBOT_LINEAR_NEAR_MIN  # [SIN USO] sin lector; _apply_velocity_profile no lo referencia
 
         # Parámetros de perfil de velocidad angular (desde config.py, en PWM)
-        self.min_rotation_speed = ROBOT_MIN_ROTATION_SPEED  # MIN cuando LEJOS (PWM)
-        self.max_rotation_speed = ROBOT_MAX_ROTATION_SPEED  # MAX (PWM)
+        self.min_rotation_speed = ROBOT_MIN_ROTATION_SPEED  # [SIN USO] solo default inalcanzable de _apply_rotation_profile
+        self.max_rotation_speed = ROBOT_MAX_ROTATION_SPEED  # [SIN USO] solo default inalcanzable de _apply_rotation_profile
         self.angle_near = math.radians(ROBOT_ROTATION_ARRIVAL_ANGLE_DEG)  # Donde empieza rampa (rad)
-        self.rotation_near_min = ROBOT_ROTATION_NEAR_MIN  # MIN en la rampa (PWM)
+        self.rotation_near_min = ROBOT_ROTATION_NEAR_MIN  # [SIN USO] sin lector; _apply_rotation_profile no lo referencia
 
         # Override de velocidad lineal máxima (para creep/captura)
         # Cuando no es None, v se capea a este valor DESPUÉS del perfil de velocidad
