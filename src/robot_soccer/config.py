@@ -503,7 +503,7 @@ MOTOR_MAX_PWM = 127              # PWM máximo absoluto del motor (límite firmw
 # Perfil: LEJOS → velocidad constante MIN, RAMPA → desacelera de MIN a NEAR_MIN
 ROBOT_MIN_ROTATION_SPEED = 50  # [SIN USO] rotate_to_angle pasa el rango del JSON; default inalcanzable de _apply_rotation_profile
 ROBOT_MAX_ROTATION_SPEED = 65  # [SIN USO] idem ROBOT_MIN_ROTATION_SPEED (default inalcanzable)
-ROBOT_ROTATION_ARRIVAL_ANGLE_DEG = 25.0  # Ángulo donde empieza rampa de desaceleración (grados)
+ROBOT_ROTATION_ARRIVAL_ANGLE_DEG = 30.0  # Frontera lejos/cerca: inicio de rampa y conmutación de gain scheduling (grados)
 ROBOT_ROTATION_NEAR_MIN = 45  # [SIN USO] self.rotation_near_min no tiene ningún lector
 
 # --- Velocidades de Movimiento Lineal (en PWM: 0-127) ---
@@ -860,3 +860,11 @@ PID_POSITION_KD = 0.0836
 PID_ANGLE_KP = 0.3522000000008896
 PID_ANGLE_KI = 0.02
 PID_ANGLE_KD = 0.05
+
+# Gain scheduling de rotación: ganancia P agresiva usada SOLO en rotate_to_angle
+# cuando |error| > ROBOT_ROTATION_ARRIVAL_ANGLE_DEG (zona lejos). Satura el perfil
+# al techo del robot (pwm_max del JSON) para girar rápido lejos del objetivo. Cerca
+# (|error| <= ROBOT_ROTATION_ARRIVAL_ANGLE_DEG) se usa el PID_ANGLE_KP calibrado
+# (asentamiento suave, sin sobreimpulso). NO afecta la corrección angular del
+# movimiento lineal (esa sigue con PID_ANGLE_KP). Calibrable en banco.
+PID_ANGLE_KP_ROTATION_FAR = 2.0

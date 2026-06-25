@@ -22,6 +22,7 @@ from robot_soccer.config import (
     PID_ANGLE_KP,
     PID_ANGLE_KI,
     PID_ANGLE_KD,
+    PID_ANGLE_KP_ROTATION_FAR,
     STUCK_MOVEMENT_THRESHOLD_PX,
     STUCK_DETECTION_WINDOW_S,
     STUCK_BOOST_INCREMENT,
@@ -116,6 +117,9 @@ class DifferentialDriveController:
         self.kp_angle = PID_ANGLE_KP       # Ganancia proporcional angular
         self.ki_angle = PID_ANGLE_KI       # Ganancia integral angular
         self.kd_angle = PID_ANGLE_KD       # Ganancia derivativa angular
+        # Gain scheduling de rotación: kp agresiva lejos del objetivo (solo en
+        # rotate_to_angle, |error| > angle_near). Ver PID_ANGLE_KP_ROTATION_FAR.
+        self.kp_angle_rotation_far = PID_ANGLE_KP_ROTATION_FAR
 
         # Compensación de latencia para predictive stopping
         # Medición real: 25 FPS (40ms/frame) + procesamiento (15ms) + RF (10ms) = ~65ms
@@ -937,8 +941,14 @@ class DifferentialDriveController:
         state['last_pid_time'] = now_angle
         dt_angle = max(0.001, min(0.1, dt_angle))
 
-        # Proporcional
-        p_term = self.kp_angle * angle_error
+        # Proporcional con gain scheduling: ganancia agresiva lejos del objetivo
+        # (pisa el acelerador hasta el techo del perfil) y ganancia calibrada cerca
+        # (asentamiento suave, sin sobreimpulso). Evita reintroducir el kp alto
+        # global (kp=2.84) que se descartó por oscilación cerca del setpoint.
+        kp = (self.kp_angle_rotation_far
+              if abs(angle_error) > self.angle_near
+              else self.kp_angle)
+        p_term = kp * angle_error
 
         # Integral (con anti-windup, basado en tiempo)
         if (state['last_error_angle'] * angle_error) < 0:
