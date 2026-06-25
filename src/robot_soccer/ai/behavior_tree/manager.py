@@ -162,6 +162,11 @@ class BehaviorManager:
                 from robot_soccer.config import ROL_DEFENSIVO
                 p.set_rol(ROL_DEFENSIVO)
                 self.trees[p.id] = create_defender_tree()
+            # Reiniciar el cronómetro de posesión: un atacante recién promovido empieza
+            # de cero (evita que un valor obsoleto dispare el tope al instante).
+            bb = self.blackboards.get(p.id)
+            if bb is not None:
+                bb._possession_start_time = None
         self._role_last_switch_t = now
 
     def get_current_state(self, player_id):

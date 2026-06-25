@@ -671,6 +671,15 @@ POST_KICK_COOLDOWN_S   = 0.8  # s — cooldown tras patear antes de poder detect
 # de kick_when_clear para que nunca cuelgue; el tope duro de posesión es POSSESSION_MAX_TIME_S.
 SHOT_WAIT_MAX_S = 2.0  # s — espera máx. por línea de tiro libre antes de disparar igual
 
+# Tope duro de posesión: tiempo máximo que el atacante puede estar 'en posesión'
+# (continuamente cerca de la pelota: dist < CIRCLE_BALL_ACTIVATE_DISTANCE_PX) antes de
+# disparar a la fuerza y retirarse. Evita que el robot orbite/forcejee indefinidamente
+# junto a la pelota (oscilación observada de ~11s). La SSL no impone un límite de TIEMPO
+# de posesión en cancha (su regla análoga es de distancia: driblar <=1m); 4s es una
+# adaptación al campo chico, donde la posesión sin dribbler es frágil.
+POSSESSION_MAX_TIME_S = 4.0          # s  — tope de posesión antes del disparo forzado
+POSSESSION_RELEASE_DISTANCE_PX = 100 # px — la pelota a >N px resetea el cronómetro (posesión perdida)
+
 # Factores de escape para detectar que la pelota se alejó demasiado.
 # Durante avance: dist > BEHIND_BALL_APPROACH_PX * ADVANCE_ESCAPE_FACTOR → abortar
 # Durante asentamiento: dist > CAPTURE_CONFIRM_DISTANCE_PX * SETTLE_ESCAPE_FACTOR → abortar

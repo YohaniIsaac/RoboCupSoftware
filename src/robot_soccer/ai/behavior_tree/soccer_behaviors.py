@@ -60,6 +60,8 @@ from robot_soccer.config import (
     DEFENDER_YIELD_REVERSE_PWM,
     POST_KICK_COOLDOWN_S,
     SHOT_WAIT_MAX_S,
+    POSSESSION_MAX_TIME_S,
+    POSSESSION_RELEASE_DISTANCE_PX,
     PATH_PLANNING_ROBOT_OBSTACLE_RADIUS,
     PATH_PLANNING_OBSTACLE_CLEARANCE,
     RIVAL_HOLD_YIELD_S,
@@ -1420,6 +1422,34 @@ def _clear_advance_state(blackboard, player_id):
         rf.set_motors(player_id + 1, 0, 0)
 
 
+# ── Cronómetro de posesión (tope duro de tiempo con la pelota) ──────────────────
+def _possession_reset(blackboard):
+    """Detiene el cronómetro de posesión (tras kick, pérdida de pelota o cambio de rol)."""
+    blackboard._possession_start_time = None
+
+
+def _possession_track(blackboard, dist_to_ball):
+    """Arranca/resetea el cronómetro de posesión según la proximidad a la pelota.
+
+    Arranca al entrar el atacante a la zona de la pelota (< CIRCLE_BALL_ACTIVATE_DISTANCE_PX)
+    si no estaba activo; lo resetea si la pelota se aleja (> POSSESSION_RELEASE_DISTANCE_PX).
+    Entre ambos umbrales mantiene el valor (histéresis). Llamado desde los running de
+    move_behind_ball y advance_to_contact.
+    """
+    active = getattr(blackboard, '_possession_start_time', None) is not None
+    if dist_to_ball > POSSESSION_RELEASE_DISTANCE_PX:
+        if active:
+            _possession_reset(blackboard)
+    elif dist_to_ball < CIRCLE_BALL_ACTIVATE_DISTANCE_PX and not active:
+        blackboard._possession_start_time = time.time()
+
+
+def _possession_expired(blackboard):
+    """True si el atacante lleva >= POSSESSION_MAX_TIME_S 'en posesión' (cerca de la pelota)."""
+    start = getattr(blackboard, '_possession_start_time', None)
+    return start is not None and (time.time() - start) >= POSSESSION_MAX_TIME_S
+
+
 def _compute_circle_ball_lookahead(robot_pos, ball_pos, behind_pos):
     """Calcula el siguiente waypoint sobre el círculo alrededor de la pelota.
 
@@ -1688,6 +1718,10 @@ def _move_behind_ball_running(blackboard):
     ball_pos   = np.array(blackboard.ball.get_position(), dtype=float)
     phase      = getattr(blackboard, '_behind_ball_phase', 'direct')
 
+    # Cronómetro de posesión: arranca al entrar en la zona de la pelota (tope duro en
+    # la rama de alta prioridad del árbol; ver _possession_track / _possession_expired).
+    _possession_track(blackboard, float(np.linalg.norm(ball_pos - player_pos)))
+
     # Actualizar posición anterior de la pelota cada tick para la predicción de intercepción
     blackboard._ball_prev_pos = ball_pos.copy()
 
@@ -1946,6 +1980,10 @@ def _advance_to_contact_running(blackboard):
     goal_pos   = np.array(blackboard.opponent_goal_pos, dtype=float)
     dist       = float(np.linalg.norm(ball_pos - player_pos))
 
+    # Cronómetro de posesión: sigue corriendo durante el avance al contacto
+    # (ver _possession_track / _possession_expired y la rama de tope del árbol).
+    _possession_track(blackboard, dist)
+
     contact_made = getattr(blackboard, '_contact_made', False)
 
     # ──────────────────────────────
@@ -2171,6 +2209,7 @@ def kick_immediately(blackboard):
 
     blackboard.player._has_ball = False
     blackboard._last_kick_time  = time.time()  # bloquea fast-path en move_behind_ball
+    _possession_reset(blackboard)  # la posesión terminó: reinicia el cronómetro de tope
     # Snapshot de la posición de la pelota al momento del kick: permite
     # distinguir en move_behind_ball entre kick exitoso (pelota voló) y
     # fallido (pelota apenas se movió → re-avanzar o retroceder según
@@ -2227,6 +2266,53 @@ def kick_when_clear(blackboard):
         cm.rf_controller.set_motors(player_id + 1, 0, 0)
     blackboard.last_action = "waiting_for_clear_shot"
     return NodeStatus.RUNNING
+
+
+def _forced_kick_and_retreat_start(blackboard):
+    """Tope de posesión alcanzado: dispara ya (aunque no sea ideal) e inicia la retirada.
+
+    Disparar libera la pelota y rompe la oscilación de un atacante que orbita junto a
+    ella sin resolver. Tras el disparo, retrocede recto un instante para no recolisionar.
+    """
+    if not hasattr(blackboard, "command_manager"):
+        return NodeStatus.FAILURE
+
+    robot_status_logger.emit_event(
+        blackboard.player.id,
+        f"POSESION AGOTADA ({POSSESSION_MAX_TIME_S:.1f}s) -> disparo forzado + retirada"
+    )
+    kick_immediately(blackboard)  # resetea el cronómetro de posesión
+    blackboard._retreat_until = time.time() + POST_KICK_COOLDOWN_S
+    blackboard.command_manager.creep_forward(
+        blackboard.player.id, speed=-CAPTURE_CREEP_SPEED_PWM
+    )
+    blackboard.last_action = "forced_kick_retreat"
+    return NodeStatus.RUNNING
+
+
+def _forced_kick_and_retreat_running(blackboard):
+    """Retrocede hasta cumplir _retreat_until; luego libera y reinicia el ciclo de ataque."""
+    player_id = blackboard.player.id
+    if time.time() >= getattr(blackboard, '_retreat_until', 0.0):
+        blackboard.command_manager.actions_in_progress.pop(player_id, None)
+        rf = blackboard.command_manager.rf_controller
+        if rf:
+            rf.set_motors(player_id + 1, 0, 0)
+        _possession_reset(blackboard)
+        robot_status_logger.emit_event(player_id, "retirada completa -> reanudar ataque")
+        return NodeStatus.SUCCESS
+    # creep_forward persiste hasta cancelarlo; no hace falta reemitirlo cada tick.
+    blackboard.last_action = "retreating_after_kick"
+    return NodeStatus.RUNNING
+
+
+def create_forced_kick_retreat_node():
+    """Nodo stateful: disparo forzado por tope de posesión + retirada recta."""
+    return StatefulActionNode(
+        _forced_kick_and_retreat_start,
+        _forced_kick_and_retreat_running,
+        name="DisparoForzadoYRetirada"
+    )
 
 
 def should_yield_to_rival(blackboard) -> bool:
@@ -2376,6 +2462,10 @@ def hold_intercept_position(blackboard):
     if not hasattr(blackboard, "command_manager"):
         return NodeStatus.FAILURE
 
+    # Ceder la pelota = no estoy en posesión: reinicia el cronómetro para no arrastrar
+    # un valor obsoleto al re-comprometerme con la pelota tras interceptar.
+    _possession_reset(blackboard)
+
     ball_pos   = blackboard.ball.get_position()
     player_pos = blackboard.player.get_position()
 
@@ -2457,7 +2547,9 @@ def create_attacker_tree():
     El robot nunca necesita rotar con la pelota ni activar el dribbler.
 
     Ciclo continuo:
-        PosicionarDetrásPelota → AvanzarAlContacto → DisparoInmediato → (reinicio)
+        PosicionarDetrásPelota → AvanzarAlContacto → DisparoSiLibre → (reinicio)
+
+    Prioridad: ceder al rival > tope de posesión (disparo forzado) > ciclo de ataque.
 
     Returns:
         SelectorNode: Árbol de comportamiento del atacante.
@@ -2470,6 +2562,15 @@ def create_attacker_tree():
         ActionNode(hold_intercept_position, "Interceptar"),
     )
 
+    # Tope de posesión: si el atacante lleva demasiado tiempo junto a la pelota sin
+    # resolver, dispara a la fuerza y se retira (rompe oscilación/forcejeo). Alta
+    # prioridad: preempta el ciclo de ataque y la espera de línea libre.
+    timeout_kick_branch = SequenceNode("TopePosesion")
+    timeout_kick_branch.add_children(
+        ConditionNode(_possession_expired, "PosesionAgotada"),
+        create_forced_kick_retreat_node(),
+    )
+
     # Ciclo de ataque directo: posicionar → contactar → disparar
     attack_cycle = SequenceNode("CicloAtaqueDirecto")
     attack_cycle.add_children(
@@ -2479,7 +2580,7 @@ def create_attacker_tree():
     )
 
     attacker_tree = SelectorNode("ComportamientoAtacante")
-    attacker_tree.add_children(yield_branch, attack_cycle)
+    attacker_tree.add_children(yield_branch, timeout_kick_branch, attack_cycle)
 
     return attacker_tree
 
