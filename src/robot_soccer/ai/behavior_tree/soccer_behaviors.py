@@ -1908,8 +1908,11 @@ def _advance_to_contact_start(blackboard):
 
     # Encender el dribbler para AGARRAR la pelota SOLO cuando ya está cerca (no desde
     # behind_pos, lejos): da tiempo a que el rodillo tome vueltas justo antes del contacto.
-    # El lazo de decision_process lo pulsa (CAPTURE al agarrar, HOLD al sostener). Se apaga
-    # en move_behind_ball (posicionamiento/rotación) y en el kick.
+    # Esto INICIALIZA el latch al entrar a la fase (True si ya estamos dentro de la zona de
+    # enganche, False si arrancamos lejos); el running solo lo sube a True con histéresis
+    # (no vuelve a apagarlo por jitter). El lazo de decision_process lo pulsa (CAPTURE al
+    # agarrar, HOLD al sostener). Se apaga en move_behind_ball (posicionamiento/rotación) y
+    # en el kick.
     blackboard.player._dribbler_on = dist < DRIBBLER_ENGAGE_DISTANCE_PX
 
     # Reiniciar estado de contacto
@@ -2024,9 +2027,16 @@ def _advance_to_contact_running(blackboard):
     # (ver _possession_track / _possession_expired y la rama de tope del árbol).
     _possession_track(blackboard, dist)
 
-    # Dribbler: engancha cuando el robot ya está cerca de la pelota (durante el creep),
-    # no desde lejos. Al cruzar DRIBBLER_ENGAGE_DISTANCE_PX el rodillo empieza a girar.
-    blackboard.player._dribbler_on = dist < DRIBBLER_ENGAGE_DISTANCE_PX
+    # Dribbler: engancha al entrar a DRIBBLER_ENGAGE_DISTANCE_PX y SE MANTIENE (histéresis):
+    # una vez encendido NO se apaga aunque la pelota se aleje por jitter de detección o
+    # rodadura. Sin la histéresis, cada vez que db cruzaba 50px (la pelota rueda al ser
+    # rozada) el flag caía a False, el watchdog del firmware paraba el rodillo, y el balón
+    # rebotaba en un rodillo detenido — justo lo observado ('la pelota choca solo con el
+    # dribbler apagado'). El flag se limpia al salir de la fase: _move_behind_ball_start y
+    # el kick lo ponen en False (reset del latch). El avance acota la persecución con su
+    # propio escape/timeout, así que el rodillo no queda encendido indefinidamente.
+    if dist < DRIBBLER_ENGAGE_DISTANCE_PX:
+        blackboard.player._dribbler_on = True
 
     # Tope de posesión: el SelectorNode no re-evalúa la rama TopePosesion mientras este
     # nodo está RUNNING, así que el preempt se hace ABORTANDO aquí (FAILURE -> el selector

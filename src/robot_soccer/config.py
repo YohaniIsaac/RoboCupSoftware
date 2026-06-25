@@ -743,13 +743,18 @@ DRIBBLER_CAPTURE_POWER = 50  # PWM para atrapar pelota (0-255 directo)
 # Reducida para bajar consumo. NO se usa rotando con la pelota (dribbler off al rotar).
 DRIBBLER_HOLD_POWER = 30  # PWM reducido para sostener pelota (0-255 directo)
 
-# Dribbler intermitente: duración del pulso ON (ms) mientras mantiene pelota.
-# El motor se activa durante ON ms, luego se apaga durante OFF ms, y repite.
-# Reduce calor en el motor al trabarse (pulsado macro): la corriente media baja en
-# proporción ON/(ON+OFF), dejando enfriar entre pulsos. ON=80ms cubre el keepalive
-# (<100ms del watchdog firmware). OFF>0 es clave para no cocinar el motor en stall.
-DRIBBLER_PULSE_ON_MS = 80   # ms — duración del pulso encendido (= keepalive)
-DRIBBLER_PULSE_OFF_MS = 20  # ms — duración del pulso apagado (>0 limita corriente; corto = agarre casi continuo)
+# Dribbler CASI CONTINUO durante captura/sostén: pulso ON largo + OFF muy corto. El rodillo
+# gira de forma efectivamente continua (la ventana OFF, ~20ms cada ~0.32s, es imperceptible
+# y casi nunca coincide con el breve instante de contacto), conservando un respiro térmico
+# periódico. Motivación: con el pulsado 80/20 anterior la pelota rebotaba en el rodillo
+# durante las ventanas OFF al llegar al contacto; alargar ON las hace raras.
+# El limitador de corriente PRINCIPAL es el PWM bajo (DRIBBLER_CAPTURE/HOLD_POWER ≈20% de
+# 255), NO el pulsado — por eso pocas transiciones (menos picos de inrush) es seguro. El
+# pulsado solo aporta un respiro térmico en stall sostenido. OFF=0 daría 100% continuo (lo
+# soporta _pulse_dribbler); se deja un OFF mínimo por el historial de quemado. El keepalive
+# interno (DRIBBLER_KEEPALIVE=80ms < watchdog firmware 100ms) refresca dentro del ON largo.
+DRIBBLER_PULSE_ON_MS = 300  # ms — pulso encendido largo (keepalive interno cada 80ms)
+DRIBBLER_PULSE_OFF_MS = 20  # ms — respiro térmico mínimo, imperceptible (0 = 100% continuo)
 
 # Distancia robot-pelota a la que se ENCIENDE el dribbler durante el avance al contacto.
 # Solo gira cuando está lo bastante cerca para capturar (no desde behind_pos, lejos): da
