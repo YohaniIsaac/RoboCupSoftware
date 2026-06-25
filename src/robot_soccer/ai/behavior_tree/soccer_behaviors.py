@@ -1429,20 +1429,30 @@ def _possession_reset(blackboard):
     blackboard._possession_start_time = None
 
 
-def _possession_track(blackboard, dist_to_ball):
-    """Arranca/resetea el cronómetro de posesión según la proximidad a la pelota.
+def _possession_mark_contact(blackboard):
+    """Arranca el cronómetro de posesión en el PRIMER contacto real con la pelota.
 
-    Arranca al entrar el atacante a la zona de la pelota (< CIRCLE_BALL_ACTIVATE_DISTANCE_PX)
-    si no estaba activo; lo resetea si la pelota se aleja (> POSSESSION_RELEASE_DISTANCE_PX).
-    Entre ambos umbrales mantiene el valor (histéresis). Llamado desde los running de
-    move_behind_ball y advance_to_contact.
+    'Posesión' = tener la pelota (contacto direccional confirmado), no aproximarse a ella.
+    Idempotente: si ya está activo no lo reinicia (mide posesión continua entre micro-
+    recontactos del mismo intento; una pérdida real > POSSESSION_RELEASE_DISTANCE_PX lo
+    apaga vía _possession_track y un nuevo contacto vuelve a arrancarlo). Es el ÚNICO punto
+    que inicia el cronómetro: el tope POSSESSION_MAX_TIME_S se mide desde el contacto, no
+    desde el approach — así un creep lento ya no se come el presupuesto antes de asentar/disparar.
     """
-    active = getattr(blackboard, '_possession_start_time', None) is not None
-    if dist_to_ball > POSSESSION_RELEASE_DISTANCE_PX:
-        if active:
-            _possession_reset(blackboard)
-    elif dist_to_ball < CIRCLE_BALL_ACTIVATE_DISTANCE_PX and not active:
+    if getattr(blackboard, '_possession_start_time', None) is None:
         blackboard._possession_start_time = time.time()
+
+
+def _possession_track(blackboard, dist_to_ball):
+    """Apaga el cronómetro de posesión si la pelota se alejó (posesión perdida).
+
+    El cronómetro NO arranca aquí (eso lo hace _possession_mark_contact en el contacto);
+    aquí solo se resetea cuando la pelota se aleja > POSSESSION_RELEASE_DISTANCE_PX. Llamado
+    desde los running de move_behind_ball y advance_to_contact.
+    """
+    if (dist_to_ball > POSSESSION_RELEASE_DISTANCE_PX
+            and getattr(blackboard, '_possession_start_time', None) is not None):
+        _possession_reset(blackboard)
 
 
 def _possession_expired(blackboard):
@@ -1920,6 +1930,7 @@ def _advance_to_contact_start(blackboard):
         blackboard._contact_made         = True
         blackboard._contact_settle_start = time.time()
         blackboard.player._has_ball      = True
+        _possession_mark_contact(blackboard)  # el tope de posesión cuenta desde el contacto
         blackboard.last_action           = "settling_contact"
         robot_status_logger.emit_event(
             player_id,
@@ -2134,6 +2145,7 @@ def _advance_to_contact_running(blackboard):
             blackboard._contact_made         = True
             blackboard._contact_settle_start = time.time()
             blackboard.player._has_ball      = True
+            _possession_mark_contact(blackboard)  # el tope de posesión cuenta desde el contacto
             blackboard.last_action           = "settling_contact"
             robot_status_logger.emit_event(
                 player_id,
