@@ -266,11 +266,12 @@ PATH_PLANNING_CONTEST_CLEARANCE = 20  # px — clearance reducido en la zona de 
 
 # Clearance dedicado al POSICIONAMIENTO behind-ball (move_robot_to con avoid_ball=True).
 # El contest clearance (20) deja la zona de exclusión de la pelota en 10+20+6=36px,
-# menor que el radio del cuerpo del robot (~30px) → lo roza/empuja al rodearla. Con 35
-# la zona = 10+35+6 = 51px: el centro del robot se mantiene a ≥51px de la pelota (cuerpo a
-# ~9px de su superficie) mientras BEHIND_BALL_APPROACH_PX(60) sigue alcanzable. Solo aplica
-# al posicionamiento; el contacto final lo cierra advance_to_contact en modo directo.
-PATH_PLANNING_BALL_POSITIONING_CLEARANCE = 35  # px — clearance al rodear la pelota posicionándose
+# menor que el radio del cuerpo del robot (~30px) → lo roza/empuja al rodearla. Con 41
+# la zona = 10+41+6 = 57px: el centro del robot se mantiene a ≥57px de la pelota (unos px
+# más de aire que antes, para que no roce). BEHIND_BALL_APPROACH_PX(72) > 57 sigue alcanzable
+# con holgura sana (~15px, evita el parpadeo proyectado/freeze). Solo aplica al
+# posicionamiento; el contacto final lo cierra advance_to_contact en modo directo.
+PATH_PLANNING_BALL_POSITIONING_CLEARANCE = 41  # px — clearance al rodear la pelota posicionándose
 RRT_WAYPOINT_ARRIVAL_PX  = 20    # px — umbral de llegada a waypoints intermedios
 RRT_REPLAN_POSITION_PX   = 80    # px — trigger replan si robot se aleja >N px del punto enviado
 RRT_REPLAN_COOLDOWN_S    = 0.5   # s  — tiempo mínimo entre replans por posición/obstáculo
@@ -748,9 +749,10 @@ DRIBBLER_PULSE_OFF_MS = 0  # ms — duración del pulso apagado (0=continuo)
 # --- Posicionamiento detrás de la pelota (ataque sin dribbler) ---
 # El atacante se posiciona en la línea pelota-arco ANTES de hacer contacto,
 # eliminando la necesidad de rotar con la pelota o activar el dribbler.
-# BEHIND_BALL_APPROACH_PX debe ser > CAPTURE_ACTIVATE_DISTANCE_PX para no
-# rozar la pelota durante el posicionamiento.
-BEHIND_BALL_APPROACH_PX = 60  # px — distancia robot-pelota al posicionarse detrás
+# BEHIND_BALL_APPROACH_PX debe ser > la zona-obstáculo de la pelota
+# (PATH_PLANNING_BALL_OBSTACLE_RADIUS+POSITIONING_CLEARANCE+margin = 57px) con holgura,
+# para que el staging sea alcanzable por el planner sin proyectar el goal (freeze).
+BEHIND_BALL_APPROACH_PX = 72  # px — distancia robot-pelota al posicionarse detrás
 BEHIND_BALL_LATERAL_OFFSET_PX = 75 # px — desvío lateral para rodear la pelota
 BEHIND_BALL_ALIGN_TOLERANCE_DEG = 15.0  # ° — tolerancia angular aceptable al posicionar
 # Techo de velocidad lineal al rodear la pelota de cerca (fase 'circle', única que se
@@ -769,9 +771,9 @@ BEHIND_BALL_NEAR_CEILING_PWM = 40  # PWM — techo lineal en el arco de aproxima
 CIRCLE_BALL_ACTIVATE_DISTANCE_PX = 55
 # Radio del arco. Igual a BEHIND_BALL_APPROACH_PX para que el final del arco
 # coincida exactamente con behind_pos (transición sin discontinuidades al exit).
-CIRCLE_BALL_RADIUS_PX = 60
+CIRCLE_BALL_RADIUS_PX = 72
 # Avance angular por waypoint del arco. La cuerda entre waypoints consecutivos
-# (2·R·sin(step/2) = 31 px a R=60) DEBE superar el guard de de-duplicación de
+# (2·R·sin(step/2) = 37 px a R=72) DEBE superar el guard de de-duplicación de
 # move_robot_to (20 px) y el umbral de llegada (BEHIND_BALL_ARRIVAL_PX=15): con
 # 15° la cuerda era 15.7 px < ambos, el robot llegaba a un waypoint y el siguiente
 # quedaba dentro del guard → cada comando se ignoraba → freeze al alinear. 30°
