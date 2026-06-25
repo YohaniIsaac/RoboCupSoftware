@@ -661,7 +661,8 @@ ROTATE_RECOMMAND_MIN_DEG = 8.0
 # Tiempo de espera (segundos) tras confirmar contacto con la pelota.
 # Permite que la pelota se acomode contra el robot antes de disparar.
 # Si la pelota escapa durante este tiempo, el ciclo se reinicia.
-CONTACT_SETTLE_TIME_S  = 0.3  # s — espera de asentamiento antes del disparo
+CONTACT_SETTLE_TIME_S  = 1.2  # s — espera de asentamiento antes del disparo (verifica posesión
+                              #      estable: la pelota debe seguir centrada al final, no solo presente)
 POST_KICK_COOLDOWN_S   = 0.8  # s — cooldown tras patear antes de poder detectar contacto
                                #     inmediato de nuevo. Fuerza reposicionamiento físico.
 

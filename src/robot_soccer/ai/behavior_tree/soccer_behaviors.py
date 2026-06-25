@@ -2101,11 +2101,25 @@ def _advance_to_contact_running(blackboard):
     # ¿Terminó el tiempo de asentamiento?
     elapsed = time.time() - blackboard._contact_settle_start
     if elapsed >= CONTACT_SETTLE_TIME_S:
+        # Re-verificar el contacto direccional al CERRAR el asentamiento: el check de
+        # escape por distancia (arriba) es laxo (70px) y no detecta que la pelota se
+        # haya descentrado lateralmente durante la espera. _kick_contact exige que la
+        # pelota siga alcanzada y centrada en la nariz (D < tol); si no, patear sería al
+        # vacío/desviado → re-stage (behind_ball realinea) en vez de disparar.
+        contact_ok, _L, _D = _kick_contact(player_pos, blackboard.player.angle, ball_pos)
+        if not contact_ok:
+            blackboard.player._has_ball = False
+            robot_status_logger.emit_event(
+                player_id,
+                f"advance_contact ASENTAMIENTO DESCENTRADO: L={_L:.1f}px D={_D:.1f}px -> re-stage"
+            )
+            return NodeStatus.FAILURE
+
         blackboard.player._has_ball = True
         blackboard.last_action      = "contact_confirmed"
         robot_status_logger.emit_event(
             player_id,
-            f"advance_contact ASENTAMIENTO OK: t={elapsed:.2f}s -> SUCCESS"
+            f"advance_contact ASENTAMIENTO OK: t={elapsed:.2f}s L={_L:.1f}px D={_D:.1f}px -> SUCCESS"
         )
         return NodeStatus.SUCCESS
 
