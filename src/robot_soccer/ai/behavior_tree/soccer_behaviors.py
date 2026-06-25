@@ -59,6 +59,7 @@ from robot_soccer.config import (
     DEFENDER_YIELD_CLEAR_PX,
     DEFENDER_YIELD_REVERSE_PWM,
     POST_KICK_COOLDOWN_S,
+    SHOT_WAIT_MAX_S,
     PATH_PLANNING_ROBOT_OBSTACLE_RADIUS,
     PATH_PLANNING_OBSTACLE_CLEARANCE,
     RIVAL_HOLD_YIELD_S,
@@ -2183,6 +2184,51 @@ def kick_immediately(blackboard):
     return NodeStatus.SUCCESS
 
 
+def kick_when_clear(blackboard):
+    """Dispara solo si la línea de tiro está libre; si un rival la bloquea, espera.
+
+    El robot ya está en contacto y alineado con el arco (llegó desde advance_to_contact).
+    En vez de patear incondicionalmente, comprueba is_shot_possible (rival a <50px de la
+    línea robot→arco). Si está libre, dispara. Si está bloqueada, mantiene posición
+    (motores a 0) esperando a que el rival se aparte, hasta SHOT_WAIT_MAX_S; agotada la
+    espera, dispara igual (mejor un tiro disputado que retener indefinidamente). El tope
+    duro de posesión (POSSESSION_MAX_TIME_S) lo aplica además la rama de alta prioridad.
+
+    Returns:
+        NodeStatus.SUCCESS tras disparar; RUNNING mientras espera línea libre.
+    """
+    if not hasattr(blackboard, "command_manager"):
+        return NodeStatus.FAILURE
+
+    if is_shot_possible(blackboard):
+        blackboard._shot_wait_start = None
+        return kick_immediately(blackboard)
+
+    player_id = blackboard.player.id
+    now       = time.time()
+    if getattr(blackboard, '_shot_wait_start', None) is None:
+        blackboard._shot_wait_start = now
+        robot_status_logger.emit_event(
+            player_id, "kick_when_clear LINEA BLOQUEADA: esperando que el rival se aparte"
+        )
+    elapsed = now - blackboard._shot_wait_start
+    if elapsed >= SHOT_WAIT_MAX_S:
+        blackboard._shot_wait_start = None
+        robot_status_logger.emit_event(
+            player_id,
+            f"kick_when_clear ESPERA AGOTADA ({elapsed:.1f}s) -> disparo disputado"
+        )
+        return kick_immediately(blackboard)
+
+    # Mantener posición (motores a 0) mientras la línea siga bloqueada.
+    cm = blackboard.command_manager
+    cm.actions_in_progress.pop(player_id, None)
+    if cm.rf_controller:
+        cm.rf_controller.set_motors(player_id + 1, 0, 0)
+    blackboard.last_action = "waiting_for_clear_shot"
+    return NodeStatus.RUNNING
+
+
 def should_yield_to_rival(blackboard) -> bool:
     """Devuelve True cuando un rival tiene ventaja clara para llegar primero a la pelota.
 
@@ -2429,7 +2475,7 @@ def create_attacker_tree():
     attack_cycle.add_children(
         create_move_behind_ball_node(),
         create_advance_to_contact_node(),
-        ActionNode(kick_immediately, "DisparoInmediato"),
+        ActionNode(kick_when_clear, "DisparoSiLibre"),
     )
 
     attacker_tree = SelectorNode("ComportamientoAtacante")

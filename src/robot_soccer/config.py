@@ -666,6 +666,11 @@ CONTACT_SETTLE_TIME_S  = 1.2  # s — espera de asentamiento antes del disparo (
 POST_KICK_COOLDOWN_S   = 0.8  # s — cooldown tras patear antes de poder detectar contacto
                                #     inmediato de nuevo. Fuerza reposicionamiento físico.
 
+# Tiempo máximo que el atacante, ya en contacto y alineado, espera a que un rival
+# despeje la línea de tiro antes de disparar igual (tiro disputado). Acota la espera
+# de kick_when_clear para que nunca cuelgue; el tope duro de posesión es POSSESSION_MAX_TIME_S.
+SHOT_WAIT_MAX_S = 2.0  # s — espera máx. por línea de tiro libre antes de disparar igual
+
 # Factores de escape para detectar que la pelota se alejó demasiado.
 # Durante avance: dist > BEHIND_BALL_APPROACH_PX * ADVANCE_ESCAPE_FACTOR → abortar
 # Durante asentamiento: dist > CAPTURE_CONFIRM_DISTANCE_PX * SETTLE_ESCAPE_FACTOR → abortar
