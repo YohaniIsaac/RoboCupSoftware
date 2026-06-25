@@ -42,6 +42,7 @@ from robot_soccer.config import (
     BALL_FRESHNESS_TIMEOUT_S,
     BALL_OUT_DEBOUNCE_FRAMES,
     ROBOT_DETECTION_LOST_RAMPDOWN_S,
+    KICK_POINT_ANGLE_OFFSET_DEG,
 )
 
 log = logging.getLogger(__name__)
@@ -329,6 +330,8 @@ def decision_process(
             angle_to_goal_deg = None
             err_to_ball_deg   = None
             err_to_goal_deg   = None
+            ball_dist_px      = None
+            kick_lat_px       = None
             primary = player_map[robot_id]
             if robot_id in players_initialized and ball_initialized:
                 angle_to_ball_deg = math.degrees(math.atan2(
@@ -339,6 +342,15 @@ def decision_process(
                 # Error normalizado a (-180, 180]: positivo = girar CCW, negativo = CW
                 err_to_ball_deg = (angle_to_ball_deg - primary.angle + 180) % 360 - 180
                 err_to_goal_deg = (angle_to_goal_deg - primary.angle + 180) % 360 - 180
+                # Diagnóstico de captura: distancia a la pelota y desvío lateral con signo
+                # de la pelota respecto al eje de la nariz (solenoide a player.angle +
+                # KICK_POINT_ANGLE_OFFSET_DEG). Mismo signo que Dball (+ = pelota CCW de la
+                # nariz, − = CW). Un signo persistente delata un sesgo sistemático
+                # (cámara/montaje del marcador), no el lazo de alineación.
+                ball_dist_px = math.hypot(ball.x - primary.x, ball.y - primary.y)
+                _nose_rad = math.radians(primary.angle + KICK_POINT_ANGLE_OFFSET_DEG)
+                kick_lat_px = ((ball.x - primary.x) * (-math.sin(_nose_rad))
+                               + (ball.y - primary.y) * math.cos(_nose_rad))
 
             # --- Actualizar contexto del juego ---
             if players_initialized and ball_initialized:
@@ -446,6 +458,8 @@ def decision_process(
                             tgt_ang=tgt_ang_v,
                             ball_err=err_to_ball_deg if p.id == robot_id else None,
                             goal_err=err_to_goal_deg if p.id == robot_id else None,
+                            ball_dist=ball_dist_px if p.id == robot_id else None,
+                            kick_lat=kick_lat_px if p.id == robot_id else None,
                             dist=dist_v,
                             rrt_len=rrt_len_p,
                             n_obs=n_obs_p,
@@ -1235,6 +1249,12 @@ def decision_process_2v2(
                         ang_goal = math.degrees(math.atan2(
                             opp_goal[1] - p.y, opp_goal[0] - p.x))
                         err_goal = (ang_goal - p.angle + 180) % 360 - 180
+                        # Diagnóstico de captura (ver path 1-robot): distancia a la pelota y
+                        # desvío lateral con signo respecto a la nariz (mismo signo que Dball).
+                        ball_dist = math.hypot(ball.x - p.x, ball.y - p.y)
+                        _nose_rad = math.radians(p.angle + KICK_POINT_ANGLE_OFFSET_DEG)
+                        kick_lat = ((ball.x - p.x) * (-math.sin(_nose_rad))
+                                    + (ball.y - p.y) * math.cos(_nose_rad))
                         robot_status_logger.update(
                             p.id,
                             state=bt_action or "unknown",
@@ -1245,6 +1265,8 @@ def decision_process_2v2(
                             dist=dist_v,
                             ball_err=err_ball,
                             goal_err=err_goal,
+                            ball_dist=ball_dist,
+                            kick_lat=kick_lat,
                             rrt_len=rrt_len,
                             n_obs=n_obs,
                         )

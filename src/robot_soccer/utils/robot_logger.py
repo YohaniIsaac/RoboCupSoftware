@@ -70,6 +70,11 @@ def _fmt_state(v: Optional[str]) -> str:
     return f"{(v or '---'):<22s}"
 
 
+def _fmt_lat(v: Optional[float]) -> str:
+    """Desvío lateral con signo respecto a la nariz, px. Ej: ' -3.7px' o ' ---px'."""
+    return f"{v:+5.1f}px" if v is not None else "  ---px"
+
+
 # ─── Definición de campos ─────────────────────────────────────────────────────
 
 @dataclass
@@ -94,6 +99,8 @@ FIELD_DEFS: list[FieldDef] = [
     FieldDef("dist",      "d=",      _fmt_dist,  enabled=True),
     FieldDef("ball_err",  "Dball=",  _fmt_angle, enabled=True),
     FieldDef("goal_err",  "Dgoal=",  _fmt_angle, enabled=True),
+    FieldDef("ball_dist", "db=",     _fmt_dist,  enabled=True),
+    FieldDef("kick_lat",  "lat=",    _fmt_lat,   enabled=True),
     FieldDef("stuck_boost", "sb=",  _fmt_stuck, enabled=True),
     FieldDef("creep_pwm",   "cv=",  _fmt_count, enabled=True),
     FieldDef("left_pwm",  "L=",      _fmt_pwm,   enabled=True),
@@ -117,6 +124,8 @@ class RobotStatus:
     dist:      Optional[float] = None  # distancia al target en pixeles
     ball_err:  Optional[float] = None  # error angular hacia la pelota (grados)
     goal_err:  Optional[float] = None  # error angular hacia el arco (grados)
+    ball_dist: Optional[float] = None  # distancia robot→pelota (px) — diagnóstico de captura
+    kick_lat:  Optional[float] = None  # desvío lateral pelota↔nariz con signo (px), mismo signo que Dball
     stuck_boost: Optional[int]  = None  # boost anti-atasco activo (0=libre, max=kick)
     creep_pwm:  Optional[int]   = None  # cap de velocidad regulado del creep de captura (PWM)
     left_pwm:  Optional[int]   = None  # PWM motor izquierdo (-255..255)
