@@ -445,6 +445,21 @@ class RobotCommandManager:
                                     if dist_wp_to_goal < RRT_WAYPOINT_ARRIVAL_PX:
                                         del self.actions_in_progress[player_id]
                                         log.info("R%d: llegó al objetivo (último wp)", player_id)
+                                    elif was_projected and avoid_ball:
+                                        # Posicionamiento behind-ball: el goal (behind_pos) quedó
+                                        # proyectado al BORDE de la zona de la pelota (jitter de
+                                        # detección acerca el target a la pelota). El robot ya
+                                        # rodeó la pelota por el path RRT* y llegó a ese borde
+                                        # (lado correcto, ~zona px detrás): es un staging válido.
+                                        # Completar aquí (el BT verifica alineación y avanza al
+                                        # contacto) en vez de SOSTENER 3s (freeze) o embestir con
+                                        # PID directo. Evita la congelación observada en el log.
+                                        del self.actions_in_progress[player_id]
+                                        self._waiting_goal_clear.pop(player_id, None)
+                                        self._waiting_since.pop(player_id, None)
+                                        log.info("R%d: avoid_ball goal proyectado al borde "
+                                                 "(%.0fpx del goal real) — staging OK", player_id,
+                                                 dist_wp_to_goal)
                                     elif was_projected and not is_contest_goal:
                                         # El goal real sigue bloqueado por un obstáculo:
                                         # sostener posición aquí (sin PID directo, que
