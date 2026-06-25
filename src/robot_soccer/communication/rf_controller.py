@@ -20,7 +20,7 @@ from .command_protocol import RobotCommandProtocol
 from ..controllers.robot_calibration_multipoint import (
     get_calibration_manager_multipoint as get_calibration_manager
 )
-from ..config import DRIBBLER_MAX_PWM
+from ..config import DRIBBLER_MAX_PWM, is_dribbler_enabled
 
 log = logging.getLogger(__name__)
 
@@ -275,6 +275,12 @@ class RFController:
         Returns:
             bool: True si el comando se envió correctamente, False en caso contrario.
         """
+        # Gate de hardware: si el dribbler de este robot está marcado como AVERIADO, forzar 0
+        # (nunca energizar el componente roto, venga el comando de donde venga). robot_id es el
+        # id de firmware (1-4); el id de jugador es robot_id-1. Chokepoint único: todos los
+        # paths de dribbler pasan por aquí.
+        if not is_dribbler_enabled(robot_id - 1):
+            power = 0
         # Clampar al cap blando (0..DRIBBLER_MAX_PWM): nunca acercarse a 255.
         power_val = max(0, min(DRIBBLER_MAX_PWM, int(power)))
 

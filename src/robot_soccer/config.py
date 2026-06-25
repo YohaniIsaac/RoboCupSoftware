@@ -768,6 +768,30 @@ DRIBBLER_PULSE_OFF_MS = 20  # ms — respiro térmico mínimo, imperceptible (0 
 # y >= CAPTURE_ACTIVATE_DISTANCE_PX. Subir = enciende antes (más margen); bajar = menos corriente.
 DRIBBLER_ENGAGE_DISTANCE_PX = 50  # px — enciende el dribbler bajo esta distancia a la pelota
 
+# --- Switch: robots con dribbler AVERIADO (hardware) ---
+# IDs (espacio de jugador 0-3) cuyo dribbler NO funciona. Para esos robots el rodillo nunca
+# se energiza (set_dribbler los fuerza a 0, protegiendo el componente roto) y el arbitraje de
+# roles prefiere que ataque un compañero con dribbler sano. Un robot averiado SIGUE intentando
+# capturar: avanza al contacto, asienta y patea — solo que sin la ayuda del rodillo.
+# Switch: agregar/quitar un id activa/desactiva el manejo para ese robot; frozenset() vacío =
+# todos operativos (sin gate ni penalización, comportamiento idéntico al previo).
+DRIBBLER_DISABLED_ROBOT_IDS = frozenset({0})  # R0 tiene el dribbler averiado
+# Penalización de distancia a la pelota (×) que paga un robot con dribbler averiado en el
+# arbitraje de roles: debe estar este factor más cerca que un compañero sano para atacar. Así
+# el atacante preferente es el de dribbler sano, salvo que el averiado esté mucho más cerca.
+# 1.0 = sin preferencia (solo gatea el motor, no toca roles) — permite el "y/o" del switch.
+DRIBBLER_DISABLED_ROLE_PENALTY = 1.5
+
+
+def is_dribbler_enabled(robot_id):
+    """True si el dribbler del robot (id de jugador 0-3) funciona.
+
+    False si está marcado como averiado en DRIBBLER_DISABLED_ROBOT_IDS. Único predicado de
+    capacidad del dribbler — usado por el gate de hardware (rf_controller.set_dribbler), el
+    enganche del avance (soccer_behaviors), el pulso (decision_process) y el arbitraje de roles.
+    """
+    return robot_id not in DRIBBLER_DISABLED_ROBOT_IDS
+
 # --- Posicionamiento detrás de la pelota (ataque sin dribbler) ---
 # El atacante se posiciona en la línea pelota-arco ANTES de hacer contacto,
 # eliminando la necesidad de rotar con la pelota o activar el dribbler.

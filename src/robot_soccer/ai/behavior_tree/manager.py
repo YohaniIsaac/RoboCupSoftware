@@ -12,6 +12,8 @@ from robot_soccer.config import (
     BT_ROLE_SWITCH_HYSTERESIS,
     BT_ROLE_COMMITMENT_RATIO,
     BT_ROLE_SWITCH_COOLDOWN_S,
+    DRIBBLER_DISABLED_ROLE_PENALTY,
+    is_dribbler_enabled,
 )
 from robot_soccer.controllers.robot_command_manager import RobotCommandManager
 from .soccer_behaviors import (Blackboard, create_attacker_tree, create_defender_tree)
@@ -137,20 +139,36 @@ class BehaviorManager:
         if attacker_dist < commitment_px:
             return
 
-        # Regla 4: histéresis — buscar defensor significativamente más cercano
+        # Regla 4: histéresis — buscar defensor significativamente más cercano. Usa distancia
+        # EFECTIVA (penaliza al robot con dribbler averiado): así un compañero sano roba el rol
+        # más fácil a un atacante averiado, y un averiado debe estar mucho más cerca para robarlo.
+        attacker_eff = self._effective_ball_dist(current_attacker)
         for p in self.team_players:
             if p.rol == ROL_ATACANTE:
                 continue
-            other_dist = float(p.distance_to_ball(self.ball))
-            if other_dist * BT_ROLE_SWITCH_HYSTERESIS < attacker_dist:
+            other_eff = self._effective_ball_dist(p)
+            if other_eff * BT_ROLE_SWITCH_HYSTERESIS < attacker_eff:
                 log.info(
-                    "ROL SWITCH: R%d → ATACANTE (%.0fpx) | R%d → DEFENSOR (%.0fpx) "
+                    "ROL SWITCH: R%d → ATACANTE (ef=%.0fpx) | R%d → DEFENSOR (ef=%.0fpx) "
                     "| ratio=%.2f > histeresis=%.1f",
-                    p.id, other_dist, current_attacker.id, attacker_dist,
-                    attacker_dist / max(other_dist, 1.0), BT_ROLE_SWITCH_HYSTERESIS,
+                    p.id, other_eff, current_attacker.id, attacker_eff,
+                    attacker_eff / max(other_eff, 1.0), BT_ROLE_SWITCH_HYSTERESIS,
                 )
                 self._do_role_switch(p.id, now)
                 return
+
+    def _effective_ball_dist(self, p):
+        """Distancia a la pelota PENALIZADA para el arbitraje de roles.
+
+        Un robot con dribbler averiado (DRIBBLER_DISABLED_ROBOT_IDS) paga
+        DRIBBLER_DISABLED_ROLE_PENALTY (×): debe estar ese factor más cerca que un compañero
+        sano para atacar, de modo que el atacante preferente es el de dribbler sano salvo que
+        el averiado esté mucho más cerca. PENALTY=1.0 desactiva la preferencia (solo gate de motor).
+        """
+        d = float(p.distance_to_ball(self.ball))
+        if not is_dribbler_enabled(p.id):
+            d *= DRIBBLER_DISABLED_ROLE_PENALTY
+        return d
 
     def _do_role_switch(self, new_attacker_id: int, now: float):
         """Aplica el cambio de rol y recrea los árboles afectados con estado limpio."""

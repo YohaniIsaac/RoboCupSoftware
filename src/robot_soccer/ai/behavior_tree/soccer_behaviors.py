@@ -13,6 +13,7 @@ log = logging.getLogger(__name__)
 from robot_soccer.utils.robot_logger import robot_status_logger
 from robot_soccer.ai.behavior_tree.utils import calculate_ball_approach_position
 from robot_soccer.config import (
+    is_dribbler_enabled,
     ROL_ATACANTE, ROL_DEFENSIVO, FIELD_SIM,
     BT_SHOT_DISTANCE_RATIO, BT_PASS_MIN_RATIO, BT_PASS_MAX_RATIO,
     BT_CAPTURE_RANGE_RATIO, BT_APPROACH_RATIO, BT_CAPTURE_ACTIVATE_RATIO,
@@ -1922,8 +1923,11 @@ def _advance_to_contact_start(blackboard):
     # enganche, False si arrancamos lejos); el running solo lo sube a True con histéresis
     # (no vuelve a apagarlo por jitter). El lazo de decision_process lo pulsa (CAPTURE al
     # agarrar, HOLD al sostener). Se apaga en move_behind_ball (posicionamiento/rotación) y
-    # en el kick.
-    blackboard.player._dribbler_on = dist < DRIBBLER_ENGAGE_DISTANCE_PX
+    # en el kick. Robot con dribbler averiado (DRIBBLER_DISABLED_ROBOT_IDS): nunca engancha
+    # (captura solo por avance+asentamiento+kick); el gate de set_dribbler lo respalda igual.
+    blackboard.player._dribbler_on = (
+        is_dribbler_enabled(blackboard.player.id) and dist < DRIBBLER_ENGAGE_DISTANCE_PX
+    )
 
     # Reiniciar estado de contacto
     blackboard._contact_made         = False
@@ -2045,7 +2049,8 @@ def _advance_to_contact_running(blackboard):
     # dribbler apagado'). El flag se limpia al salir de la fase: _move_behind_ball_start y
     # el kick lo ponen en False (reset del latch). El avance acota la persecución con su
     # propio escape/timeout, así que el rodillo no queda encendido indefinidamente.
-    if dist < DRIBBLER_ENGAGE_DISTANCE_PX:
+    # Robot con dribbler averiado: nunca engancha (el gate de set_dribbler lo respalda igual).
+    if is_dribbler_enabled(blackboard.player.id) and dist < DRIBBLER_ENGAGE_DISTANCE_PX:
         blackboard.player._dribbler_on = True
 
     # Tope de posesión: el SelectorNode no re-evalúa la rama TopePosesion mientras este

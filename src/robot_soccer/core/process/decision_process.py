@@ -43,6 +43,7 @@ from robot_soccer.config import (
     BALL_OUT_DEBOUNCE_FRAMES,
     ROBOT_DETECTION_LOST_RAMPDOWN_S,
     KICK_POINT_ANGLE_OFFSET_DEG,
+    is_dribbler_enabled,
 )
 
 log = logging.getLogger(__name__)
@@ -60,6 +61,10 @@ def _pulse_dribbler(rf, p, now, phase_d, timer_d, last_ka_d, prev_d, keepalive_s
     """
     rid = p.id
     fw_id = rid + 1
+    if not is_dribbler_enabled(rid):
+        # Dribbler averiado: nunca pulsar (proteger el componente). El robot captura igual por
+        # avance+asentamiento+kick. set_dribbler también lo gatea, esto evita RF/eventos inútiles.
+        return
     has_ball = getattr(p, '_has_ball', False)
     grabbing = getattr(p, '_dribbler_on', False) and not has_ball
     engaged  = has_ball or getattr(p, '_dribbler_on', False)
@@ -114,6 +119,8 @@ def _dribbler_view(p, phase_d):
     desenganchado (rodillo parado). En modo continuo (DRIBBLER_PULSE_OFF_MS=0) la fase es
     siempre 'on', así que muestra C/H mientras esté enganchado.
     """
+    if not is_dribbler_enabled(p.id):
+        return 'avr'  # dribbler averiado (DRIBBLER_DISABLED_ROBOT_IDS): nunca se energiza
     has_ball = getattr(p, '_has_ball', False)
     if not (has_ball or getattr(p, '_dribbler_on', False)):
         return None
@@ -719,12 +726,13 @@ def decision_process_2v2(
     all_players  = players_red + players_blue
     player_map   = {p.id: p for p in all_players}
 
-    players_red[0].set_rol(ROL_ATACANTE)
-    for p in players_red[1:]:
-        p.set_rol(ROL_DEFENSIVO)
-    players_blue[0].set_rol(ROL_ATACANTE)
-    for p in players_blue[1:]:
-        p.set_rol(ROL_DEFENSIVO)
+    # Atacante inicial: preferir un robot con dribbler sano (los averiados atacan solo si no
+    # hay alternativa). Evita arrancar con el robot averiado de atacante y esperar un cooldown
+    # de arbitraje para corregirlo. Ver DRIBBLER_DISABLED_ROBOT_IDS.
+    for team in (players_red, players_blue):
+        attacker = next((p for p in team if is_dribbler_enabled(p.id)), team[0])
+        for p in team:
+            p.set_rol(ROL_ATACANTE if p is attacker else ROL_DEFENSIVO)
 
     ball = Ball(0, 0)
 
