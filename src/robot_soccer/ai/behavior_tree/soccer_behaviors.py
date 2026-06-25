@@ -1722,6 +1722,14 @@ def _move_behind_ball_running(blackboard):
     # la rama de alta prioridad del árbol; ver _possession_track / _possession_expired).
     _possession_track(blackboard, float(np.linalg.norm(ball_pos - player_pos)))
 
+    # Tope de posesión: el SelectorNode no es reactivo (no re-evalúa la rama TopePosesion
+    # mientras este nodo está RUNNING), así que el preempt se hace ABORTANDO aquí. Al
+    # devolver FAILURE el selector resetea y dispara forced_kick_and_retreat el tick siguiente.
+    if _possession_expired(blackboard):
+        blackboard.command_manager.actions_in_progress.pop(player_id, None)
+        robot_status_logger.emit_event(player_id, "behind_ball TOPE POSESION -> abortar a disparo forzado")
+        return NodeStatus.FAILURE
+
     # Actualizar posición anterior de la pelota cada tick para la predicción de intercepción
     blackboard._ball_prev_pos = ball_pos.copy()
 
@@ -1986,6 +1994,15 @@ def _advance_to_contact_running(blackboard):
     # Cronómetro de posesión: sigue corriendo durante el avance al contacto
     # (ver _possession_track / _possession_expired y la rama de tope del árbol).
     _possession_track(blackboard, dist)
+
+    # Tope de posesión: el SelectorNode no re-evalúa la rama TopePosesion mientras este
+    # nodo está RUNNING, así que el preempt se hace ABORTANDO aquí (FAILURE -> el selector
+    # resetea y dispara forced_kick_and_retreat el tick siguiente). Hace el tope un cap DURO
+    # de tiempo (antes solo saltaba tras el timeout de 7s del avance).
+    if _possession_expired(blackboard):
+        _clear_advance_state(blackboard, player_id)
+        robot_status_logger.emit_event(player_id, "advance_contact TOPE POSESION -> abortar a disparo forzado")
+        return NodeStatus.FAILURE
 
     contact_made = getattr(blackboard, '_contact_made', False)
 
