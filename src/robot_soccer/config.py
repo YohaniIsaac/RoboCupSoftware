@@ -369,7 +369,10 @@ FIELD_CAM = FieldGeometry(
     goal_right_x=632,
     goal_right_top_y=196,
     goal_right_bottom_y=296,
-    margin=15,
+    # Margen >= radio del cuerpo del robot (~30px): clamp mantiene los targets
+    # (behind_pos, defensivo, etc.) lo bastante adentro para que el cuerpo no
+    # penetre la pared. Con 15px el centro quedaba a 15px del muro -> colisión.
+    margin=35,
 )
 
 # ==========================================

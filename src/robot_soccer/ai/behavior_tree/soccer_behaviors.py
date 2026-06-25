@@ -1914,7 +1914,10 @@ def _advance_to_contact_start(blackboard):
         return NodeStatus.FAILURE
     unit_to_goal = goal_to_ball / dist_gtb
     target_robot = ball_pos - (KICK_POINT_OFFSET_PX - CONTACT_APPROACH_OVERSHOOT_PX) * unit_to_goal
-    target = (int(target_robot[0]), int(target_robot[1]))
+    # Clamp al área jugable: el modo directo (creep) NO pasa por el planner, así que
+    # un overshoot fuera del campo (pelota pegada a la pared) haría que el PID directo
+    # condujera contra el muro. field.clamp lo mantiene dentro del margen seguro.
+    target = tuple(blackboard.field.clamp(target_robot))
 
     # Verificar corredor libre: ningún otro robot debe estar perpendicularmente
     # dentro del segmento robot→overshoot. La creep mode avanza en línea recta
@@ -2043,6 +2046,7 @@ def _advance_to_contact_running(blackboard):
             norm = float(np.linalg.norm(away))
             unit = away / norm if norm > 1 else np.array([0.0, 1.0])
             press = ball_pos + unit * (CAPTURE_ACTIVATE_DISTANCE_PX + RIVAL_PRESS_MARGIN_PX)
+            press = blackboard.field.clamp(press)  # dentro del área jugable (modo directo)
             blackboard.command_manager.move_robot_to(player_id, (int(press[0]), int(press[1])), direct=True)
             return NodeStatus.RUNNING
         else:
@@ -2121,7 +2125,7 @@ def _advance_to_contact_running(blackboard):
             if dist_gtb >= 1.0:
                 unit_to_goal = goal_to_ball / dist_gtb
                 target_robot = ball_pos - (KICK_POINT_OFFSET_PX - CONTACT_APPROACH_OVERSHOOT_PX) * unit_to_goal
-                target = (int(target_robot[0]), int(target_robot[1]))
+                target = tuple(blackboard.field.clamp(target_robot))  # dentro del área jugable (modo directo)
                 blackboard.command_manager.move_robot_to(player_id, target, direct=True)
         return NodeStatus.RUNNING
 
