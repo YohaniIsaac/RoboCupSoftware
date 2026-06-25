@@ -75,6 +75,11 @@ def _fmt_lat(v: Optional[float]) -> str:
     return f"{v:+5.1f}px" if v is not None else "  ---px"
 
 
+def _fmt_drb(v: Optional[str]) -> str:
+    """Estado del dribbler, 4 chars. Ej: ' C50', ' H30', ' off' o '  --' (desenganchado)."""
+    return f"{(v or '--'):>4s}"
+
+
 # ─── Definición de campos ─────────────────────────────────────────────────────
 
 @dataclass
@@ -101,6 +106,7 @@ FIELD_DEFS: list[FieldDef] = [
     FieldDef("goal_err",  "Dgoal=",  _fmt_angle, enabled=True),
     FieldDef("ball_dist", "db=",     _fmt_dist,  enabled=True),
     FieldDef("kick_lat",  "lat=",    _fmt_lat,   enabled=True),
+    FieldDef("dribbler",  "drb=",    _fmt_drb,   enabled=True),
     FieldDef("stuck_boost", "sb=",  _fmt_stuck, enabled=True),
     FieldDef("creep_pwm",   "cv=",  _fmt_count, enabled=True),
     FieldDef("left_pwm",  "L=",      _fmt_pwm,   enabled=True),
@@ -126,6 +132,7 @@ class RobotStatus:
     goal_err:  Optional[float] = None  # error angular hacia el arco (grados)
     ball_dist: Optional[float] = None  # distancia robot→pelota (px) — diagnóstico de captura
     kick_lat:  Optional[float] = None  # desvío lateral pelota↔nariz con signo (px), mismo signo que Dball
+    dribbler:  Optional[str]   = None  # estado dribbler: 'C50' captura / 'H30' sostén / 'off' pulso / None desenganchado
     stuck_boost: Optional[int]  = None  # boost anti-atasco activo (0=libre, max=kick)
     creep_pwm:  Optional[int]   = None  # cap de velocidad regulado del creep de captura (PWM)
     left_pwm:  Optional[int]   = None  # PWM motor izquierdo (-255..255)

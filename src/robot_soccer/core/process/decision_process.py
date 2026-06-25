@@ -65,10 +65,16 @@ def _pulse_dribbler(rf, p, now, phase_d, timer_d, last_ka_d, prev_d, keepalive_s
     engaged  = has_ball or getattr(p, '_dribbler_on', False)
     power = DRIBBLER_CAPTURE_POWER if grabbing else DRIBBLER_HOLD_POWER
 
-    # Flanco de subida del enganche: reiniciar el ciclo de pulso.
+    # Flanco de subida del enganche: reiniciar el ciclo de pulso. Eventos de flanco
+    # (baja frecuencia, solo en transiciones) para ver en el log cuándo y por qué el
+    # rodillo arranca/para — diagnóstico de captura (¿el dribbler estaba ON al contacto?).
     if engaged and not prev_d.get(rid, False):
         phase_d[rid] = 'on'
         timer_d[rid] = now
+        robot_status_logger.emit_event(
+            rid, f"dribbler ON pwr={power} ({'captura' if grabbing else 'sosten'})")
+    elif not engaged and prev_d.get(rid, False):
+        robot_status_logger.emit_event(rid, "dribbler OFF (fuera de enganche)")
     prev_d[rid] = engaged
 
     if not engaged:
@@ -98,6 +104,22 @@ def _pulse_dribbler(rf, p, now, phase_d, timer_d, last_ka_d, prev_d, keepalive_s
             last_ka_d[rid] = now
             phase_d[rid] = 'on'
             timer_d[rid] = now
+
+
+def _dribbler_view(p, phase_d):
+    """Estado del dribbler para el campo drb= del STATUS (snapshot a 2 Hz).
+
+    Lee los mismos flags que _pulse_dribbler: 'C{pwr}' agarrando (captura), 'H{pwr}'
+    sosteniendo (con pelota), 'off' enganchado pero en ventana de pulso apagado, None
+    desenganchado (rodillo parado). En modo continuo (DRIBBLER_PULSE_OFF_MS=0) la fase es
+    siempre 'on', así que muestra C/H mientras esté enganchado.
+    """
+    has_ball = getattr(p, '_has_ball', False)
+    if not (has_ball or getattr(p, '_dribbler_on', False)):
+        return None
+    if phase_d.get(p.id, 'on') == 'off':
+        return 'off'
+    return f"H{DRIBBLER_HOLD_POWER}" if has_ball else f"C{DRIBBLER_CAPTURE_POWER}"
 
 
 def decision_process(
@@ -460,6 +482,7 @@ def decision_process(
                             goal_err=err_to_goal_deg if p.id == robot_id else None,
                             ball_dist=ball_dist_px if p.id == robot_id else None,
                             kick_lat=kick_lat_px if p.id == robot_id else None,
+                            dribbler=_dribbler_view(p, dribbler_pulse_phase),
                             dist=dist_v,
                             rrt_len=rrt_len_p,
                             n_obs=n_obs_p,
@@ -1267,6 +1290,7 @@ def decision_process_2v2(
                             goal_err=err_goal,
                             ball_dist=ball_dist,
                             kick_lat=kick_lat,
+                            dribbler=_dribbler_view(p, dribbler_pulse_phase),
                             rrt_len=rrt_len,
                             n_obs=n_obs,
                         )
