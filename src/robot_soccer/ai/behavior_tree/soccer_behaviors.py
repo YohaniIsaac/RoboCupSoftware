@@ -42,6 +42,7 @@ from robot_soccer.config import (
     BEHIND_BALL_APPROACH_PX,
     BEHIND_BALL_LATERAL_OFFSET_PX,
     BEHIND_BALL_ALIGN_TOLERANCE_DEG,
+    BEHIND_BALL_NEAR_CEILING_PWM,
     CIRCLE_BALL_ACTIVATE_DISTANCE_PX,
     CIRCLE_BALL_RADIUS_PX,
     CIRCLE_BALL_STEP_ANGLE_DEG,
@@ -1610,6 +1611,10 @@ def _move_behind_ball_start(blackboard):
             # NO debe pasar por RRT* (la pelota, a CIRCLE_BALL_RADIUS_PX, es obstáculo
             # y el planner proyecta/retiene el waypoint → freeze). PID directo: la
             # acción se borra al llegar a cada waypoint, habilitando el siguiente.
+            # Techo de velocidad: el arco roza la zona de la pelota; mantenerlo lento
+            # para que cualquier contacto sea suave (defensa en profundidad).
+            if controller:
+                controller.max_linear_pwm_override = BEHIND_BALL_NEAR_CEILING_PWM
             blackboard.command_manager.move_robot_to(
                 blackboard.player.id, target,
                 arrival_threshold=BEHIND_BALL_ARRIVAL_PX, direct=True,
@@ -1647,9 +1652,11 @@ def _move_behind_ball_start(blackboard):
             f"behind_ball CAMINO DIRECTO: tgt=({target[0]},{target[1]})"
         )
 
+    # avoid_ball=True: el planner trata la pelota como obstáculo duro con clearance de
+    # posicionamiento → el robot la rodea (detour/direct) en vez de rozarla/empujarla.
     blackboard.command_manager.move_robot_to(
         blackboard.player.id, target,
-        arrival_threshold=BEHIND_BALL_ARRIVAL_PX,
+        arrival_threshold=BEHIND_BALL_ARRIVAL_PX, avoid_ball=True,
     )
     blackboard.last_action = "move_behind_ball"
     return NodeStatus.RUNNING
@@ -1712,16 +1719,20 @@ def _move_behind_ball_running(blackboard):
     # angularmente con behind_pos (transición a 'direct' = approach final recto).
     if phase == 'circle':
         behind_pos = blackboard._behind_ball_pos
+        controller = blackboard.command_manager.controllers.get(player_id)
         lookahead, ang_err = _compute_circle_ball_lookahead(
             player_pos, ball_pos, behind_pos
         )
 
         if ang_err <= CIRCLE_BALL_EXIT_TOLERANCE_DEG:
             blackboard._behind_ball_phase = 'direct'
+            # Salir del arco: liberar el techo de velocidad para el approach final recto.
+            if controller:
+                controller.max_linear_pwm_override = None
             target = (int(behind_pos[0]), int(behind_pos[1]))
             blackboard.command_manager.move_robot_to(
                 player_id, target,
-                arrival_threshold=BEHIND_BALL_ARRIVAL_PX,
+                arrival_threshold=BEHIND_BALL_ARRIVAL_PX, avoid_ball=True,
             )
             robot_status_logger.emit_event(
                 player_id,
@@ -1734,6 +1745,9 @@ def _move_behind_ball_running(blackboard):
         target = (int(lookahead[0]), int(lookahead[1]))
         # direct=True: arco sin RRT* (ver CIRCLE INICIO). Evita que el planner
         # proyecte el waypoint pegado a la pelota y retenga al robot (freeze).
+        # Techo de velocidad: arco lento → contacto suave si llegara a rozar.
+        if controller:
+            controller.max_linear_pwm_override = BEHIND_BALL_NEAR_CEILING_PWM
         blackboard.command_manager.move_robot_to(
             player_id, target,
             arrival_threshold=BEHIND_BALL_ARRIVAL_PX, direct=True,
@@ -1751,7 +1765,7 @@ def _move_behind_ball_running(blackboard):
             target = (int(bp[0]), int(bp[1]))
             blackboard.command_manager.move_robot_to(
                 player_id, target,
-                arrival_threshold=BEHIND_BALL_ARRIVAL_PX,
+                arrival_threshold=BEHIND_BALL_ARRIVAL_PX, avoid_ball=True,
             )
             robot_status_logger.emit_event(
                 player_id,

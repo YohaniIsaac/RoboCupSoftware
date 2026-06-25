@@ -244,7 +244,10 @@ PATH_PLANNING_OBSTACLE_CLEARANCE = 60    # Margen de seguridad (px) añadido a c
                                          # (subido de 45→60: rutas más separadas de los robots)
 PATH_PLANNING_ROBOT_OBSTACLE_RADIUS = 45 # Radio (px) con que se modela cada robot como obstáculo
 PATH_PLANNING_BALL_OBSTACLE_RADIUS  = 10 # Radio (px) con que se modela la pelota como obstáculo
-                                         # Zona exclusión = 10 + clearance(45) = 55px < BEHIND_BALL(60px)
+                                         # Zona exclusión = radio(10) + clearance + margin(6).
+                                         # Con clearance completo(60) = 76px > BEHIND_BALL(60) → el
+                                         # target detrás de la pelota sería inalcanzable; por eso el
+                                         # posicionamiento usa PATH_PLANNING_BALL_POSITIONING_CLEARANCE.
 
 # --- Inflación dependiente del contexto (zona de disputa de la pelota) ---
 # Cerca de la pelota convergen varios robots y el contacto es OBLIGATORIO; el
@@ -260,6 +263,14 @@ PATH_PLANNING_CONTEST_RADIUS_PX = 120 # px — goal a <=N de la pelota => intenc
                                       # predicho quedaba con clearance completo (60) y un compañero
                                       # estático (defensor) lo inflaba hasta bloquearlo → deadlock.
 PATH_PLANNING_CONTEST_CLEARANCE = 20  # px — clearance reducido en la zona de disputa
+
+# Clearance dedicado al POSICIONAMIENTO behind-ball (move_robot_to con avoid_ball=True).
+# El contest clearance (20) deja la zona de exclusión de la pelota en 10+20+6=36px,
+# menor que el radio del cuerpo del robot (~30px) → lo roza/empuja al rodearla. Con 35
+# la zona = 10+35+6 = 51px: el centro del robot se mantiene a ≥51px de la pelota (cuerpo a
+# ~9px de su superficie) mientras BEHIND_BALL_APPROACH_PX(60) sigue alcanzable. Solo aplica
+# al posicionamiento; el contacto final lo cierra advance_to_contact en modo directo.
+PATH_PLANNING_BALL_POSITIONING_CLEARANCE = 35  # px — clearance al rodear la pelota posicionándose
 RRT_WAYPOINT_ARRIVAL_PX  = 20    # px — umbral de llegada a waypoints intermedios
 RRT_REPLAN_POSITION_PX   = 80    # px — trigger replan si robot se aleja >N px del punto enviado
 RRT_REPLAN_COOLDOWN_S    = 0.5   # s  — tiempo mínimo entre replans por posición/obstáculo
@@ -724,6 +735,11 @@ DRIBBLER_PULSE_OFF_MS = 0  # ms — duración del pulso apagado (0=continuo)
 BEHIND_BALL_APPROACH_PX = 60  # px — distancia robot-pelota al posicionarse detrás
 BEHIND_BALL_LATERAL_OFFSET_PX = 75 # px — desvío lateral para rodear la pelota
 BEHIND_BALL_ALIGN_TOLERANCE_DEG = 15.0  # ° — tolerancia angular aceptable al posicionar
+# Techo de velocidad lineal al rodear la pelota de cerca (fase 'circle', única que se
+# acerca a <CIRCLE_BALL_ACTIVATE_DISTANCE_PX por diseño). Entre el creep (30) y la rampa
+# lejana (50-80): si el arco llegara a rozar la pelota, el contacto es suave (la nudge,
+# no la lanza). Defensa en profundidad sobre PATH_PLANNING_BALL_POSITIONING_CLEARANCE.
+BEHIND_BALL_NEAR_CEILING_PWM = 40  # PWM — techo lineal en el arco de aproximación a la pelota
 
 # --- Skill: aproximación geométrica a la pelota (arco) ---
 # Cuando el robot está cerca de la pelota Y en el lado equivocado, describe un

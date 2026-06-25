@@ -13,6 +13,7 @@ from robot_soccer.config import (
     PATH_PLANNING_OBSTACLE_CLEARANCE,
     PATH_PLANNING_CONTEST_RADIUS_PX,
     PATH_PLANNING_CONTEST_CLEARANCE,
+    PATH_PLANNING_BALL_POSITIONING_CLEARANCE,
     CAPTURE_ACTIVATE_DISTANCE_PX,
     RRT_WAYPOINT_ARRIVAL_PX,
     RRT_REPLAN_POSITION_PX,
@@ -276,13 +277,21 @@ class RobotCommandManager:
                         # En navegación normal se mantiene el clearance completo.
                         # La pelota se incluye como obstáculo solo si el goal está lejos
                         # de ella (en captura/contacto el robot DEBE llegar a la pelota).
+                        avoid_ball = action.get('avoid_ball', False)
                         req_clearance = PATH_PLANNING_OBSTACLE_CLEARANCE
                         # Goal de disputa: el target está sobre/junto a la pelota (move_to_ball,
                         # behind_ball pegado). El contacto ES el objetivo, así que un goal
                         # proyectado por congestión NO debe disparar el hold-with-stop (que
                         # congelaría al robot a media persecución); se conduce directo al balón.
                         is_contest_goal = False
-                        if self._ball_pos is not None:
+                        if avoid_ball and self._ball_pos is not None:
+                            # POSICIONAMIENTO behind-ball: la pelota es obstáculo DURO con
+                            # clearance dedicado (el robot la RODEA, no la roza) y NO es goal
+                            # de disputa → en proyección sostiene posición en vez de embestir.
+                            req_clearance = PATH_PLANNING_BALL_POSITIONING_CLEARANCE
+                            obstacles.append([self._ball_pos[0], self._ball_pos[1],
+                                              PATH_PLANNING_BALL_OBSTACLE_RADIUS])
+                        elif self._ball_pos is not None:
                             dist_goal_ball = math.hypot(
                                 goal[0] - self._ball_pos[0],
                                 goal[1] - self._ball_pos[1],
@@ -574,7 +583,7 @@ class RobotCommandManager:
                         self.rf_controller.set_motors(fw_id, speed, speed)
 
     def move_robot_to(self, player_id, target_pos, target_angle=None, speed_factor=1.0,
-                      arrival_threshold=None, direct=False):
+                      arrival_threshold=None, direct=False, avoid_ball=False):
         """Ordena a un robot moverse a una posición específica.
 
         Args:
@@ -592,6 +601,12 @@ class RobotCommandManager:
                 target con PID directo + steering. Para maniobras de corto alcance
                 ya validadas por el caller (p.ej. el creep de advance_to_contact),
                 donde el planner proyectaría/congelaría el avance. Defaults to False.
+            avoid_ball (bool, optional): Si True (solo modo planner), la pelota se
+                trata como obstáculo duro con clearance de posicionamiento
+                (PATH_PLANNING_BALL_POSITIONING_CLEARANCE) y NO como goal de disputa:
+                el robot la RODEA en vez de rozarla, y si el goal queda proyectado
+                sostiene posición en lugar de embestir. Lo usa move_behind_ball.
+                Defaults to False.
 
         Note:
             La acción se ejecuta de forma asíncrona. Use execute_commands()
@@ -642,6 +657,7 @@ class RobotCommandManager:
             'speed_factor': speed_factor,
             'arrival_threshold': arrival_threshold,
             'direct': direct,
+            'avoid_ball': avoid_ball,
         }
         log.info("Robot %i: Ordenado movimiento a %s%s", player_id, target_pos,
                  " (directo)" if direct else "")
