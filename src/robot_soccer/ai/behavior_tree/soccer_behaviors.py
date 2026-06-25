@@ -2167,10 +2167,16 @@ def _advance_to_contact_running(blackboard):
             )
             return NodeStatus.FAILURE
 
-        # Recalcular target sólo cuando aún no estamos en zona fina de captura.
-        # Una vez dentro, el PID cierra la distancia con el target ya emitido
-        # sin seguir la pelota frame a frame (evita oscilación por jitter).
-        if dist > CAPTURE_ACTIVATE_DISTANCE_PX:
+        # Recalcular target. Zona gruesa (dist > CAPTURE_ACTIVATE_DISTANCE_PX): seguir la
+        # pelota cada tick (el guard <20px de move_robot_to filtra el jitter, el PID cierra
+        # suave). Zona fina (≤): NO seguir frame a frame... EXCEPTO si el robot ya llegó al
+        # target y quedó inerte sin contacto — la pelota rodó hacia adelante (la empuja en
+        # vez de agarrarla) y queda fuera de L≤34. Re-emitir un creep fresco hacia la pelota
+        # actual cierra el contacto en lugar de quedar parado hasta el tope/timeout (la zona
+        # muerta (34,47] del último test). Inactivo ⇒ sin acción en curso ⇒ el guard de
+        # de-dup no aplica y el target se acepta aunque cambie poco.
+        idle_in_capture_zone = player_id not in blackboard.command_manager.actions_in_progress
+        if dist > CAPTURE_ACTIVATE_DISTANCE_PX or idle_in_capture_zone:
             goal_to_ball = goal_pos - ball_pos
             dist_gtb = float(np.linalg.norm(goal_to_ball))
             if dist_gtb >= 1.0:
