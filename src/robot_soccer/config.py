@@ -266,12 +266,12 @@ PATH_PLANNING_CONTEST_CLEARANCE = 20  # px — clearance reducido en la zona de 
 
 # Clearance dedicado al POSICIONAMIENTO behind-ball (move_robot_to con avoid_ball=True).
 # El contest clearance (20) deja la zona de exclusión de la pelota en 10+20+6=36px,
-# menor que el radio del cuerpo del robot (~30px) → lo roza/empuja al rodearla. Con 41
-# la zona = 10+41+6 = 57px: el centro del robot se mantiene a ≥57px de la pelota (unos px
-# más de aire que antes, para que no roce). BEHIND_BALL_APPROACH_PX(72) > 57 sigue alcanzable
-# con holgura sana (~15px, evita el parpadeo proyectado/freeze). Solo aplica al
+# menor que el radio del cuerpo del robot (~30px) → lo roza/empuja al rodearla. Con 37
+# la zona = 10+37+6 = 53px: el centro del robot se mantiene a ≥53px de la pelota (apenas el
+# aire justo para no rozar). BEHIND_BALL_APPROACH_PX(64) > 53 sigue alcanzable con holgura
+# sana (~11px, evita el parpadeo proyectado/freeze; C5 es backstop). Solo aplica al
 # posicionamiento; el contacto final lo cierra advance_to_contact en modo directo.
-PATH_PLANNING_BALL_POSITIONING_CLEARANCE = 41  # px — clearance al rodear la pelota posicionándose
+PATH_PLANNING_BALL_POSITIONING_CLEARANCE = 37  # px — clearance al rodear la pelota posicionándose
 RRT_WAYPOINT_ARRIVAL_PX  = 20    # px — umbral de llegada a waypoints intermedios
 RRT_REPLAN_POSITION_PX   = 80    # px — trigger replan si robot se aleja >N px del punto enviado
 RRT_REPLAN_COOLDOWN_S    = 0.5   # s  — tiempo mínimo entre replans por posición/obstáculo
@@ -749,15 +749,21 @@ DRIBBLER_HOLD_POWER = 30  # PWM reducido para sostener pelota (0-255 directo)
 # proporción ON/(ON+OFF), dejando enfriar entre pulsos. ON=80ms cubre el keepalive
 # (<100ms del watchdog firmware). OFF>0 es clave para no cocinar el motor en stall.
 DRIBBLER_PULSE_ON_MS = 80   # ms — duración del pulso encendido (= keepalive)
-DRIBBLER_PULSE_OFF_MS = 40  # ms — duración del pulso apagado (>0 limita corriente media)
+DRIBBLER_PULSE_OFF_MS = 20  # ms — duración del pulso apagado (>0 limita corriente; corto = agarre casi continuo)
+
+# Distancia robot-pelota a la que se ENCIENDE el dribbler durante el avance al contacto.
+# Solo gira cuando está lo bastante cerca para capturar (no desde behind_pos, lejos): da
+# tiempo a que el rodillo tome vueltas justo antes del contacto. Debe ser < BEHIND_BALL_APPROACH_PX
+# y >= CAPTURE_ACTIVATE_DISTANCE_PX. Subir = enciende antes (más margen); bajar = menos corriente.
+DRIBBLER_ENGAGE_DISTANCE_PX = 50  # px — enciende el dribbler bajo esta distancia a la pelota
 
 # --- Posicionamiento detrás de la pelota (ataque sin dribbler) ---
 # El atacante se posiciona en la línea pelota-arco ANTES de hacer contacto,
 # eliminando la necesidad de rotar con la pelota o activar el dribbler.
 # BEHIND_BALL_APPROACH_PX debe ser > la zona-obstáculo de la pelota
-# (PATH_PLANNING_BALL_OBSTACLE_RADIUS+POSITIONING_CLEARANCE+margin = 57px) con holgura,
+# (PATH_PLANNING_BALL_OBSTACLE_RADIUS+POSITIONING_CLEARANCE+margin = 53px) con holgura,
 # para que el staging sea alcanzable por el planner sin proyectar el goal (freeze).
-BEHIND_BALL_APPROACH_PX = 72  # px — distancia robot-pelota al posicionarse detrás
+BEHIND_BALL_APPROACH_PX = 64  # px — distancia robot-pelota al posicionarse detrás
 BEHIND_BALL_LATERAL_OFFSET_PX = 75 # px — desvío lateral para rodear la pelota
 BEHIND_BALL_ALIGN_TOLERANCE_DEG = 15.0  # ° — tolerancia angular aceptable al posicionar
 # Techo de velocidad lineal al rodear la pelota de cerca (fase 'circle', única que se
@@ -776,7 +782,7 @@ BEHIND_BALL_NEAR_CEILING_PWM = 40  # PWM — techo lineal en el arco de aproxima
 CIRCLE_BALL_ACTIVATE_DISTANCE_PX = 55
 # Radio del arco. Igual a BEHIND_BALL_APPROACH_PX para que el final del arco
 # coincida exactamente con behind_pos (transición sin discontinuidades al exit).
-CIRCLE_BALL_RADIUS_PX = 72
+CIRCLE_BALL_RADIUS_PX = 64
 # Avance angular por waypoint del arco. La cuerda entre waypoints consecutivos
 # (2·R·sin(step/2) = 37 px a R=72) DEBE superar el guard de de-duplicación de
 # move_robot_to (20 px) y el umbral de llegada (BEHIND_BALL_ARRIVAL_PX=15): con

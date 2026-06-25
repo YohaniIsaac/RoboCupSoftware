@@ -25,6 +25,7 @@ from robot_soccer.config import (
     CAPTURE_OVERSHOOT_PX,
     CAPTURE_CONFIRM_DISTANCE_PX,
     CAPTURE_CREEP_SPEED_PWM,
+    DRIBBLER_ENGAGE_DISTANCE_PX,
     CREEP_REGULATOR_ENABLED,
     CREEP_BASE_MAX_PWM,
     KICK_POINT_OFFSET_PX,
@@ -1888,10 +1889,11 @@ def _advance_to_contact_start(blackboard):
     goal_pos   = np.array(blackboard.opponent_goal_pos, dtype=float)
     dist       = float(np.linalg.norm(ball_pos - player_pos))
 
-    # Encender el dribbler para AGARRAR la pelota durante el avance recto al contacto
-    # (el lazo de decision_process lo pulsa: CAPTURE mientras agarra, HOLD al sostener).
-    # Se apaga en move_behind_ball (posicionamiento/rotación) y en el kick.
-    blackboard.player._dribbler_on = True
+    # Encender el dribbler para AGARRAR la pelota SOLO cuando ya está cerca (no desde
+    # behind_pos, lejos): da tiempo a que el rodillo tome vueltas justo antes del contacto.
+    # El lazo de decision_process lo pulsa (CAPTURE al agarrar, HOLD al sostener). Se apaga
+    # en move_behind_ball (posicionamiento/rotación) y en el kick.
+    blackboard.player._dribbler_on = dist < DRIBBLER_ENGAGE_DISTANCE_PX
 
     # Reiniciar estado de contacto
     blackboard._contact_made         = False
@@ -2003,6 +2005,10 @@ def _advance_to_contact_running(blackboard):
     # Cronómetro de posesión: sigue corriendo durante el avance al contacto
     # (ver _possession_track / _possession_expired y la rama de tope del árbol).
     _possession_track(blackboard, dist)
+
+    # Dribbler: engancha cuando el robot ya está cerca de la pelota (durante el creep),
+    # no desde lejos. Al cruzar DRIBBLER_ENGAGE_DISTANCE_PX el rodillo empieza a girar.
+    blackboard.player._dribbler_on = dist < DRIBBLER_ENGAGE_DISTANCE_PX
 
     # Tope de posesión: el SelectorNode no re-evalúa la rama TopePosesion mientras este
     # nodo está RUNNING, así que el preempt se hace ABORTANDO aquí (FAILURE -> el selector
