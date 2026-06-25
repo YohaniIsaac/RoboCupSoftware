@@ -1585,7 +1585,14 @@ def _move_behind_ball_start(blackboard):
             goal_pos[1] - player_pos[1], goal_pos[0] - player_pos[0])))
         alignment = abs((ang_to_ball - ang_to_goal + 180) % 360 - 180)
         err_heading = abs((ang_to_ball - blackboard.player.angle + 180) % 360 - 180)
-        if alignment < 30 and err_heading < BEHIND_BALL_ALIGN_TOLERANCE_DEG * 2:
+        # Invariante: el gate de heading del fast-path DEBE ser < ADVANCE_CONTACT_ALIGN_DEG
+        # (25°). Con el viejo *2 (30°) el fast-path aceptaba un heading que advance_to_contact
+        # re-stageaba de inmediato (DESALINEADO > 25°) → ping-pong directo↔re-stage sin
+        # realinear nunca. Con BEHIND_BALL_ALIGN_TOLERANCE_DEG (15°) el fast-path garantiza el
+        # mismo heading que el AJUSTE ANGULO del camino normal y queda bajo el límite
+        # geométrico de contacto centrado (~18° con KICK_POINT_TOLERANCE_PX=10 a L≈30px); los
+        # casos [15°,30°] caen al circle/AJUSTE ANGULO que realinea (rápido por gain scheduling).
+        if alignment < 30 and err_heading < BEHIND_BALL_ALIGN_TOLERANCE_DEG:
             blackboard.last_action = "behind_ball_ready"
             robot_status_logger.emit_event(
                 blackboard.player.id,
