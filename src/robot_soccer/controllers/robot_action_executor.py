@@ -109,7 +109,7 @@ class RobotActionExecutor:
             if self.rf_controller:
                 # Firmware usa IDs 1-based (player.id es 0-based)
                 self.rf_controller.set_dribbler(player.id + 1, DRIBBLER_CAPTURE_POWER)
-                log.info("Robot %i: Motor de captura ACTIVADO (%.0f%%)", player.id, DRIBBLER_CAPTURE_POWER * 100)
+                log.info("Robot %i: Motor de captura ACTIVADO (PWM=%d)", player.id, DRIBBLER_CAPTURE_POWER)
 
             # PASO 3: Acercarse un poco más con motor activo
             if dist_to_ball > CAPTURE_CONFIRM_DISTANCE_PX:

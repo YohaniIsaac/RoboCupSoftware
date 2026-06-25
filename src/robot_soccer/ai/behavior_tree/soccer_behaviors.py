@@ -1500,6 +1500,10 @@ def _move_behind_ball_start(blackboard):
     if not hasattr(blackboard, "command_manager"):
         return NodeStatus.FAILURE
 
+    # Dribbler OFF durante el posicionamiento/rotación (solo agarra en el avance recto;
+    # no se rota con el dribbler). Cubre cualquier salida de advance que no lo limpiara.
+    blackboard.player._dribbler_on = False
+
     # Limpiar override de velocidad residual de Phase 2 previa
     controller = blackboard.command_manager.controllers.get(blackboard.player.id)
     if controller and controller.max_linear_pwm_override is not None:
@@ -1884,6 +1888,11 @@ def _advance_to_contact_start(blackboard):
     goal_pos   = np.array(blackboard.opponent_goal_pos, dtype=float)
     dist       = float(np.linalg.norm(ball_pos - player_pos))
 
+    # Encender el dribbler para AGARRAR la pelota durante el avance recto al contacto
+    # (el lazo de decision_process lo pulsa: CAPTURE mientras agarra, HOLD al sostener).
+    # Se apaga en move_behind_ball (posicionamiento/rotación) y en el kick.
+    blackboard.player._dribbler_on = True
+
     # Reiniciar estado de contacto
     blackboard._contact_made         = False
     blackboard._contact_settle_start = None
@@ -2216,6 +2225,7 @@ def kick_immediately(blackboard):
     rf = blackboard.command_manager.rf_controller
     if rf:
         fw_id = blackboard.player.id + 1
+        rf.set_dribbler(fw_id, 0)  # apagar dribbler ya (no esperar el watchdog) antes del disparo
         rf.kick_priority(fw_id, 1.0)
 
     # En simulación: aplicar velocidad a la pelota hacia el arco
@@ -2229,6 +2239,7 @@ def kick_immediately(blackboard):
         ball.dy = 15.0 * direction[1]
 
     blackboard.player._has_ball = False
+    blackboard.player._dribbler_on = False  # dribbler OFF antes/al patear (no estorbar al disparo)
     blackboard._last_kick_time  = time.time()  # bloquea fast-path en move_behind_ball
     _possession_reset(blackboard)  # la posesión terminó: reinicia el cronómetro de tope
     # Snapshot de la posición de la pelota al momento del kick: permite

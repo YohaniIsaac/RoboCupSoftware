@@ -29,6 +29,7 @@ from robot_soccer.config import (
     ROL_DEFENSIVO,
     FIELD_CAM,
     CAPTURE_CONFIRM_DISTANCE_PX,
+    DRIBBLER_CAPTURE_POWER,
     DRIBBLER_HOLD_POWER,
     DRIBBLER_PULSE_ON_MS,
     DRIBBLER_PULSE_OFF_MS,
@@ -44,6 +45,58 @@ from robot_soccer.config import (
 )
 
 log = logging.getLogger(__name__)
+
+
+def _pulse_dribbler(rf, p, now, phase_d, timer_d, last_ka_d, prev_d, keepalive_s):
+    """Pulso keepalive del dribbler de un robot, con resguardo de corriente.
+
+    Se engancha al AGARRAR (player._dribbler_on, durante el avance recto al contacto) o
+    al tener posesión (_has_ball): usa DRIBBLER_CAPTURE_POWER mientras agarra y
+    DRIBBLER_HOLD_POWER mientras sostiene. Refresca cada keepalive_s (< watchdog firmware
+    de 100ms) y pulsa ON/OFF (DRIBBLER_PULSE_ON/OFF_MS) para limitar la corriente media de
+    stall. set_dribbler ya recorta al cap blando DRIBBLER_MAX_PWM. NO se engancha durante
+    el posicionamiento/rotación (_dribbler_on se limpia allí).
+    """
+    rid = p.id
+    fw_id = rid + 1
+    has_ball = getattr(p, '_has_ball', False)
+    grabbing = getattr(p, '_dribbler_on', False) and not has_ball
+    engaged  = has_ball or getattr(p, '_dribbler_on', False)
+    power = DRIBBLER_CAPTURE_POWER if grabbing else DRIBBLER_HOLD_POWER
+
+    # Flanco de subida del enganche: reiniciar el ciclo de pulso.
+    if engaged and not prev_d.get(rid, False):
+        phase_d[rid] = 'on'
+        timer_d[rid] = now
+    prev_d[rid] = engaged
+
+    if not engaged:
+        return
+
+    pulse_on_s  = DRIBBLER_PULSE_ON_MS  / 1000.0
+    pulse_off_s = DRIBBLER_PULSE_OFF_MS / 1000.0
+    if pulse_off_s <= 0:
+        # Modo continuo (sin pulsado macro)
+        if now - last_ka_d[rid] >= keepalive_s:
+            rf.set_dribbler(fw_id, power)
+            last_ka_d[rid] = now
+        return
+
+    phase_elapsed = now - timer_d[rid]
+    if phase_d[rid] == 'on':
+        if now - last_ka_d[rid] >= keepalive_s:
+            rf.set_dribbler(fw_id, power)
+            last_ka_d[rid] = now
+        if phase_elapsed >= pulse_on_s:
+            rf.set_dribbler(fw_id, 0)
+            phase_d[rid] = 'off'
+            timer_d[rid] = now
+    else:  # 'off'
+        if phase_elapsed >= pulse_off_s:
+            rf.set_dribbler(fw_id, power)
+            last_ka_d[rid] = now
+            phase_d[rid] = 'on'
+            timer_d[rid] = now
 
 
 def decision_process(
@@ -152,7 +205,7 @@ def decision_process(
     DRIBBLER_KEEPALIVE = 0.08     # 80ms < timeout firmware (100ms)
     dribbler_pulse_phase = {rid: 'on' for rid in robot_ids}
     dribbler_pulse_timer = {rid: 0.0 for rid in robot_ids}
-    prev_has_ball = {rid: False for rid in robot_ids}
+    prev_dribbler_engaged = {rid: False for rid in robot_ids}
 
     prev_bt_action = None
     last_status_log = 0.0         # throttle de status (0.5 Hz → cada 2s)
@@ -295,46 +348,13 @@ def decision_process(
                 zona = max(0.0, min(2.0, zona))
                 behavior_manager.update_game_context((posesion, proximidad, zona))
 
-            # --- Dribbler keepalive con pulso intermitente (por robot) ---
+            # --- Dribbler: pulso de captura/sostén (por robot) ---
             if behavior_active and robot_available:
                 rf = behavior_manager.command_manager.rf_controller
                 for p in behavior_manager.team_players:
-                    rid = p.id
-                    firmware_id = rid + 1
-
-                    # Resetear ciclo de pulso al capturar la pelota (flanco de subida)
-                    if p._has_ball and not prev_has_ball.get(rid, False):
-                        dribbler_pulse_phase[rid] = 'on'
-                        dribbler_pulse_timer[rid] = now
-
-                    if p._has_ball:
-                        pulse_on_s  = DRIBBLER_PULSE_ON_MS  / 1000.0
-                        pulse_off_s = DRIBBLER_PULSE_OFF_MS / 1000.0
-
-                        if pulse_off_s <= 0:
-                            # Modo continuo
-                            if now - last_dribbler_keepalive[rid] >= DRIBBLER_KEEPALIVE:
-                                rf.set_dribbler(firmware_id, DRIBBLER_HOLD_POWER)
-                                last_dribbler_keepalive[rid] = now
-                        else:
-                            phase_elapsed = now - dribbler_pulse_timer[rid]
-                            if dribbler_pulse_phase[rid] == 'on':
-                                if now - last_dribbler_keepalive[rid] >= DRIBBLER_KEEPALIVE:
-                                    rf.set_dribbler(firmware_id, DRIBBLER_HOLD_POWER)
-                                    last_dribbler_keepalive[rid] = now
-                                if phase_elapsed >= pulse_on_s:
-                                    rf.set_dribbler(firmware_id, 0)
-                                    dribbler_pulse_phase[rid] = 'off'
-                                    dribbler_pulse_timer[rid] = now
-                            else:  # 'off'
-                                if phase_elapsed >= pulse_off_s:
-                                    rf.set_dribbler(firmware_id, DRIBBLER_HOLD_POWER)
-                                    last_dribbler_keepalive[rid] = now
-                                    dribbler_pulse_phase[rid] = 'on'
-                                    dribbler_pulse_timer[rid] = now
-
-            for p in players:
-                prev_has_ball[p.id] = p._has_ball
+                    _pulse_dribbler(rf, p, now, dribbler_pulse_phase,
+                                    dribbler_pulse_timer, last_dribbler_keepalive,
+                                    prev_dribbler_engaged, DRIBBLER_KEEPALIVE)
 
             # --- Actualizar posiciones de todos los robots para el planner ---
             _all_robot_data = [
@@ -756,7 +776,7 @@ def decision_process_2v2(
     last_dribbler_keepalive = {rid: 0.0 for rid in all_ids}
     dribbler_pulse_phase    = {rid: 'on' for rid in all_ids}
     dribbler_pulse_timer    = {rid: 0.0 for rid in all_ids}
-    prev_has_ball           = {rid: False for rid in all_ids}
+    prev_dribbler_engaged   = {rid: False for rid in all_ids}
 
     log.info("Decision 2v2 lista. ESPACIO=ambos, R=rojo, B=azul.")
 
@@ -999,41 +1019,14 @@ def decision_process_2v2(
                     elif dist > CAPTURE_CONFIRM_DISTANCE_PX * 2:
                         p._has_ball = False
 
-            # --- Dribbler keepalive (robots activos de cada equipo) ---
+            # --- Dribbler: pulso de captura/sostén (robots activos de cada equipo) ---
             for bm, active in ((bm_red, active_red), (bm_blue, active_blue)):
                 if not active:
                     continue
                 for p in bm.team_players:
-                    rid = p.id
-                    if p._has_ball and not prev_has_ball.get(rid, False):
-                        dribbler_pulse_phase[rid] = 'on'
-                        dribbler_pulse_timer[rid] = now
-                    if p._has_ball:
-                        pulse_on_s  = DRIBBLER_PULSE_ON_MS  / 1000.0
-                        pulse_off_s = DRIBBLER_PULSE_OFF_MS / 1000.0
-                        if pulse_off_s <= 0:
-                            if now - last_dribbler_keepalive[rid] >= DRIBBLER_KEEPALIVE:
-                                rf.set_dribbler(rid + 1, DRIBBLER_HOLD_POWER)
-                                last_dribbler_keepalive[rid] = now
-                        else:
-                            elapsed = now - dribbler_pulse_timer[rid]
-                            if dribbler_pulse_phase[rid] == 'on':
-                                if now - last_dribbler_keepalive[rid] >= DRIBBLER_KEEPALIVE:
-                                    rf.set_dribbler(rid + 1, DRIBBLER_HOLD_POWER)
-                                    last_dribbler_keepalive[rid] = now
-                                if elapsed >= pulse_on_s:
-                                    rf.set_dribbler(rid + 1, 0)
-                                    dribbler_pulse_phase[rid] = 'off'
-                                    dribbler_pulse_timer[rid] = now
-                            else:
-                                if elapsed >= pulse_off_s:
-                                    rf.set_dribbler(rid + 1, DRIBBLER_HOLD_POWER)
-                                    last_dribbler_keepalive[rid] = now
-                                    dribbler_pulse_phase[rid] = 'on'
-                                    dribbler_pulse_timer[rid] = now
-
-            for p in all_players:
-                prev_has_ball[p.id] = p._has_ball
+                    _pulse_dribbler(rf, p, now, dribbler_pulse_phase,
+                                    dribbler_pulse_timer, last_dribbler_keepalive,
+                                    prev_dribbler_engaged, DRIBBLER_KEEPALIVE)
 
             # --- Obstáculos comunes: todos los robots detectados ---
             _all_robot_data = [

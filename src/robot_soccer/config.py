@@ -725,26 +725,31 @@ BALL_INTERCEPT_MAX_PX                = 60   # px      — desplazamiento máximo
 # Calibrar con scripts/calibrate_behavior_thresholds.py (teclas T/Y)
 DRIBBLE_PWM_FACTOR = 1.0  # factor — compensación de fricción del dribbler
 
-# Potencia del motor dribbler en PWM (0-255) durante la fase de CAPTURA.
-# El firmware usa SoftPWM: 255 = máxima fuerza de agarre.
-# Se activa cuando el BT inicia capture_ball (fase 2: creep forward).
-# Calibrar con scripts/calibrate_behavior_thresholds.py (teclas 1/2)
-DRIBBLER_CAPTURE_POWER = 0  # PWM para atrapar pelota
+# Cap blando (Python) del PWM del dribbler. set_dribbler recorta cualquier valor a este
+# techo ANTES de enviarlo por RF. Ajustable sin reflashear.
+# ⚠️ NO usar el dribbler cerca del PWM máximo (255): el motor DC (N20, BJT como switch)
+# NO tiene sensor de corriente; a PWM alto y en stall (rodillo trabado) la corriente de
+# stall sostenida QUEMA el componente (ya ocurrió). Mantener el PWM bajo (rango de los
+# motores de tracción, ~20-47) y pulsado. Subir solo de a poco vigilando temperatura.
+DRIBBLER_MAX_PWM = 70  # PWM — techo blando; el valor de trabajo va MUY por debajo de 255
 
-# Potencia del motor dribbler en PWM (0-255) mientras MANTIENE la pelota.
-# Potencia reducida para disminuir consumo de corriente y proteger
-# el regulador de tensión durante rotación con pelota.
-# Se usa en keepalive y durante orient_to_goal / shoot_to_goal.
-# Calibrar con scripts/calibrate_behavior_thresholds.py (teclas 3/4)
-DRIBBLER_HOLD_POWER = 0  # PWM reducido para sostener pelota
+# Potencia del motor dribbler en PWM (0-255) durante la fase de CAPTURA (agarrar la pelota
+# en el avance recto al contacto). En la escala SoftPWM de los motores de tracción
+# (firmware 30-47, calibración 19-32): el rodillo tiene poca carga, gira bien a ~50.
+# Valor de arranque conservador (lejos de 255 por seguridad); calibrar en banco.
+DRIBBLER_CAPTURE_POWER = 50  # PWM para atrapar pelota (0-255 directo)
+
+# Potencia del motor dribbler en PWM (0-255) mientras MANTIENE la pelota (keepalive).
+# Reducida para bajar consumo. NO se usa rotando con la pelota (dribbler off al rotar).
+DRIBBLER_HOLD_POWER = 30  # PWM reducido para sostener pelota (0-255 directo)
 
 # Dribbler intermitente: duración del pulso ON (ms) mientras mantiene pelota.
 # El motor se activa durante ON ms, luego se apaga durante OFF ms, y repite.
-# Reduce calor en el motor al trabarse, protegiendo el regulador de tensión.
-# Si DRIBBLER_PULSE_OFF_MS = 0, funciona de forma continua (sin intermitencia).
-# Calibrar con scripts/calibrate_behavior_thresholds.py (teclas 5/6 y 7/8)
-DRIBBLER_PULSE_ON_MS = 90  # ms — duración del pulso encendido
-DRIBBLER_PULSE_OFF_MS = 0  # ms — duración del pulso apagado (0=continuo)
+# Reduce calor en el motor al trabarse (pulsado macro): la corriente media baja en
+# proporción ON/(ON+OFF), dejando enfriar entre pulsos. ON=80ms cubre el keepalive
+# (<100ms del watchdog firmware). OFF>0 es clave para no cocinar el motor en stall.
+DRIBBLER_PULSE_ON_MS = 80   # ms — duración del pulso encendido (= keepalive)
+DRIBBLER_PULSE_OFF_MS = 40  # ms — duración del pulso apagado (>0 limita corriente media)
 
 # --- Posicionamiento detrás de la pelota (ataque sin dribbler) ---
 # El atacante se posiciona en la línea pelota-arco ANTES de hacer contacto,

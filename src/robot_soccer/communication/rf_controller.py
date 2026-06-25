@@ -20,6 +20,7 @@ from .command_protocol import RobotCommandProtocol
 from ..controllers.robot_calibration_multipoint import (
     get_calibration_manager_multipoint as get_calibration_manager
 )
+from ..config import DRIBBLER_MAX_PWM
 
 log = logging.getLogger(__name__)
 
@@ -267,14 +268,15 @@ class RFController:
 
         Args:
             robot_id (int): ID del robot (1-4).
-            power (int): Potencia del dribbler en PWM (0-255). Defaults to 255.
-                0 = apagado, ~115 = mantener pelota, 255 = captura máxima.
+            power (int): Potencia del dribbler en PWM (0-255). El valor se recorta al
+                cap blando DRIBBLER_MAX_PWM antes de enviarse (protección de corriente:
+                el motor NO tiene sensor y a PWM alto en stall se quema).
 
         Returns:
             bool: True si el comando se envió correctamente, False en caso contrario.
         """
-        # Clampar a rango válido 0-255
-        power_val = max(0, min(255, int(power)))
+        # Clampar al cap blando (0..DRIBBLER_MAX_PWM): nunca acercarse a 255.
+        power_val = max(0, min(DRIBBLER_MAX_PWM, int(power)))
 
         # Generar comando
         command = self.protocol.format_dribbler_command(robot_id, power_val)
