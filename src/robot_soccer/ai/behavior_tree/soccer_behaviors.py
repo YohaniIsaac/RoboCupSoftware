@@ -33,6 +33,7 @@ from robot_soccer.config import (
     CONTACT_APPROACH_OVERSHOOT_PX,
     KICK_POINT_TOLERANCE_PX,
     CONTACT_REACH_MARGIN_PX,
+    CONTACT_REACH_MARGIN_HOLD_PX,
     KICK_POINT_ANGLE_OFFSET_DEG,
     KICK_FAIL_DETECT_WINDOW_S,
     KICK_FAIL_GRACE_S,
@@ -1388,7 +1389,7 @@ def _path_near_ball(p1, p2, ball, threshold=35):
     return bool(np.linalg.norm(closest - b) < threshold)
 
 
-def _kick_contact(player_pos, player_angle_deg, ball_pos):
+def _kick_contact(player_pos, player_angle_deg, ball_pos, reach_margin_px=None):
     """Contacto direccional con la pelota para confirmar que se puede patear.
 
     Descompone la posición de la pelota relativa al robot en el eje de la nariz:
@@ -1396,21 +1397,30 @@ def _kick_contact(player_pos, player_angle_deg, ball_pos):
       D = desvío lateral de la pelota respecto al eje de la nariz.
 
     Hay contacto cuando el solenoide (a KICK_POINT_OFFSET_PX) ALCANZÓ la pelota —
-    L <= KICK_POINT_OFFSET_PX + CONTACT_REACH_MARGIN_PX, es decir NO corto (esto
-    obliga a completar el overshoot: el robot empuja hasta que la pelota lo frena
-    ~L=30) — y la pelota está centrada (D < KICK_POINT_TOLERANCE_PX). A diferencia
-    de un radio simétrico |pelota − kick_point|, distingue "corto" (no patear) de
+    L <= KICK_POINT_OFFSET_PX + reach_margin_px, es decir NO corto (esto obliga a
+    completar el overshoot: el robot empuja hasta que la pelota lo frena ~L=30) —
+    y la pelota está centrada (D < KICK_POINT_TOLERANCE_PX). A diferencia de un
+    radio simétrico |pelota − kick_point|, distingue "corto" (no patear) de
     "alcanzado/pasado" (patear).
+
+    Args:
+        reach_margin_px: margen longitudinal del gate. None → CONTACT_REACH_MARGIN_PX
+            (ADQUISICIÓN estricta, =34). La RE-verificación al cerrar el asentamiento
+            pasa CONTACT_REACH_MARGIN_HOLD_PX (MANTENER tolerante, =42): histéresis
+            asimétrica para no re-stagear una pelota ya sostenida y centrada que derivó
+            unos px hacia afuera.
 
     Returns:
         (ok, L, D): bool de contacto y las componentes longitudinal/lateral (px).
     """
+    if reach_margin_px is None:
+        reach_margin_px = CONTACT_REACH_MARGIN_PX
     rad = np.radians(player_angle_deg + KICK_POINT_ANGLE_OFFSET_DEG)
     u   = np.array([np.cos(rad), np.sin(rad)])
     rel = np.asarray(ball_pos, dtype=float) - np.asarray(player_pos, dtype=float)
     L   = float(rel @ u)
     D   = float(np.linalg.norm(rel - L * u))
-    ok  = (0.0 < L <= KICK_POINT_OFFSET_PX + CONTACT_REACH_MARGIN_PX) and (D < KICK_POINT_TOLERANCE_PX)
+    ok  = (0.0 < L <= KICK_POINT_OFFSET_PX + reach_margin_px) and (D < KICK_POINT_TOLERANCE_PX)
     return ok, L, D
 
 
@@ -2231,7 +2241,12 @@ def _advance_to_contact_running(blackboard):
         # haya descentrado lateralmente durante la espera. _kick_contact exige que la
         # pelota siga alcanzada y centrada en la nariz (D < tol); si no, patear sería al
         # vacío/desviado → re-stage (behind_ball realinea) en vez de disparar.
-        contact_ok, _L, _D = _kick_contact(player_pos, blackboard.player.angle, ball_pos)
+        # Margen longitudinal RELAJADO (HOLD, =42): histéresis asimétrica. La pelota ya
+        # estuvo en contacto (L≤34 al adquirir) y se sostuvo centrada; que haya derivado
+        # unos px hacia afuera (L 34→39) no debe forzar re-stage. El gate lateral (D)
+        # sigue estricto: si se descentró de verdad, igual re-stagea.
+        contact_ok, _L, _D = _kick_contact(player_pos, blackboard.player.angle, ball_pos,
+                                           reach_margin_px=CONTACT_REACH_MARGIN_HOLD_PX)
         if not contact_ok:
             blackboard.player._has_ball = False
             robot_status_logger.emit_event(

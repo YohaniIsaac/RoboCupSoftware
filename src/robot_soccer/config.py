@@ -573,6 +573,14 @@ CONTACT_REACH_MARGIN_PX = 4   # px — margen longitudinal: el solenoide se cons
                               #      KICK_POINT_OFFSET_PX + este margen (=34). Evita el disparo "corto"
                               #      (p.ej. L=42, kick_point 12px antes de la pelota) y deja que el
                               #      overshoot empuje hasta que la pelota frene al robot (~L=30).
+CONTACT_REACH_MARGIN_HOLD_PX = 12  # px — margen longitudinal RELAJADO para la RE-verificación al
+                              #      cerrar el asentamiento (gate de "mantener", =42). Histéresis
+                              #      asimétrica: ADQUIRIR el contacto es estricto (=34, no patear de
+                              #      lejos), pero una pelota ya sostenida ~1s y CENTRADA (D<tol) que
+                              #      derivó unos px hacia afuera (L 34→39) NO debe forzar re-stage —
+                              #      patear es correcto. Sin esto, una captura justo en el borde (L≈34)
+                              #      fallaba la re-verificación con cualquier jitter y entraba en bucle
+                              #      de re-stage hasta que el rival robaba la pelota (observado en log).
 KICK_POINT_ANGLE_OFFSET_DEG = 0.0  # ° — offset angular entre el eje del marker ArUco y el eje
                                     #      real del solenoide (desalineación mecánica). Calibrar
                                     #      con el robot en múltiples orientaciones en el centro
@@ -671,8 +679,10 @@ ROTATE_RECOMMAND_MIN_DEG = 8.0
 # Tiempo de espera (segundos) tras confirmar contacto con la pelota.
 # Permite que la pelota se acomode contra el robot antes de disparar.
 # Si la pelota escapa durante este tiempo, el ciclo se reinicia.
-CONTACT_SETTLE_TIME_S  = 1.2  # s — espera de asentamiento antes del disparo (verifica posesión
-                              #      estable: la pelota debe seguir centrada al final, no solo presente)
+CONTACT_SETTLE_TIME_S  = 1.0  # s — espera de asentamiento antes del disparo (verifica posesión
+                              #      estable: la pelota debe seguir centrada al final, no solo presente).
+                              #      Bajado 1.2→1.0: menos ventana para que la pelota derive del centro
+                              #      o el rival cierre la distancia antes de disparar (ver re-stage en log).
 POST_KICK_COOLDOWN_S   = 0.8  # s — cooldown tras patear antes de poder detectar contacto
                                #     inmediato de nuevo. Fuerza reposicionamiento físico.
 
