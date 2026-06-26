@@ -51,6 +51,10 @@ class Player:
 
         # Estado de posesión
         self._has_ball = False
+        # Timestamp del último disparo (lo escribe kick_immediately). El estimador de
+        # posesión de decision_process lo lee para no re-derivar _has_ball=True durante
+        # POST_KICK_COOLDOWN_S tras patear (la cámara aún ve la pelota pegada 1-2 frames).
+        self._last_kick_time = 0.0
         self.ball_capture_distance = 30
 
         # Parámetros de movimiento

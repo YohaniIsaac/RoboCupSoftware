@@ -43,6 +43,7 @@ from robot_soccer.config import (
     BALL_OUT_DEBOUNCE_FRAMES,
     ROBOT_DETECTION_LOST_RAMPDOWN_S,
     KICK_POINT_ANGLE_OFFSET_DEG,
+    POST_KICK_COOLDOWN_S,
     is_dribbler_enabled,
 )
 
@@ -342,7 +343,13 @@ def decision_process(
                         continue
                     dist = float(p.distance_to_ball(ball))
                     distances[p.id] = dist
-                    if dist < CAPTURE_CONFIRM_DISTANCE_PX:
+                    if now - getattr(p, '_last_kick_time', 0.0) < POST_KICK_COOLDOWN_S:
+                        # Cooldown post-kick: la posesión terminó al disparar. No re-derivar
+                        # has_ball=True por proximidad mientras la cámara aún ve la pelota
+                        # pegada (1-2 frames de lag) o el dribbler se re-engancha (H{pwr})
+                        # sobre una pelota ya disparada. Ver _pulse_dribbler / kick_immediately.
+                        p._has_ball = False
+                    elif dist < CAPTURE_CONFIRM_DISTANCE_PX:
                         _ang = math.degrees(math.atan2(
                             ball.y - p.y, ball.x - p.x))
                         _err = abs((_ang - p.angle + 180) % 360 - 180)
@@ -1046,6 +1053,11 @@ def decision_process_2v2(
                 for p in all_players:
                     if p.id not in players_initialized:
                         continue
+                    # Cooldown post-kick: un robot que acaba de disparar ya no posee la
+                    # pelota aunque la cámara la siga viendo pegada (1-2 frames de lag) → no
+                    # compite por best_pid ni re-engancha el dribbler. Ver kick_immediately.
+                    if now - getattr(p, '_last_kick_time', 0.0) < POST_KICK_COOLDOWN_S:
+                        continue
                     dist = float(p.distance_to_ball(ball))
                     if dist < CAPTURE_CONFIRM_DISTANCE_PX:
                         ang = math.degrees(math.atan2(ball.y - p.y, ball.x - p.x))
@@ -1057,7 +1069,9 @@ def decision_process_2v2(
                     if p.id not in players_initialized:
                         continue
                     dist = float(p.distance_to_ball(ball))
-                    if p.id == best_pid:
+                    if now - getattr(p, '_last_kick_time', 0.0) < POST_KICK_COOLDOWN_S:
+                        p._has_ball = False   # acaba de patear: soltar posesión y dribbler
+                    elif p.id == best_pid:
                         p._has_ball = True
                     elif dist < CAPTURE_CONFIRM_DISTANCE_PX:
                         p._has_ball = False   # en rango pero no el más cercano → cede

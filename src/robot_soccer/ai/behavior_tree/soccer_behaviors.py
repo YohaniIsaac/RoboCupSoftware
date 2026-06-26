@@ -1527,7 +1527,7 @@ def _move_behind_ball_start(blackboard):
     player_pos = np.array(blackboard.player.get_position(), dtype=float)
 
     dist_to_ball    = float(np.linalg.norm(ball_pos - player_pos))
-    secs_since_kick = time.time() - getattr(blackboard, '_last_kick_time', 0.0)
+    secs_since_kick = time.time() - getattr(blackboard.player, '_last_kick_time', 0.0)
 
     # Tras un kick reciente, distinguir tres sub-casos según qué pasó con la pelota:
     #   (1) Kick exitoso: la pelota voló (ball_displacement >= KICK_SUCCESS_MIN_PX).
@@ -2296,7 +2296,9 @@ def kick_immediately(blackboard):
 
     blackboard.player._has_ball = False
     blackboard.player._dribbler_on = False  # dribbler OFF antes/al patear (no estorbar al disparo)
-    blackboard._last_kick_time  = time.time()  # bloquea fast-path en move_behind_ball
+    # Timestamp en el PLAYER (no en el blackboard): decision_process lo lee por-robot para
+    # gatear la re-derivación de _has_ball post-kick. Bloquea además el fast-path de move_behind_ball.
+    blackboard.player._last_kick_time = time.time()
     _possession_reset(blackboard)  # la posesión terminó: reinicia el cronómetro de tope
     # Snapshot de la posición de la pelota al momento del kick: permite
     # distinguir en move_behind_ball entre kick exitoso (pelota voló) y
