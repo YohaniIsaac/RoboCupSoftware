@@ -1377,6 +1377,14 @@ def decision_process_2v2(
                                 'team': p.team,
                                 'left_pwm': lp,
                                 'right_pwm': rp,
+                                # Estado del rodillo (mismo valor que el campo drb= del STATUS):
+                                # 'C{pwr}'/'H{pwr}' enganchado, 'off' enganchado en ventana de
+                                # pulso apagado, 'avr' averiado, None desenganchado. Observación
+                                # pura: _dribbler_view es O(1) sobre flags ya mantenidos por el
+                                # loop de control (no agrega cómputo ni sincronización).
+                                'dribbler': _dribbler_view(
+                                    p, dribbler_pulse_phase,
+                                    positioning=bool(last_action in _POSITIONING_ACTIONS)),
                             }
                     viz_state_pipe.send({
                         'players': players_viz,

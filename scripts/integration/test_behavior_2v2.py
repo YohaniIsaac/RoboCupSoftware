@@ -145,6 +145,7 @@ LOG_CHANNELS: dict = {
     'game_state':     True,   # flags partido:         {t, ev:'gs',  s, v}
     'position':       True,   # pos en snap: p=[x,y]
     'angle_in_snap':  True,   # ángulo en snap: a=float
+    'dribbler':       True,   # rodillo: drb en snap + {t, ev:'drb', r, team, drb, mode} al engan./deseng.
     'path_change':    True,   # nueva ruta RRT*:     {t, ev:'path', r, team, path, wp}
     'pwm':            False,  # PWM en snap: L=int, R=int  (debug controlador)
     'target_in_snap': False,  # target en snap: tgt=[x,y]
@@ -244,6 +245,13 @@ class _MatchRecorder:
                 'rol_prev': None,
                 'has_ball_prev': False,
                 'pos_prev': None,
+                # Dribbler: engaged = drb ∉ {None,'avr'} (colapsa la ventana de pulso 'off',
+                # que sigue enganchada). Cuenta activaciones y tiempo encendido; los flancos
+                # van a events (métricas) y al canal 'drb' (timeline).
+                'dribbler_eng_prev': False,
+                'dribbler_on_ts': None,
+                'dribbler_activations': 0,
+                'dribbler_on_s': 0.0,
                 'dwell_s': {},
                 'action_entries': {},
                 'role_changes': 0,
@@ -287,6 +295,8 @@ class _MatchRecorder:
                 rob['p'] = [round(pos[0]), round(pos[1])]
             if LOG_CHANNELS.get('angle_in_snap') and p.get('angle_deg') is not None:
                 rob['a'] = round(p['angle_deg'], 1)
+            if LOG_CHANNELS.get('dribbler'):
+                rob['drb'] = p.get('dribbler')
             if LOG_CHANNELS.get('pwm'):
                 rob['L'] = p.get('left_pwm')
                 rob['R'] = p.get('right_pwm')
@@ -419,6 +429,25 @@ class _MatchRecorder:
                 self._event(t_rel, 'defender_ball_gain', robot=rid)
             st['has_ball_prev'] = has_ball
 
+            # Dribbler: flanco engan./deseng. (colapsa el pulso 'off', que sigue enganchado).
+            drb = p.get('dribbler')
+            drb_eng = drb is not None and drb != 'avr'
+            if drb_eng and not st['dribbler_eng_prev']:
+                st['dribbler_activations'] += 1
+                st['dribbler_on_ts'] = ts
+                self._event(t_rel, 'dribbler_on', robot=rid, mode=drb)
+                if LOG_CHANNELS.get('dribbler'):
+                    self._tl(t_rel, 'drb', r=rid, team=p.get('team', ''),
+                             drb='on', mode=drb)
+            elif st['dribbler_eng_prev'] and not drb_eng:
+                if st['dribbler_on_ts'] is not None:
+                    st['dribbler_on_s'] += ts - st['dribbler_on_ts']
+                    st['dribbler_on_ts'] = None
+                self._event(t_rel, 'dribbler_off', robot=rid)
+                if LOG_CHANNELS.get('dribbler'):
+                    self._tl(t_rel, 'drb', r=rid, team=p.get('team', ''), drb='off')
+            st['dribbler_eng_prev'] = drb_eng
+
             if pos is not None:
                 if st['pos_prev'] is not None:
                     st['dist_px'] += math.hypot(pos[0] - st['pos_prev'][0],
@@ -475,6 +504,10 @@ class _MatchRecorder:
                 'role_changes': st['role_changes'],
                 'defender_ball_gains': st['defender_ball_gains'],
                 'defender_captures': st['defender_captures'],
+                'dribbler': {
+                    'activations': st['dribbler_activations'],
+                    'on_s': round(st['dribbler_on_s'], 2),
+                },
                 'has_ball_s': round(st['has_ball_s'], 2),
                 'distance_traveled_px': round(st['dist_px'], 1),
                 'tracking_error_mm': _stats(st['tracking_mm']),
