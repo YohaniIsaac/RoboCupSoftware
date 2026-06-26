@@ -28,11 +28,19 @@ Controles (ventana OpenCV):
     K       : Mostrar/ocultar overlay del kick_point (lectura de config.py)
     ESC     : Salir (pregunta en la ventana si conservar el video grabado)
 
+Cronómetro y fin del partido:
+    El partido dura MATCH_DURATION_S de TIEMPO DE JUEGO efectivo: el reloj se
+    congela en posicionamiento y goles, pero la pelota fuera sí cuenta. El HUD
+    muestra el tiempo restante (MM:SS). Al agotarse se muestra "TIEMPO!" y el
+    test se cierra solo enviando el mismo 'exit' que ESC (decisión detiene los
+    robots de forma segura en su finally).
+
 Grabación de video:
-    El partido se graba siempre en segundo plano como video LIMPIO (el frame de
-    cámara corregido en perspectiva, sin overlays de debug). Se escribe a un
-    archivo temporal .part y solo se conserva si al salir con ESC se confirma
-    con [S]; con [N], ESC o Ctrl+C se descarta. La grabación vive en el proceso
+    El partido se graba en segundo plano, recortado al juego efectivo (sin
+    posicionamiento ni goles) y con el marcador + cronómetro quemados; sin los
+    overlays de debug (paths, círculos, kick-point). Se escribe a un archivo
+    temporal .part y solo se conserva si al terminar (TIEMPO o ESC) se confirma
+    con [S]; con [N], ESC sin confirmar o Ctrl+C se descarta. Vive en el proceso
     de visualización: no toca percepción/decisión/RF, así que no añade latencia
     al control. Salida: recordings/<nombre_script>/<nombre_script>_<ts>.mp4
 
@@ -104,6 +112,12 @@ GOAL_COOLDOWN_S  = 5.0
 RECORD_DIR_NAME = "recordings"          # raíz dedicada solo a videos
 RECORD_SUBDIR   = Path(__file__).stem   # subcarpeta propia de este script
 RECORD_FPS      = 20.0                   # cadencia de playback; el ritmo real se ajusta por reloj
+
+# Duración del partido en TIEMPO DE JUEGO efectivo: el reloj se congela en
+# posicionamiento y goles, pero la pelota fuera SÍ cuenta. Al agotarse, el test
+# termina solo (mismo 'exit' que ESC). Base del cronómetro y del recorte del video.
+MATCH_DURATION_S    = 300.0   # 5 minutos de juego efectivo
+MATCH_OVER_BANNER_S = 3.0     # cuánto se muestra "TIEMPO!" antes de preguntar si guardar
 
 # Robots por equipo
 TEAM_RED_IDS  = [0, 1]
@@ -780,7 +794,15 @@ def visualization_process_2v2(perception_pipe, decision_pipe, keyboard_pipe,
     rec_tmp_path   = None
     rec_final_path = None
     rec_frames     = 0
-    rec_t0         = None
+
+    # Reloj del partido (tiempo de juego efectivo): avanza con ambos equipos
+    # activos y sin posicionamiento/gol; la pelota fuera SÍ cuenta. Base del
+    # cronómetro, del recorte del video y del fin automático del partido.
+    match_clock_s   = 0.0
+    _clock_prev_ts  = None
+    _clock_running  = False
+    match_over_viz  = False   # True → tiempo agotado, mostrando "TIEMPO!"
+    match_over_t    = None    # wall-clock del fin, para el delay antes de preguntar
 
     def _ask_save_recording(base_frame, n_frames, dur_s):
         """Diálogo en la ventana: [S] conserva, [N]/ESC descarta. Devuelve bool."""
@@ -808,6 +830,46 @@ def visualization_process_2v2(perception_pipe, decision_pipe, keyboard_pipe,
             if kk in (ord('n'), ord('N'), 27):
                 return False
 
+    def _fmt_clock(secs):
+        secs = max(0, int(secs))
+        return f"{secs // 60:02d}:{secs % 60:02d}"
+
+    def _draw_scoreboard(img, remaining_s):
+        """Marcador + cronómetro (restante). Mismo dibujo en vivo y quemado en el video."""
+        iw = img.shape[1]
+        score_text = f"ROJO: {score['red']}    AZUL: {score['blue']}"
+        (tw, _), _ = cv2.getTextSize(score_text, cv2.FONT_HERSHEY_SIMPLEX, 0.75, 2)
+        cv2.putText(img, score_text, ((iw - tw) // 2, 28),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.75, (255, 255, 255), 2, cv2.LINE_AA)
+        clk_col = ((40, 40, 230) if remaining_s <= 10 else
+                   (40, 200, 230) if remaining_s <= 30 else (235, 235, 235))
+        clock_text = _fmt_clock(remaining_s)
+        (cw, _), _ = cv2.getTextSize(clock_text, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
+        cv2.putText(img, clock_text, ((iw - cw) // 2, 52),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, clk_col, 2, cv2.LINE_AA)
+
+    def _finalize_recording(base_frame):
+        """Cierra el video y pregunta si conservarlo; descarta si no se confirma."""
+        nonlocal video_writer
+        if video_writer is None:
+            return
+        video_writer.release()
+        video_writer = None
+        dur_s = rec_frames / RECORD_FPS if RECORD_FPS else 0.0
+        keep = rec_frames > 0 and _ask_save_recording(base_frame, rec_frames, dur_s)
+        if keep and rec_tmp_path is not None:
+            try:
+                rec_tmp_path.rename(rec_final_path)
+                log.info("Video del partido guardado en %s", rec_final_path)
+            except Exception as e:
+                log.error("No se pudo guardar el video: %s", e)
+        elif rec_tmp_path is not None:
+            try:
+                rec_tmp_path.unlink(missing_ok=True)
+                log.info("Grabación descartada")
+            except Exception as e:
+                log.error("No se pudo descartar el temporal: %s", e)
+
     try:
         rec_dir = ROOT_DIR / RECORD_DIR_NAME / RECORD_SUBDIR
         rec_dir.mkdir(parents=True, exist_ok=True)
@@ -832,20 +894,12 @@ def visualization_process_2v2(perception_pipe, decision_pipe, keyboard_pipe,
         while True:
             now = time.time()
 
-            # Frame
+            # Frame (solo se actualiza aquí; la grabación se hace más abajo,
+            # anclada al reloj del partido, tras conocer el estado de decisión).
             current = frame_counter.value
             if current != last_frame_counter:
                 last_frame         = shared_array.copy()
                 last_frame_counter = current
-                # Grabar el frame limpio. Cadencia por reloj → el video se
-                # reproduce en tiempo real aunque varíe el FPS de cámara.
-                if video_writer is not None:
-                    if rec_t0 is None:
-                        rec_t0 = now
-                    rec_target = int((now - rec_t0) * RECORD_FPS)
-                    while rec_frames < rec_target:
-                        video_writer.write(last_frame)
-                        rec_frames += 1
 
             # Percepción
             if perception_pipe.poll():
@@ -898,8 +952,43 @@ def visualization_process_2v2(perception_pipe, decision_pipe, keyboard_pipe,
                             pass
                     prev_robot_available = robot_available
                     recorder.on_decision(data)
+                    # Reloj del partido: avanza con ambos equipos activos y sin
+                    # posicionamiento/gol (la pelota fuera SÍ cuenta como juego).
+                    _ts_dec = data.get('timestamp')
+                    _clock_run = bool(
+                        active_red and active_blue
+                        and not pre_init_viz and not init_phase_viz
+                        and not goal_reset_viz)
+                    if _ts_dec is not None:
+                        if _clock_running and _clock_run and _clock_prev_ts is not None:
+                            match_clock_s += _ts_dec - _clock_prev_ts
+                        _clock_prev_ts = _ts_dec
+                    _clock_running = _clock_run
+                    # Fin por tiempo: dispara el MISMO 'exit' que ESC (decisión
+                    # detiene los robots de forma segura en su finally).
+                    if not match_over_viz and match_clock_s >= MATCH_DURATION_S:
+                        match_over_viz = True
+                        match_over_t   = now
+                        try:
+                            keyboard_pipe.send({'command': 'exit'})
+                        except Exception:
+                            pass
+                        log.info("TIEMPO — fin del partido (%.0fs de juego efectivo)",
+                                 match_clock_s)
                 except Exception:
                     pass
+
+            # Grabar SOLO el tiempo de juego efectivo: el pacing por match_clock_s
+            # (congelado en posicionamiento/gol) recorta esas fases del video. Se
+            # quema marcador + cronómetro; sin overlays de debug.
+            if video_writer is not None and last_frame is not None:
+                rec_target = int(min(match_clock_s, MATCH_DURATION_S) * RECORD_FPS)
+                if rec_frames < rec_target:
+                    rec_frame = last_frame.copy()
+                    _draw_scoreboard(rec_frame, MATCH_DURATION_S - match_clock_s)
+                    while rec_frames < rec_target:
+                        video_writer.write(rec_frame)
+                        rec_frames += 1
 
             if last_frame is not None:
                 frame = last_frame.copy()
@@ -1056,11 +1145,8 @@ def visualization_process_2v2(perception_pipe, decision_pipe, keyboard_pipe,
                                 (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.37, rc, 1)
                     y += 16
 
-                # Marcador centrado
-                score_text = f"ROJO: {score['red']}    AZUL: {score['blue']}"
-                (tw, _), _ = cv2.getTextSize(score_text, cv2.FONT_HERSHEY_SIMPLEX, 0.75, 2)
-                cv2.putText(frame, score_text, ((w - tw) // 2, 28),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.75, (255, 255, 255), 2, cv2.LINE_AA)
+                # Marcador + cronómetro (mismo dibujo que se quema en el video)
+                _draw_scoreboard(frame, MATCH_DURATION_S - match_clock_s)
 
                 cv2.putText(frame, "ESPACIO=Ambos  R=Rojo  B=Azul  K=KickPt  ESC=Salir",
                             (10, h - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (180, 180, 180), 1)
@@ -1196,6 +1282,23 @@ def visualization_process_2v2(perception_pipe, decision_pipe, keyboard_pipe,
                     cv2.putText(frame, out_text, ((w - tw_o) // 2, hc + 10),
                                 cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 165, 255), 2, cv2.LINE_AA)
 
+                # Overlay TIEMPO! (fin del partido) — análogo a GOOOL!
+                if match_over_viz:
+                    overlay   = frame.copy()
+                    banner_y1 = h // 3
+                    banner_y2 = 2 * h // 3
+                    cv2.rectangle(overlay, (0, banner_y1), (w, banner_y2), (30, 30, 30), -1)
+                    cv2.addWeighted(overlay, 0.6, frame, 0.4, 0, frame)
+                    t_label = "TIEMPO!"
+                    (tw_t, th_t), _ = cv2.getTextSize(t_label, cv2.FONT_HERSHEY_SIMPLEX, 2.2, 5)
+                    cv2.putText(frame, t_label,
+                                ((w - tw_t) // 2, (banner_y1 + banner_y2 + th_t) // 2),
+                                cv2.FONT_HERSHEY_SIMPLEX, 2.2, (255, 255, 255), 5, cv2.LINE_AA)
+                    final_txt = f"FINAL  —  ROJO {score['red']}  :  {score['blue']} AZUL"
+                    (fw, _), _ = cv2.getTextSize(final_txt, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
+                    cv2.putText(frame, final_txt, ((w - fw) // 2, banner_y2 + 28),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (220, 220, 220), 2, cv2.LINE_AA)
+
                 cv2.imshow(window_name, frame)
             else:
                 placeholder = np.zeros(frame_shape, dtype=np.uint8)
@@ -1205,6 +1308,13 @@ def visualization_process_2v2(perception_pipe, decision_pipe, keyboard_pipe,
                             cv2.FONT_HERSHEY_SIMPLEX, 0.7, (128, 128, 128), 2)
                 cv2.imshow(window_name, placeholder)
 
+            # Fin del partido por tiempo: tras mostrar "TIEMPO!" unos segundos,
+            # cerrar igual que un ESC (preguntar si guardar el video).
+            if (match_over_viz and match_over_t is not None
+                    and now - match_over_t >= MATCH_OVER_BANNER_S):
+                _finalize_recording(last_frame)
+                break
+
             key = cv2.waitKey(1) & 0xFF
             if key == 27:  # ESC
                 try:
@@ -1213,24 +1323,7 @@ def visualization_process_2v2(perception_pipe, decision_pipe, keyboard_pipe,
                     pass
                 # Cerrar el video y preguntar en la ventana si conservarlo
                 # (los robots ya se detienen: 'exit' fue enviado a decisión).
-                if video_writer is not None:
-                    video_writer.release()
-                    video_writer = None
-                    dur_s = rec_frames / RECORD_FPS if RECORD_FPS else 0.0
-                    keep = (rec_frames > 0 and
-                            _ask_save_recording(last_frame, rec_frames, dur_s))
-                    if keep and rec_tmp_path is not None:
-                        try:
-                            rec_tmp_path.rename(rec_final_path)
-                            log.info("Video del partido guardado en %s", rec_final_path)
-                        except Exception as e:
-                            log.error("No se pudo guardar el video: %s", e)
-                    elif rec_tmp_path is not None:
-                        try:
-                            rec_tmp_path.unlink(missing_ok=True)
-                            log.info("Grabación descartada")
-                        except Exception as e:
-                            log.error("No se pudo descartar el temporal: %s", e)
+                _finalize_recording(last_frame)
                 break
             elif key == ord(' '):
                 # No limpiar goal_reset_viz aquí: la decisión solo reanuda si el saque
@@ -1351,8 +1444,11 @@ def main():
     log.info("  5. Presionar ESPACIO: partido inicia (solo si robots y pelota OK)")
     log.info("  (R / B: activar solo rojo / azul para pruebas)")
     log.info("=" * 65)
-    log.info("Grabación   : video limpio del partido (sin overlays).")
-    log.info("              Al salir con ESC se pregunta si conservarlo o descartarlo.")
+    log.info("Duración    : %.0f min de juego efectivo (reloj congelado en posicionamiento/gol).",
+             MATCH_DURATION_S / 60.0)
+    log.info("Grabación   : video del partido con marcador + cronómetro quemados,")
+    log.info("              recortado al juego (sin posicionamiento ni goles).")
+    log.info("              Al terminar (TIEMPO o ESC) se pregunta si conservarlo.")
     log.info("              Salida: %s/%s/", RECORD_DIR_NAME, RECORD_SUBDIR)
     log.info("=" * 65)
 
