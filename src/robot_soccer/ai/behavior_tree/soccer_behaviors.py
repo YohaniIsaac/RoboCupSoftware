@@ -2191,6 +2191,12 @@ def _advance_to_contact_running(blackboard):
             unit = away / norm if norm > 1 else np.array([0.0, 1.0])
             press = ball_pos + unit * (CAPTURE_ACTIVATE_DISTANCE_PX + RIVAL_PRESS_MARGIN_PX)
             press = blackboard.field.clamp(press)  # dentro del área jugable (modo directo)
+            # Cediendo el contacto = no capturo: apagar el rodillo mientras retrocedo a la
+            # posición de press. El latch se encendió al entrar a <DRIBBLER_ENGAGE_DISTANCE_PX;
+            # dejarlo prendido haría girar el rodillo mientras me alejo de la pelota. Si el
+            # rival se aparta, el reenganche normal (dist < DRIBBLER_ENGAGE_DISTANCE_PX) lo
+            # vuelve a encender.
+            blackboard.player._dribbler_on = False
             blackboard.command_manager.move_robot_to(player_id, (int(press[0]), int(press[1])), direct=True)
             return NodeStatus.RUNNING
         else:
@@ -2629,6 +2635,14 @@ def hold_intercept_position(blackboard):
     # Ceder la pelota = no estoy en posesión: reinicia el cronómetro para no arrastrar
     # un valor obsoleto al re-comprometerme con la pelota tras interceptar.
     _possession_reset(blackboard)
+
+    # Apagar el rodillo al ceder. El latch _dribbler_on puede venir sucio de un advance
+    # previo (se enciende a <DRIBBLER_ENGAGE_DISTANCE_PX y solo lo limpian
+    # _move_behind_ball_start y el kick). Los estados de intercept NO están en
+    # _POSITIONING_ACTIONS, así que el pulso del dribbler no los suprime: sin este
+    # apagado explícito el rodillo seguiría girando mientras el robot rota hacia su
+    # línea de intercepción y se aleja de la pelota (lo observado al ceder).
+    blackboard.player._dribbler_on = False
 
     ball_pos   = blackboard.ball.get_position()
     player_pos = blackboard.player.get_position()
