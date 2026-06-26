@@ -809,6 +809,14 @@ def is_dribbler_enabled(robot_id):
 # (PATH_PLANNING_BALL_OBSTACLE_RADIUS+POSITIONING_CLEARANCE+margin = 53px) con holgura,
 # para que el staging sea alcanzable por el planner sin proyectar el goal (freeze).
 BEHIND_BALL_APPROACH_PX = 64  # px — distancia robot-pelota al posicionarse detrás
+# Acorralamiento: si el punto ideal "detrás de la pelota" (línea arco→pelota a
+# BEHIND_BALL_APPROACH_PX) cae más de este margen FUERA del área jugable, la pelota
+# está contra un borde sin sitio para que el robot se posicione a tirar al arco.
+# El atacante deja de orbitarla (rodearla con el cuerpo/rodillo la expulsaría) y
+# pasa a disparo de liberación (forced_kick). Ver _ball_cornered en soccer_behaviors.
+# Calibrado del log 21:14 (behind_pos clampeado ~44px contra el muro inferior); con
+# 25px se toleran pelotas que aún tienen sitio suficiente para el staging.
+BEHIND_BALL_CORNER_CLAMP_PX = 25  # px — clamp del behind_pos sobre el cual se considera acorralada
 BEHIND_BALL_LATERAL_OFFSET_PX = 75 # px — desvío lateral para rodear la pelota
 BEHIND_BALL_ALIGN_TOLERANCE_DEG = 15.0  # ° — tolerancia angular aceptable al posicionar
 # Techo de velocidad lineal al rodear la pelota de cerca (fase 'circle', única que se

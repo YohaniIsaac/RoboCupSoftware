@@ -50,7 +50,18 @@ from robot_soccer.config import (
 log = logging.getLogger(__name__)
 
 
-def _pulse_dribbler(rf, p, now, phase_d, timer_d, last_ka_d, prev_d, keepalive_s):
+# last_action del BT (blackboard) en los que el robot está POSICIONÁNDOSE/rotando, no
+# capturando: el rodillo debe estar OFF aunque el estimador geométrico haya enclavado
+# _has_ball (rodear la pelota con el rodillo encendido la expulsa al estar descentrada;
+# ver _ball_cornered). Deben coincidir con los blackboard.last_action que setea
+# _move_behind_ball en soccer_behaviors.
+_POSITIONING_ACTIONS = frozenset({
+    "move_behind_ball", "circle_ball", "retreating_from_ball",
+})
+
+
+def _pulse_dribbler(rf, p, now, phase_d, timer_d, last_ka_d, prev_d, keepalive_s,
+                    positioning=False):
     """Pulso keepalive del dribbler de un robot, con resguardo de corriente.
 
     Se engancha al AGARRAR (player._dribbler_on, durante el avance recto al contacto) o
@@ -68,7 +79,10 @@ def _pulse_dribbler(rf, p, now, phase_d, timer_d, last_ka_d, prev_d, keepalive_s
         return
     has_ball = getattr(p, '_has_ball', False)
     grabbing = getattr(p, '_dribbler_on', False) and not has_ball
-    engaged  = has_ball or getattr(p, '_dribbler_on', False)
+    # positioning=True: el robot rodea/rota para posicionarse (no captura). Suprimir el
+    # rodillo aunque _has_ball esté enclavado: girar con la pelota descentrada en el morro
+    # la expulsa (lo que vaciaba la posesión contra el borde). Ver _POSITIONING_ACTIONS.
+    engaged  = (has_ball or getattr(p, '_dribbler_on', False)) and not positioning
     power = DRIBBLER_CAPTURE_POWER if grabbing else DRIBBLER_HOLD_POWER
 
     # Flanco de subida del enganche: reiniciar el ciclo de pulso. Eventos de flanco
@@ -112,16 +126,19 @@ def _pulse_dribbler(rf, p, now, phase_d, timer_d, last_ka_d, prev_d, keepalive_s
             timer_d[rid] = now
 
 
-def _dribbler_view(p, phase_d):
+def _dribbler_view(p, phase_d, positioning=False):
     """Estado del dribbler para el campo drb= del STATUS (snapshot a 2 Hz).
 
     Lee los mismos flags que _pulse_dribbler: 'C{pwr}' agarrando (captura), 'H{pwr}'
     sosteniendo (con pelota), 'off' enganchado pero en ventana de pulso apagado, None
     desenganchado (rodillo parado). En modo continuo (DRIBBLER_PULSE_OFF_MS=0) la fase es
-    siempre 'on', así que muestra C/H mientras esté enganchado.
+    siempre 'on', así que muestra C/H mientras esté enganchado. Con positioning=True el
+    rodillo está suprimido (mismo gate que _pulse_dribbler) → reportar parado (None).
     """
     if not is_dribbler_enabled(p.id):
         return 'avr'  # dribbler averiado (DRIBBLER_DISABLED_ROBOT_IDS): nunca se energiza
+    if positioning:
+        return None  # suprimido durante el posicionamiento/rotación (ver _pulse_dribbler)
     has_ball = getattr(p, '_has_ball', False)
     if not (has_ball or getattr(p, '_dribbler_on', False)):
         return None
@@ -400,9 +417,12 @@ def decision_process(
             if behavior_active and robot_available:
                 rf = behavior_manager.command_manager.rf_controller
                 for p in behavior_manager.team_players:
+                    _bb_p = behavior_manager.blackboards.get(p.id)
+                    _positioning = bool(_bb_p and _bb_p.last_action in _POSITIONING_ACTIONS)
                     _pulse_dribbler(rf, p, now, dribbler_pulse_phase,
                                     dribbler_pulse_timer, last_dribbler_keepalive,
-                                    prev_dribbler_engaged, DRIBBLER_KEEPALIVE)
+                                    prev_dribbler_engaged, DRIBBLER_KEEPALIVE,
+                                    positioning=_positioning)
 
             # --- Actualizar posiciones de todos los robots para el planner ---
             _all_robot_data = [
@@ -496,7 +516,9 @@ def decision_process(
                             goal_err=err_to_goal_deg if p.id == robot_id else None,
                             ball_dist=ball_dist_px if p.id == robot_id else None,
                             kick_lat=kick_lat_px if p.id == robot_id else None,
-                            dribbler=_dribbler_view(p, dribbler_pulse_phase),
+                            dribbler=_dribbler_view(
+                                p, dribbler_pulse_phase,
+                                positioning=bt_action_p in _POSITIONING_ACTIONS),
                             dist=dist_v,
                             rrt_len=rrt_len_p,
                             n_obs=n_obs_p,
@@ -1083,9 +1105,12 @@ def decision_process_2v2(
                 if not active:
                     continue
                 for p in bm.team_players:
+                    _bb_p = bm.blackboards.get(p.id)
+                    _positioning = bool(_bb_p and _bb_p.last_action in _POSITIONING_ACTIONS)
                     _pulse_dribbler(rf, p, now, dribbler_pulse_phase,
                                     dribbler_pulse_timer, last_dribbler_keepalive,
-                                    prev_dribbler_engaged, DRIBBLER_KEEPALIVE)
+                                    prev_dribbler_engaged, DRIBBLER_KEEPALIVE,
+                                    positioning=_positioning)
 
             # --- Obstáculos comunes: todos los robots detectados ---
             _all_robot_data = [
@@ -1312,7 +1337,9 @@ def decision_process_2v2(
                             goal_err=err_goal,
                             ball_dist=ball_dist,
                             kick_lat=kick_lat,
-                            dribbler=_dribbler_view(p, dribbler_pulse_phase),
+                            dribbler=_dribbler_view(
+                                p, dribbler_pulse_phase,
+                                positioning=bt_action in _POSITIONING_ACTIONS),
                             rrt_len=rrt_len,
                             n_obs=n_obs,
                         )

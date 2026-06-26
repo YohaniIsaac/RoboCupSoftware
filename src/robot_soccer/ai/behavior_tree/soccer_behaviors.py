@@ -44,6 +44,7 @@ from robot_soccer.config import (
     CORRIDOR_CLEARANCE_PX,
     DRIBBLER_HOLD_POWER,
     BEHIND_BALL_APPROACH_PX,
+    BEHIND_BALL_CORNER_CLAMP_PX,
     BEHIND_BALL_LATERAL_OFFSET_PX,
     BEHIND_BALL_ALIGN_TOLERANCE_DEG,
     BEHIND_BALL_NEAR_CEILING_PWM,
@@ -1473,6 +1474,41 @@ def _possession_expired(blackboard):
     return start is not None and (time.time() - start) >= POSSESSION_MAX_TIME_S
 
 
+def _ball_cornered(blackboard):
+    """True si la pelota está acorralada contra un borde: el punto ideal "detrás de la
+    pelota" (línea arco→pelota a BEHIND_BALL_APPROACH_PX) cae fuera del área jugable por
+    más de BEHIND_BALL_CORNER_CLAMP_PX, así que el robot no tiene sitio físico para
+    ponerse detrás y tirar al arco (el behind_pos queda clampeado contra la pared).
+
+    Solo cuenta cuando el robot YA está en rango de contacto (dist <=
+    CAPTURE_CONFIRM_DISTANCE_PX) o posee la pelota: así el disparo de liberación CONECTA
+    (la pelota está al alcance del solenoide). Gatillar de lejos haría whiff + retirada +
+    re-aproximación sin tocar nunca la pelota (livelock). Si está lejos, debe seguir
+    aproximándose con normalidad. Cuando es True, seguir rodeando la pelota solo la
+    expulsa (el cuerpo/rodillo la barre al rotar contra el borde), así que el árbol corta
+    a disparo de liberación (forced_kick + retirada): rompe el orbitado y resetea en vez
+    de regalar la pelota afuera. Condición de alta prioridad del SelectorNode, y además
+    abort in-node en move_behind_ball (el selector no es reactivo mientras corre).
+    """
+    if not hasattr(blackboard, "command_manager"):
+        return False
+    player     = blackboard.player
+    ball_pos   = np.array(blackboard.ball.get_position(), dtype=float)
+    player_pos = np.array(player.get_position(), dtype=float)
+    dist = float(np.linalg.norm(ball_pos - player_pos))
+    if dist > CAPTURE_CONFIRM_DISTANCE_PX and not getattr(player, '_has_ball', False):
+        return False
+    goal_pos     = np.array(blackboard.opponent_goal_pos, dtype=float)
+    goal_to_ball = ball_pos - goal_pos
+    d = float(np.linalg.norm(goal_to_ball))
+    if d < 1.0:
+        return False
+    unit_behind = goal_to_ball / d  # arco → pelota (y más allá)
+    behind_raw  = ball_pos + unit_behind * BEHIND_BALL_APPROACH_PX
+    clamped     = np.array(blackboard.field.clamp(behind_raw.astype(int)), dtype=float)
+    return float(np.linalg.norm(behind_raw - clamped)) > BEHIND_BALL_CORNER_CLAMP_PX
+
+
 def _compute_circle_ball_lookahead(robot_pos, ball_pos, behind_pos):
     """Calcula el siguiente waypoint sobre el círculo alrededor de la pelota.
 
@@ -1632,6 +1668,17 @@ def _move_behind_ball_start(blackboard):
             )
             return NodeStatus.SUCCESS
 
+    # Pelota acorralada contra un borde: no hay sitio para ponerse detrás y tirar al
+    # arco. Rodearla solo la expulsa → abortar a disparo de liberación (el Selector
+    # dispara forced_kick_and_retreat por la rama PelotaAcorralada). Igual que TOPE POSESION.
+    if _ball_cornered(blackboard):
+        blackboard.command_manager.actions_in_progress.pop(blackboard.player.id, None)
+        robot_status_logger.emit_event(
+            blackboard.player.id,
+            "behind_ball ACORRALADA: sin sitio detras del borde -> disparo de liberacion"
+        )
+        return NodeStatus.FAILURE
+
     # Intercepción: si la pelota se mueve (tras un kick), apuntar a posición futura.
     # Usa posición predicha para el target pero posición real para el trigger de
     # recalculación y los checks de obstáculos (pelota física sigue siendo el obstáculo).
@@ -1785,6 +1832,18 @@ def _move_behind_ball_running(blackboard):
             return _move_behind_ball_start(blackboard)
         blackboard.last_action = "retreating_from_ball"
         return NodeStatus.RUNNING
+
+    # Pelota acorralada contra un borde (ver _ball_cornered): cortar el orbitado y
+    # abortar a disparo de liberación. El SelectorNode no es reactivo mientras este
+    # nodo corre, así que el preempt se hace ABORTANDO aquí (igual que TOPE POSESION);
+    # al devolver FAILURE el selector dispara forced_kick por la rama PelotaAcorralada.
+    if _ball_cornered(blackboard):
+        blackboard.command_manager.actions_in_progress.pop(player_id, None)
+        robot_status_logger.emit_event(
+            player_id,
+            "behind_ball ACORRALADA: sin sitio detras del borde -> disparo de liberacion"
+        )
+        return NodeStatus.FAILURE
 
     # Recalcular si la pelota se movió demasiado.
     # Cooldown: limita recalculaciones a ~3Hz para no inundar el planner RRT*
@@ -2676,6 +2735,16 @@ def create_attacker_tree():
         create_forced_kick_retreat_node(),
     )
 
+    # Pelota acorralada contra un borde: el punto detrás de la pelota cae fuera de la
+    # cancha (sin sitio para tirar al arco). Dispara a la fuerza para liberarla y romper
+    # el orbitado, en vez de expulsarla afuera al rotar. Misma prioridad/patrón que el
+    # tope de posesión; el abort in-node de move_behind_ball cubre el caso RUNNING.
+    cornered_kick_branch = SequenceNode("PelotaAcorralada")
+    cornered_kick_branch.add_children(
+        ConditionNode(_ball_cornered, "PelotaContraBorde"),
+        create_forced_kick_retreat_node(),
+    )
+
     # Ciclo de ataque directo: posicionar → contactar → disparar
     attack_cycle = SequenceNode("CicloAtaqueDirecto")
     attack_cycle.add_children(
@@ -2685,7 +2754,8 @@ def create_attacker_tree():
     )
 
     attacker_tree = SelectorNode("ComportamientoAtacante")
-    attacker_tree.add_children(yield_branch, timeout_kick_branch, attack_cycle)
+    attacker_tree.add_children(
+        yield_branch, timeout_kick_branch, cornered_kick_branch, attack_cycle)
 
     return attacker_tree
 
