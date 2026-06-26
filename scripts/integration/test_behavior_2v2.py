@@ -26,7 +26,15 @@ Controles (ventana OpenCV):
     R       : Activar/pausar solo equipo rojo   (debug: verificar un equipo)
     B       : Activar/pausar solo equipo azul   (debug: verificar un equipo)
     K       : Mostrar/ocultar overlay del kick_point (lectura de config.py)
-    ESC     : Salir
+    ESC     : Salir (pregunta en la ventana si conservar el video grabado)
+
+Grabación de video:
+    El partido se graba siempre en segundo plano como video LIMPIO (el frame de
+    cámara corregido en perspectiva, sin overlays de debug). Se escribe a un
+    archivo temporal .part y solo se conserva si al salir con ESC se confirma
+    con [S]; con [N], ESC o Ctrl+C se descarta. La grabación vive en el proceso
+    de visualización: no toca percepción/decisión/RF, así que no añade latencia
+    al control. Salida: recordings/<nombre_script>/<nombre_script>_<ts>.mp4
 
 Overlay del kick_point:
     Con K se muestra para cada robot el punto desplazado del marker ArUco en
@@ -88,6 +96,14 @@ log = logging.getLogger(__name__)
 SHM_NAME       = "robot_soccer_2v2"
 BALL_RADIUS_PX = 15
 GOAL_COOLDOWN_S  = 5.0
+
+# Grabación del partido (video limpio, sin overlays). Se graba a un archivo
+# temporal y al salir con ESC se pregunta en la ventana si conservarlo. Cada
+# script guarda en su propia subcarpeta dentro de RECORD_DIR_NAME (este patrón
+# se replicará en otros scripts de integración).
+RECORD_DIR_NAME = "recordings"          # raíz dedicada solo a videos
+RECORD_SUBDIR   = Path(__file__).stem   # subcarpeta propia de este script
+RECORD_FPS      = 20.0                   # cadencia de playback; el ritmo real se ajusta por reloj
 
 # Robots por equipo
 TEAM_RED_IDS  = [0, 1]
@@ -756,6 +772,62 @@ def visualization_process_2v2(perception_pipe, decision_pipe, keyboard_pipe,
 
     recorder = _MatchRecorder()
 
+    # --- Grabación del partido (frame limpio de cámara, sin overlays) ---
+    # Se escribe a un .part temporal y al salir con ESC se pregunta en la ventana
+    # si conservarlo. Vive 100% en este proceso (no toca percepción/decisión/RF),
+    # así que no añade latencia al control. Solo se graba al llegar frame nuevo.
+    video_writer   = None
+    rec_tmp_path   = None
+    rec_final_path = None
+    rec_frames     = 0
+    rec_t0         = None
+
+    def _ask_save_recording(base_frame, n_frames, dur_s):
+        """Diálogo en la ventana: [S] conserva, [N]/ESC descarta. Devuelve bool."""
+        dlg = (base_frame.copy() if base_frame is not None
+               else np.zeros((CAMERA_PERSPECTIVE_HEIGHT, CAMERA_PERSPECTIVE_WIDTH, 3),
+                             dtype=np.uint8))
+        hh, ww = dlg.shape[:2]
+        ov = dlg.copy()
+        cv2.rectangle(ov, (0, hh // 2 - 56), (ww, hh // 2 + 56), (18, 18, 18), -1)
+        cv2.addWeighted(ov, 0.78, dlg, 0.22, 0, dlg)
+        lines = (
+            (f"Grabacion: {n_frames} frames (~{dur_s:.0f}s)", -28, 0.55, (200, 200, 200)),
+            ("Guardar video del partido?",                      2, 0.70, (255, 255, 255)),
+            ("[S] Si, conservar      [N] Descartar",           34, 0.60, (60, 220, 60)),
+        )
+        for txt, dy, sc, col in lines:
+            (tw, _), _ = cv2.getTextSize(txt, cv2.FONT_HERSHEY_SIMPLEX, sc, 2)
+            cv2.putText(dlg, txt, ((ww - tw) // 2, hh // 2 + dy),
+                        cv2.FONT_HERSHEY_SIMPLEX, sc, col, 2, cv2.LINE_AA)
+        cv2.imshow(window_name, dlg)
+        while True:
+            kk = cv2.waitKey(30) & 0xFF
+            if kk in (ord('s'), ord('S')):
+                return True
+            if kk in (ord('n'), ord('N'), 27):
+                return False
+
+    try:
+        rec_dir = ROOT_DIR / RECORD_DIR_NAME / RECORD_SUBDIR
+        rec_dir.mkdir(parents=True, exist_ok=True)
+        _rec_ts        = time.strftime("%Y%m%d_%H%M%S")
+        rec_tmp_path   = rec_dir / f".{RECORD_SUBDIR}_{_rec_ts}.mp4.part"
+        rec_final_path = rec_dir / f"{RECORD_SUBDIR}_{_rec_ts}.mp4"
+        video_writer   = cv2.VideoWriter(
+            str(rec_tmp_path), cv2.VideoWriter_fourcc(*'mp4v'),
+            RECORD_FPS, (CAMERA_PERSPECTIVE_WIDTH, CAMERA_PERSPECTIVE_HEIGHT))
+        if not video_writer.isOpened():
+            log.warning("VideoWriter no abrió (códec mp4v) — grabación deshabilitada")
+            video_writer = None
+            rec_tmp_path = None
+        else:
+            log.info("Grabando partido (video limpio) → %s", rec_tmp_path)
+    except Exception as e:
+        log.warning("No se pudo iniciar la grabación: %s", e)
+        video_writer = None
+        rec_tmp_path = None
+
     try:
         while True:
             now = time.time()
@@ -765,6 +837,15 @@ def visualization_process_2v2(perception_pipe, decision_pipe, keyboard_pipe,
             if current != last_frame_counter:
                 last_frame         = shared_array.copy()
                 last_frame_counter = current
+                # Grabar el frame limpio. Cadencia por reloj → el video se
+                # reproduce en tiempo real aunque varíe el FPS de cámara.
+                if video_writer is not None:
+                    if rec_t0 is None:
+                        rec_t0 = now
+                    rec_target = int((now - rec_t0) * RECORD_FPS)
+                    while rec_frames < rec_target:
+                        video_writer.write(last_frame)
+                        rec_frames += 1
 
             # Percepción
             if perception_pipe.poll():
@@ -1130,6 +1211,26 @@ def visualization_process_2v2(perception_pipe, decision_pipe, keyboard_pipe,
                     keyboard_pipe.send({'command': 'exit'})
                 except Exception:
                     pass
+                # Cerrar el video y preguntar en la ventana si conservarlo
+                # (los robots ya se detienen: 'exit' fue enviado a decisión).
+                if video_writer is not None:
+                    video_writer.release()
+                    video_writer = None
+                    dur_s = rec_frames / RECORD_FPS if RECORD_FPS else 0.0
+                    keep = (rec_frames > 0 and
+                            _ask_save_recording(last_frame, rec_frames, dur_s))
+                    if keep and rec_tmp_path is not None:
+                        try:
+                            rec_tmp_path.rename(rec_final_path)
+                            log.info("Video del partido guardado en %s", rec_final_path)
+                        except Exception as e:
+                            log.error("No se pudo guardar el video: %s", e)
+                    elif rec_tmp_path is not None:
+                        try:
+                            rec_tmp_path.unlink(missing_ok=True)
+                            log.info("Grabación descartada")
+                        except Exception as e:
+                            log.error("No se pudo descartar el temporal: %s", e)
                 break
             elif key == ord(' '):
                 # No limpiar goal_reset_viz aquí: la decisión solo reanuda si el saque
@@ -1165,6 +1266,18 @@ def visualization_process_2v2(perception_pipe, decision_pipe, keyboard_pipe,
     except KeyboardInterrupt:
         pass
     finally:
+        # Cierre no via ESC (p.ej. Ctrl+C): cerrar el video y descartar el
+        # temporal — el video solo se conserva confirmando con [S] tras ESC.
+        if video_writer is not None:
+            try:
+                video_writer.release()
+            except Exception:
+                pass
+        try:
+            if rec_tmp_path is not None and rec_tmp_path.exists():
+                rec_tmp_path.unlink()
+        except Exception:
+            pass
         # Guardar cada JSON de forma independiente: si el cálculo/serialización de
         # uno falla, el otro igual se escribe (antes un fallo en summary dejaba sin
         # timeline, y viceversa).
@@ -1237,6 +1350,10 @@ def main():
     log.info("  4. Esperar a que el indicador diga ROBOTS LISTOS")
     log.info("  5. Presionar ESPACIO: partido inicia (solo si robots y pelota OK)")
     log.info("  (R / B: activar solo rojo / azul para pruebas)")
+    log.info("=" * 65)
+    log.info("Grabación   : video limpio del partido (sin overlays).")
+    log.info("              Al salir con ESC se pregunta si conservarlo o descartarlo.")
+    log.info("              Salida: %s/%s/", RECORD_DIR_NAME, RECORD_SUBDIR)
     log.info("=" * 65)
 
     p1 = multiprocessing.Process(

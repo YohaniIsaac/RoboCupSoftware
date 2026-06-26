@@ -172,3 +172,6 @@ test_*.txt
 
 # Métricas efímeras (regla del proyecto: no commitear JSON de LOG/)
 LOG/*_*.json
+
+# Grabaciones de video de los partidos/pruebas (no commitear)
+recordings/
