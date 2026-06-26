@@ -53,10 +53,16 @@ log = logging.getLogger(__name__)
 # last_action del BT (blackboard) en los que el robot está POSICIONÁNDOSE/rotando, no
 # capturando: el rodillo debe estar OFF aunque el estimador geométrico haya enclavado
 # _has_ball (rodear la pelota con el rodillo encendido la expulsa al estar descentrada;
-# ver _ball_cornered). Deben coincidir con los blackboard.last_action que setea
-# _move_behind_ball en soccer_behaviors.
+# ver _ball_cornered). Cubre dos familias:
+#   - posicionamiento detrás de la pelota: blackboard.last_action que setea
+#     _move_behind_ball en soccer_behaviors.
+#   - cesión/intercepción: estados de hold_intercept_position (el robot cede la pelota
+#     y se reubica como interceptor, NO la posee). Respaldo del apagado explícito del
+#     latch (fix en hold_intercept_position + press del avance): suprime el rodillo
+#     durante TODA la intercepción aunque _dribbler_on o _has_ball vengan sucios.
 _POSITIONING_ACTIONS = frozenset({
     "move_behind_ball", "circle_ball", "retreating_from_ball",
+    "move_to_intercept", "intercept_orienting", "intercept_hold",
 })
 
 
