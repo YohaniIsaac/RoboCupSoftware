@@ -69,6 +69,7 @@ import time
 import logging
 import argparse
 import statistics
+import shutil
 import multiprocessing
 from multiprocessing import Value, shared_memory
 from pathlib import Path
@@ -827,6 +828,7 @@ def visualization_process_2v2(perception_pipe, decision_pipe, keyboard_pipe,
     rec_tmp_path   = None
     rec_final_path = None
     rec_frames     = 0
+    recording_kept = False    # True si el video se conservó → copiar los JSON junto a él
 
     # Reloj del partido (tiempo de juego efectivo): avanza con ambos equipos
     # activos y sin posicionamiento/gol; la pelota fuera SÍ cuenta. Base del
@@ -883,7 +885,7 @@ def visualization_process_2v2(perception_pipe, decision_pipe, keyboard_pipe,
 
     def _finalize_recording(base_frame):
         """Cierra el video y pregunta si conservarlo; descarta si no se confirma."""
-        nonlocal video_writer
+        nonlocal video_writer, recording_kept
         if video_writer is None:
             return
         video_writer.release()
@@ -893,6 +895,7 @@ def visualization_process_2v2(perception_pipe, decision_pipe, keyboard_pipe,
         if keep and rec_tmp_path is not None:
             try:
                 rec_tmp_path.rename(rec_final_path)
+                recording_kept = True
                 log.info("Video del partido guardado en %s", rec_final_path)
             except Exception as e:
                 log.error("No se pudo guardar el video: %s", e)
@@ -1407,6 +1410,7 @@ def visualization_process_2v2(perception_pipe, decision_pipe, keyboard_pipe,
         # Guardar cada JSON de forma independiente: si el cálculo/serialización de
         # uno falla, el otro igual se escribe (antes un fallo en summary dejaba sin
         # timeline, y viceversa).
+        out_path = tl_path = None
         try:
             out_path = save_metrics('match_2v2', recorder.summary(score))
             log.info("Métricas del partido guardadas en %s", out_path)
@@ -1417,6 +1421,18 @@ def visualization_process_2v2(perception_pipe, decision_pipe, keyboard_pipe,
             log.info("Timeline de debug guardado en %s", tl_path)
         except Exception as e:
             log.error("No se pudo guardar el timeline de debug: %s", e)
+        # Si el video se conservó, dejar junto a él una copia de ambos JSON (los
+        # originales permanecen en LOG/). Nombres alineados al nombre del video.
+        if recording_kept and rec_final_path is not None:
+            for src_json, suffix in ((out_path, 'match'), (tl_path, 'timeline')):
+                if src_json is None:
+                    continue
+                try:
+                    dst = rec_final_path.with_name(f"{rec_final_path.stem}_{suffix}.json")
+                    shutil.copy2(src_json, dst)
+                    log.info("Copia de métricas junto al video: %s", dst)
+                except Exception as e:
+                    log.error("No se pudo copiar el JSON %s junto al video: %s", suffix, e)
         shm.close()
         cv2.destroyAllWindows()
         log.info("Visualizacion 2v2 finalizada")
