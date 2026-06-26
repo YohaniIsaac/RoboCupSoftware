@@ -140,19 +140,58 @@ class SerialManager:
             pass
         return None
 
-    def _remove_old_commands_for_robot(self, queue, robot_id):
-        """Elimina comandos viejos del mismo robot de una cola.
+    @staticmethod
+    def _command_subsystem(command):
+        """Clasifica el subsistema de un comando para el 'Last Command Wins'.
+
+        El dedup por robot debe ser POR SUBSISTEMA: un comando de motor (M,) y uno
+        de dribbler (D,) del mismo robot son ortogonales (ruedas vs rodillo) y NO
+        deben pisarse en la cola. Sin esta distinción, un M,id borra un D,id pendiente
+        del mismo robot (y viceversa); durante el movimiento eso descarta el
+        re-encendido del rodillo y la pelota se suelta (el motor refresca el watchdog
+        compartido del firmware, que mantiene el último PWM del dribbler en 0).
+
+        Args:
+            command (str): Comando en formato "M,{id},...", "D,{id},...", "R{id}{cmd}".
+
+        Returns:
+            str or None: 'motor', 'dribbler', 'kick', 'discrete', o None (sin robot,
+                p.ej. tablero): None recae en el dedup por-robot legacy.
+        """
+        if command.startswith('M,'):
+            return 'motor'
+        if command.startswith('D,'):
+            return 'dribbler'
+        if command.startswith('R') and len(command) >= 3:
+            # R{id}P = kick; otros R{id}{F/B/L/R/S/Q} = discreto (no usados en el juego)
+            return 'kick' if command[2] == 'P' else 'discrete'
+        return None
+
+    def _remove_old_commands_for_robot(self, queue, robot_id, subsystem=None):
+        """Elimina comandos viejos del mismo robot (y subsistema, si se indica) de una cola.
 
         Args:
             queue (list): Cola de comandos a limpiar
             robot_id (int): ID del robot cuyos comandos viejos se eliminarán
+            subsystem (str, optional): Si se indica, solo elimina comandos de ESE
+                subsistema (motor/dribbler/...). None = todos los del robot (legacy).
+                El dedup por (robot, subsistema) evita que un comando de motor borre
+                uno de dribbler del mismo robot.
 
         Returns:
             int: Número de comandos eliminados
         """
         original_len = len(queue)
-        # Mantener solo comandos de OTROS robots
-        queue[:] = [cmd for cmd in queue if self._extract_robot_id(cmd) != robot_id]
+        if subsystem is None:
+            # Legacy: mantener solo comandos de OTROS robots
+            queue[:] = [cmd for cmd in queue if self._extract_robot_id(cmd) != robot_id]
+        else:
+            # Mantener todo salvo los del MISMO (robot, subsistema)
+            queue[:] = [
+                cmd for cmd in queue
+                if not (self._extract_robot_id(cmd) == robot_id
+                        and self._command_subsystem(cmd) == subsystem)
+            ]
         removed = original_len - len(queue)
         return removed
 
@@ -191,11 +230,15 @@ class SerialManager:
             robot_id = self._extract_robot_id(command)
 
             if robot_id is not None:
-                # Eliminar comandos viejos del mismo robot
-                removed = self._remove_old_commands_for_robot(self.command_queue, robot_id)
+                # Last Command Wins POR SUBSISTEMA: un comando de motor no borra uno de
+                # dribbler del mismo robot (ortogonales). Antes el dedup era solo por
+                # robot y el motor borraba el re-encendido del rodillo.
+                subsystem = self._command_subsystem(command)
+                removed = self._remove_old_commands_for_robot(
+                    self.command_queue, robot_id, subsystem)
                 if removed > 0:
-                    log.debug("🗑️  Robot %d: %d comandos viejos eliminados (last wins)",
-                             robot_id, removed)
+                    log.debug("🗑️  Robot %d (%s): %d comandos viejos eliminados (last wins)",
+                             robot_id, subsystem, removed)
 
             # Agregar nuevo comando
             self.command_queue.append(command)
@@ -250,8 +293,10 @@ class SerialManager:
         if not command.endswith('\n'):
             command += '\n'
 
-        # Extraer robot_id para limpieza
+        # Extraer robot_id y subsistema para el dedup (Last Command Wins por subsistema):
+        # un stop/decel de motor no descarta el dribbler del mismo robot en la cola normal.
         robot_id = self._extract_robot_id(command)
+        subsystem = self._command_subsystem(command)
 
         with self.lock:
             if priority == 'high':
@@ -259,8 +304,8 @@ class SerialManager:
                 # No limpiar comandos de otros robots (multi-robot: cada uno
                 # gestiona su propia cola independientemente).
                 if robot_id is not None:
-                    removed_n = self._remove_old_commands_for_robot(self.command_queue, robot_id)
-                    removed_m = self._remove_old_commands_for_robot(self.medium_priority_queue, robot_id)
+                    removed_n = self._remove_old_commands_for_robot(self.command_queue, robot_id, subsystem)
+                    removed_m = self._remove_old_commands_for_robot(self.medium_priority_queue, robot_id, subsystem)
                     total_cleared = removed_n + removed_m
                     if total_cleared > 0:
                         log.debug("🚨 Robot %d: %d comandos previos descartados (stop)",
@@ -274,9 +319,9 @@ class SerialManager:
                         self.command_queue.clear()
                         self.medium_priority_queue.clear()
 
-                # Eliminar comandos viejos del MISMO robot en cola alta
+                # Eliminar comandos viejos del MISMO robot y subsistema en cola alta
                 if robot_id is not None:
-                    removed = self._remove_old_commands_for_robot(self.high_priority_queue, robot_id)
+                    removed = self._remove_old_commands_for_robot(self.high_priority_queue, robot_id, subsystem)
                     if removed > 0:
                         log.debug("🚨 Robot %d: %d comandos ALTA viejos eliminados", robot_id, removed)
 
@@ -286,10 +331,10 @@ class SerialManager:
 
             elif priority == 'medium':
                 # PRIORIDAD MEDIA: Entrada a rampa (desaceleración)
-                # Eliminar comandos del MISMO robot en colas normal + media
+                # Eliminar comandos del MISMO robot y subsistema en colas normal + media
                 if robot_id is not None:
-                    removed_normal = self._remove_old_commands_for_robot(self.command_queue, robot_id)
-                    removed_medium = self._remove_old_commands_for_robot(self.medium_priority_queue, robot_id)
+                    removed_normal = self._remove_old_commands_for_robot(self.command_queue, robot_id, subsystem)
+                    removed_medium = self._remove_old_commands_for_robot(self.medium_priority_queue, robot_id, subsystem)
                     total_removed = removed_normal + removed_medium
                     if total_removed > 0:
                         log.debug("🔶 Robot %d MEDIA: %d comandos eliminados (N=%d M=%d)",
@@ -446,10 +491,14 @@ class SerialManager:
                 # Leer respuestas disponibles
                 # Motor commands: timeout corto (respuesta llega en <3ms a 115200)
                 # Otros commands (ping, etc): timeout largo (RF roundtrips ~50ms)
-                is_motor_command = command.strip().startswith('M,')
-                max_wait_time = 0.1 if is_motor_command else 0.5
+                # M, (motor) y D, (dribbler) son comandos de robot: el transmisor responde
+                # OK de inmediato (radio.write + Serial.print). Solo ping/diagnóstico tienen
+                # roundtrips RF lentos (~50ms). Antes D, caía en la rama lenta y cada comando
+                # de dribbler bloqueaba el worker hasta 50ms, retrasando el drenado de motores.
+                is_fast_robot_command = command.strip().startswith(('M,', 'D,'))
+                max_wait_time = 0.1 if is_fast_robot_command else 0.5
                 start_read_time = time.time()
-                no_data_timeout = 0.005 if is_motor_command else 0.05
+                no_data_timeout = 0.005 if is_fast_robot_command else 0.05
 
                 last_response_time = time.time()
 
