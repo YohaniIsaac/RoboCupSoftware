@@ -87,8 +87,9 @@ void loop() {
     RobotCommand robotCmd;
     MotorCommand motorCmd;
     DribblerCommand dribblerCmd;
+    DribblerConfigCommand cfgCmd;
     TableroCommand tableroCmd;
-    MessageType msgType = parseMessage(mensaje, robotCmd, motorCmd, dribblerCmd, tableroCmd);
+    MessageType msgType = parseMessage(mensaje, robotCmd, motorCmd, dribblerCmd, cfgCmd, tableroCmd);
 
     switch (msgType) {
       case MSG_MOTOR_CONTROL: {
@@ -158,6 +159,46 @@ void loop() {
           Serial.print(dribblerCmd.robotId);
           Serial.print(" <- D(");
           Serial.print(dribblerCmd.power);
+          Serial.println(")");
+        } else {
+          Serial.println("ERROR: Fallo al transmitir");
+        }
+        break;
+      }
+
+      case MSG_DRIBBLER_CONFIG: {
+        // Seleccionar dirección según el robot
+        const byte* targetAddress;
+        switch (cfgCmd.robotId) {
+          case 1: targetAddress = addressRobot1; break;
+          case 2: targetAddress = addressRobot2; break;
+          case 3: targetAddress = addressRobot3; break;
+          case 4: targetAddress = addressRobot4; break;
+          default: targetAddress = addressRobot1; break;
+        }
+
+        // Cambiar dirección de escritura
+        radio.openWritingPipe(targetAddress);
+
+        // Enviar paquete de 5 bytes: ['C', robot_id, onMs, offMs, wdtMs]
+        uint8_t data[5];
+        data[0] = 'C';
+        data[1] = cfgCmd.robotId;
+        data[2] = cfgCmd.onMs;
+        data[3] = cfgCmd.offMs;
+        data[4] = cfgCmd.wdtMs;
+
+        bool success = radio.write(&data, sizeof(data));
+
+        if (success) {
+          Serial.print("OK: Robot ");
+          Serial.print(cfgCmd.robotId);
+          Serial.print(" <- C(");
+          Serial.print(cfgCmd.onMs);
+          Serial.print(",");
+          Serial.print(cfgCmd.offMs);
+          Serial.print(",");
+          Serial.print(cfgCmd.wdtMs);
           Serial.println(")");
         } else {
           Serial.println("ERROR: Fallo al transmitir");

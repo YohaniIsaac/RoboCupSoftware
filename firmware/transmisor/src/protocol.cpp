@@ -8,7 +8,7 @@ bool isValidRobotCommand(char cmd) {
           cmd == CMD_ROLLER_OFF || cmd == CMD_POWER_OFF);
 }
 
-MessageType parseMessage(const String& msg, RobotCommand& robotCmd, MotorCommand& motorCmd, DribblerCommand& dribblerCmd, TableroCommand& tableroCmd) {
+MessageType parseMessage(const String& msg, RobotCommand& robotCmd, MotorCommand& motorCmd, DribblerCommand& dribblerCmd, DribblerConfigCommand& cfgCmd, TableroCommand& tableroCmd) {
   if (msg.length() < 2) {
     return MSG_UNKNOWN;
   }
@@ -29,6 +29,33 @@ MessageType parseMessage(const String& msg, RobotCommand& robotCmd, MotorCommand
         dribblerCmd.robotId = robotId;
         dribblerCmd.power = power;
         return MSG_DRIBBLER_CONTROL;
+      }
+    }
+  }
+
+  // Comando de CONFIG de oscilación del dribbler: C,id,onMs,offMs,wdtMs
+  // Ejemplo: "C,1,65,15,150" = Robot 1, on=65ms off=15ms watchdog=150ms (persiste en EEPROM)
+  else if (target == 'C') {
+    int c1 = msg.indexOf(',');
+    int c2 = msg.indexOf(',', c1 + 1);
+    int c3 = msg.indexOf(',', c2 + 1);
+    int c4 = msg.indexOf(',', c3 + 1);
+
+    if (c1 > 0 && c2 > 0 && c3 > 0 && c4 > 0) {
+      int robotId = msg.substring(c1 + 1, c2).toInt();
+      int onMs    = msg.substring(c2 + 1, c3).toInt();
+      int offMs   = msg.substring(c3 + 1, c4).toInt();
+      int wdtMs   = msg.substring(c4 + 1).toInt();
+
+      if (robotId >= 1 && robotId <= 4 &&
+          onMs  >= 0 && onMs  <= 255 &&
+          offMs >= 0 && offMs <= 255 &&
+          wdtMs >= 0 && wdtMs <= 255) {
+        cfgCmd.robotId = robotId;
+        cfgCmd.onMs    = onMs;
+        cfgCmd.offMs   = offMs;
+        cfgCmd.wdtMs   = wdtMs;
+        return MSG_DRIBBLER_CONFIG;
       }
     }
   }

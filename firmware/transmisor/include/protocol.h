@@ -8,6 +8,7 @@ enum MessageType {
   MSG_ROBOT_CONTROL,      // Comandos discretos: R[ID][CMD]
   MSG_MOTOR_CONTROL,      // Comandos de velocidad variable: M,id,left,right
   MSG_DRIBBLER_CONTROL,   // Comandos de dribbler con PWM: D,id,power
+  MSG_DRIBBLER_CONFIG,    // Config de oscilación del dribbler: C,id,onMs,offMs,wdtMs
   MSG_TABLERO_CONTROL,
   MSG_UNKNOWN
 };
@@ -31,6 +32,14 @@ struct DribblerCommand {
   uint8_t power;    // 0-255 PWM
 };
 
+// Estructura para config de oscilación del dribbler (persiste en EEPROM del robot)
+struct DribblerConfigCommand {
+  uint8_t robotId;  // 1-4
+  uint8_t onMs;     // ms — fase encendida
+  uint8_t offMs;    // ms — fase apagada
+  uint8_t wdtMs;    // ms — sin refresco 'D' → apagar
+};
+
 // Estructura para comandos de tablero
 struct TableroCommand {
   char header;      // 'G'
@@ -39,7 +48,7 @@ struct TableroCommand {
 };
 
 // Funciones de procesamiento de protocolo
-MessageType parseMessage(const String& msg, RobotCommand& robotCmd, MotorCommand& motorCmd, DribblerCommand& dribblerCmd, TableroCommand& tableroCmd);
+MessageType parseMessage(const String& msg, RobotCommand& robotCmd, MotorCommand& motorCmd, DribblerCommand& dribblerCmd, DribblerConfigCommand& cfgCmd, TableroCommand& tableroCmd);
 bool isValidRobotCommand(char cmd);
 
 #endif
