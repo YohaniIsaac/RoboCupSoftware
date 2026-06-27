@@ -10,6 +10,7 @@ struct PersistCfg {
   uint16_t    magic;    // PERSIST_MAGIC
   uint8_t     version;  // PERSIST_VERSION (para migración futura)
   DribblerCfg drib;     // {onMs, offMs, wdtMs}
+  uint8_t     dbgLevel; // telemetría/debug (D2): 0=partido, 1=eventos, 2=verbose
 };
 
 // Carga la config desde EEPROM. Si MAGIC/VERSION no coinciden (virgen o esquema viejo),
@@ -19,5 +20,8 @@ void persistLoad(PersistCfg& cfg);
 // Persiste la sub-config del dribbler. EEPROM.put usa update por byte internamente: solo
 // escribe los bytes que cambian → minimiza el desgaste de la EEPROM (~100k ciclos/celda).
 void persistSaveDribbler(const DribblerCfg& drib);
+
+// Persiste el nivel de debug/telemetría (D2).
+void persistSaveDebug(uint8_t dbgLevel);
 
 #endif

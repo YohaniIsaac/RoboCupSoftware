@@ -25,4 +25,8 @@ void dribblerKickCut();
 // Avanza la máquina: oscilación on/off + watchdog de seguridad. Llamar cada iteración del loop.
 void dribblerUpdate(unsigned long now);
 
+// Getters para telemetría (D2).
+bool    dribblerEngaged();   // ¿enganchado? (estado, no la fase de oscilación)
+uint8_t dribblerPower();     // potencia vigente de la fase ON
+
 #endif

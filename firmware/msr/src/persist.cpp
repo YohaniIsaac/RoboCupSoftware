@@ -14,8 +14,18 @@ void persistLoad(PersistCfg& cfg) {
     cfg.drib.onMs  = DRIBBLER_DEFAULT_ON_MS;
     cfg.drib.offMs = DRIBBLER_DEFAULT_OFF_MS;
     cfg.drib.wdtMs = DRIBBLER_DEFAULT_WDT_MS;
+    cfg.dbgLevel   = DEBUG_DEFAULT_LEVEL;
     EEPROM.put(EE_ADDR, cfg);  // update por byte: no desgasta si ya estaba igual
   }
+}
+
+void persistSaveDebug(uint8_t dbgLevel) {
+  PersistCfg cfg;
+  EEPROM.get(EE_ADDR, cfg);   // conservar magic/version/dribbler
+  cfg.magic    = PERSIST_MAGIC;
+  cfg.version  = PERSIST_VERSION;
+  cfg.dbgLevel = dbgLevel;
+  EEPROM.put(EE_ADDR, cfg);
 }
 
 void persistSaveDribbler(const DribblerCfg& drib) {

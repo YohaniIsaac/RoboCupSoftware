@@ -1,6 +1,7 @@
 #include "robot_control.h"
 #include "config.h"
 #include "dribbler.h"
+#include "telemetry.h"
 #include <SoftPWM.h>
 
 // Variables externas (definidas en main.cpp)
@@ -128,6 +129,7 @@ void ejecutarComando(char comando) {
     case 'P':  // Patear: cortar el rodillo al instante y disparar (no bloqueante, sin pico)
       dribblerKickCut();
       solenoidFire(millis());
+      telemetrySetEvent(DBG_EV_KICK);
       break;
     case 'S':  // Detener rodillo (override manual): desenganchar vía el módulo dribbler
       dribblerKickCut();

@@ -7,6 +7,7 @@
 #include "robot_control.h"
 #include "dribbler.h"
 #include "persist.h"
+#include "telemetry.h"
 
 // Variables globales
 PololuBuzzer buzzer;
@@ -42,6 +43,8 @@ void setup() {
   // Inicializar módulo RF
   radio.begin();
   radio.setDataRate(RF24_2MBPS);  // Misma configuración que tablero
+  radio.enableDynamicPayloads();  // requerido por los ACK payloads (telemetría D2)
+  radio.enableAckPayload();       // adjuntar estado del robot al ACK (piggyback, ≈cero airtime)
   radio.openReadingPipe(1, address);
   radio.startListening();
 
@@ -57,6 +60,8 @@ void setup() {
   PersistCfg persistCfg;
   persistLoad(persistCfg);
   dribblerSetConfig(persistCfg.drib);
+  telemetrySetLevel(persistCfg.dbgLevel);
+  telemetryConfig(persistCfg.drib);
 }
 
 void loop() {
@@ -79,22 +84,43 @@ void loop() {
         int16_t rightSpeed = (int16_t)data[3] - 128;
         setMotorSpeeds(leftSpeed, rightSpeed);
         tiempoInicio = now;          // refresca el watchdog de MOVIMIENTO (solo ruedas)
+        telemetryCountM();
         break;
       }
       case 'D': {  // Dribbler: data[2]=potencia (0=apagar ya, >0=enganchar+oscilar)
         dribblerSet(data[2], now);   // el módulo tiene su PROPIO watchdog (no toca tiempoInicio)
+        telemetryCountD();
         break;
       }
       case 'C': {  // Config dribbler en runtime: data[2]=onMs, data[3]=offMs, data[4]=wdtMs
         DribblerCfg cfg = { data[2], data[3], data[4] };
         dribblerSetConfig(cfg);
+        telemetryConfig(cfg);
         persistSaveDribbler(cfg);    // persiste en EEPROM
+        telemetrySetEvent(DBG_EV_CONFIG);
+        break;
+      }
+      case 'G': {  // Debug/telemetría: data[2]=nivel (0=partido,1=eventos,2=verbose). Persiste.
+        telemetrySetLevel(data[2]);
+        persistSaveDebug(data[2]);
+        break;
+      }
+      case '?': {  // Consulta de telemetría: encolar el estado YA (aunque el nivel sea 0).
+        telemetryForcePending();
         break;
       }
       default:     // Comandos discretos (F,B,L,R,P,S,Q); 'P' corta el rodillo y dispara
         ejecutarComando(data[0]);
         break;
     }
+  }
+
+  // Telemetría (D2): si hay un record pendiente (evento con nivel>=1, o consulta '?'), encolarlo
+  // como ACK-payload — se manda piggyback en el ACK del PRÓXIMO comando. Nivel 0 → nunca encola.
+  if (telemetryTakePending()) {
+    uint8_t tbuf[TELEMETRY_SIZE];
+    uint8_t tlen = telemetryBuild(tbuf);
+    radio.writeAckPayload(1, tbuf, tlen);
   }
 
   unsigned long now = millis();

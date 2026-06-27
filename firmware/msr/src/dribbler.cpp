@@ -1,6 +1,7 @@
 #include "dribbler.h"
 #include "robot_control.h"  // setDribblerSpeed (escribe MOTOR_DC_PIN vía SoftPWM)
 #include "config.h"         // DRIBBLER_DEFAULT_*
+#include "telemetry.h"      // eventos de telemetría (engage/off)
 
 // Estado interno del único rodillo del robot. Dos conceptos SEPARADOS:
 //   s_engaged : ¿debo estar capturando? (estado de alto nivel, lo fija el comando 'D')
@@ -22,6 +23,7 @@ void dribblerSetConfig(const DribblerCfg& cfg) {
 
 void dribblerSet(uint8_t power, unsigned long now) {
   if (power == 0) {            // apagado inmediato (cesión / fin de captura)
+    if (s_engaged) telemetrySetEvent(DBG_EV_DRIBBLER_OFF);  // solo en la transición
     s_engaged = false;
     s_power   = 0;
     setDribblerSpeed(0);
@@ -32,6 +34,7 @@ void dribblerSet(uint8_t power, unsigned long now) {
     s_oscOn    = true;
     s_oscStart = now;
     setDribblerSpeed(power);
+    telemetrySetEvent(DBG_EV_DRIBBLER_ON);
   } else if (s_oscOn && power != s_power) {  // cambio de potencia (captura↔sostén) en plena fase ON
     setDribblerSpeed(power);
   }
@@ -50,6 +53,7 @@ void dribblerUpdate(unsigned long now) {
   // Watchdog de seguridad PROPIO: si Python dejó de refrescar 'D', apagar (independiente
   // del watchdog de movimiento; el tráfico de 'M' ya NO mantiene vivo el rodillo).
   if (now - s_lastFeed >= s_cfg.wdtMs) {
+    telemetrySetEvent(DBG_EV_DRIBBLER_OFF);   // fail-safe: apagado por watchdog
     s_engaged = false;
     s_power   = 0;
     setDribblerSpeed(0);
@@ -70,3 +74,6 @@ void dribblerUpdate(unsigned long now) {
     }
   }
 }
+
+bool    dribblerEngaged() { return s_engaged; }
+uint8_t dribblerPower()   { return s_power; }

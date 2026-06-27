@@ -56,7 +56,20 @@
 // Persistencia EEPROM (persist.*): marca de validez para no leer basura (0xFF) de una EEPROM
 // virgen → si MAGIC no coincide, se escriben y usan los defaults de arriba.
 #define PERSIST_MAGIC   0xD8B1
-#define PERSIST_VERSION 1
+#define PERSIST_VERSION 2     // v2: agrega dbgLevel a PersistCfg (telemetría D2)
+
+// ── Telemetría / debug (D2) ──
+// Nivel de verbosidad persistido en EEPROM. 0 = PARTIDO (sin telemetría, cero latencia),
+// 1 = eventos (engage/off/kick/config), 2 = verbose. El robot adjunta su estado al ACK del
+// nRF24 (piggyback, ≈cero airtime) solo cuando el nivel lo permite o ante consulta '?'.
+#define DEBUG_DEFAULT_LEVEL 0
+#define TELEMETRY_MAGIC 'T'   // primer byte del ACK payload de telemetría
+// Códigos de "último evento" en el record de telemetría.
+#define DBG_EV_NONE         0
+#define DBG_EV_DRIBBLER_ON  1
+#define DBG_EV_DRIBBLER_OFF 2
+#define DBG_EV_KICK         3
+#define DBG_EV_CONFIG       4
 
 // Velocidades de motores (0-255 para PWM)
 #define VELOCIDAD_ADELANTE_IZQ 47
