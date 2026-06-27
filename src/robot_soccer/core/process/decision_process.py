@@ -859,6 +859,7 @@ def decision_process_2v2(
     prev_dribbler_engaged   = {rid: False for rid in all_ids}
     _last_telem_poll = 0.0        # D1: poll de telemetría del firmware (~1Hz)
     TELEM_POLL_S = 1.0
+    _telem_outbox = []            # D1b: telemetría polleada pendiente de mandar al recorder (timeline)
 
     log.info("Decision 2v2 lista. ESPACIO=ambos, R=rojo, B=azul.")
 
@@ -1127,6 +1128,8 @@ def decision_process_2v2(
                     log.info("[TELEM] R%s cfg=%s/%s/%s eng=%s pwr=%s ev=%s m=%s d=%s",
                              _t.get('robot'), _t.get('on'), _t.get('off'), _t.get('wdt'),
                              _t.get('eng'), _t.get('pwr'), _t.get('ev'), _t.get('m'), _t.get('d'))
+                if _tlm:
+                    _telem_outbox.extend(_tlm)   # D1b: adjuntar al próximo payload de viz (timeline)
                 if _terr:
                     log.warning("[TELEM] %d ERROR(es) de entrega RF desde el ultimo poll", _terr)
 
@@ -1418,9 +1421,13 @@ def decision_process_2v2(
                         'kickoff_conceding': kickoff_conceding,
                         'kickoff_ball_centered': kickoff_ball_centered,
                         'kickoff_ready': kickoff_ready,
+                        # D1b: telemetría del firmware polleada desde el último envío (el recorder
+                        # la vuelca al timeline). Lista vacía la mayoría de los frames.
+                        'telemetry': _telem_outbox,
                         'timestamp': now,
                     })
                     last_viz_time = now
+                    _telem_outbox = []   # enviado: vaciar solo tras un send exitoso (sin pérdida)
                 except Exception:
                     pass
 

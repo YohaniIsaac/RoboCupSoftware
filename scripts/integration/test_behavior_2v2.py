@@ -147,6 +147,7 @@ LOG_CHANNELS: dict = {
     'position':       True,   # pos en snap: p=[x,y]
     'angle_in_snap':  True,   # ángulo en snap: a=float
     'dribbler':       True,   # rodillo: drb en snap + {t, ev:'drb', r, team, drb, mode} al engan./deseng.
+    'telemetry':      True,   # telemetría firmware: {t, ev:'telem', r, cfg:[on,off,wdt], eng, pwr, evf, m, d}
     'path_change':    True,   # nueva ruta RRT*:     {t, ev:'path', r, team, path, wp}
     'pwm':            False,  # PWM en snap: L=int, R=int  (debug controlador)
     'target_in_snap': False,  # target en snap: tgt=[x,y]
@@ -387,6 +388,19 @@ class _MatchRecorder:
         self._snap_counter += 1
         if self._snap_counter % _SNAP_EVERY_N == 0:
             self._record_snap(data, t_rel)
+
+        # --- Timeline: telemetría del firmware (D1b) ---
+        # Llega ya parseada desde el proceso de decisión (poll de los ACK del nRF24, ~1Hz).
+        # Se vuelca en todas las fases: es estado de hardware (config EEPROM, dribbler, eventos).
+        if LOG_CHANNELS.get('telemetry'):
+            for _tm in (data.get('telemetry') or []):
+                _tt = _tm.get('t')
+                _trel = (_tt - self.t0) if _tt is not None else t_rel
+                self._tl(_trel, 'telem',
+                         r=_tm.get('robot'),
+                         cfg=[_tm.get('on'), _tm.get('off'), _tm.get('wdt')],
+                         eng=_tm.get('eng'), pwr=_tm.get('pwr'),
+                         evf=_tm.get('ev'), m=_tm.get('m'), d=_tm.get('d'))
 
         if not in_play:
             return
