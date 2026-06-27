@@ -1,5 +1,6 @@
 #include "robot_control.h"
 #include "config.h"
+#include "dribbler.h"
 #include <SoftPWM.h>
 
 // Variables externas (definidas en main.cpp)
@@ -38,13 +39,29 @@ void detenerMovimiento() {
   SoftPWMSet(MOTOR_1B_PIN, 0);
   SoftPWMSet(MOTOR_2A_PIN, 0);
   SoftPWMSet(MOTOR_2B_PIN, 0);
-  detenerMotorDC();  // Dribbler requiere señal constante igual que las ruedas
+  // Solo ruedas: el dribbler tiene su PROPIO watchdog (módulo dribbler). Antes este stop
+  // (gatillado por el watchdog compartido) apagaba también el rodillo, pero el tráfico de 'M'
+  // del giro mantenía vivo ese watchdog y el rodillo NO se apagaba al ceder. Ahora desacoplados.
 }
 
-void activarSolenoide() {
+// Disparo del solenoide NO bloqueante: arranca el pulso y vuelve enseguida; solenoidUpdate()
+// baja el pin tras TIEMPO_PATEO_MS. Así el lazo no se congela durante el disparo y el dribbler
+// puede seguir oscilando y las ruedas moviéndose mientras tanto.
+static bool          s_solFiring = false;
+static unsigned long s_solStart  = 0;
+
+void solenoidFire(unsigned long now) {
+  if (s_solFiring) return;  // un disparo por vez (no re-disparar mientras está activo)
   digitalWrite(SOLENOIDE_PIN, HIGH);
-  delay(TIEMPO_PATEO_MS);
-  digitalWrite(SOLENOIDE_PIN, LOW);
+  s_solFiring = true;
+  s_solStart  = now;
+}
+
+void solenoidUpdate(unsigned long now) {
+  if (s_solFiring && (now - s_solStart >= TIEMPO_PATEO_MS)) {
+    digitalWrite(SOLENOIDE_PIN, LOW);
+    s_solFiring = false;
+  }
 }
 
 void activarMotorDC() {
@@ -116,16 +133,16 @@ void ejecutarComando(char comando) {
       girarDerecha();
       tiempoInicio = millis();
       break;
-    case 'P':  // Patear
-      activarSolenoide();
+    case 'P':  // Patear: cortar el rodillo al instante y disparar (no bloqueante, sin pico)
+      dribblerKickCut();
+      solenoidFire(millis());
       break;
     case 'D':  // Activar rodillo
       activarMotorDC();
       tiempoInicio = millis();
       break;
-    case 'S':  // Detener rodillo
-      detenerMotorDC();
-      tiempoInicio = millis();
+    case 'S':  // Detener rodillo (override manual): desenganchar vía el módulo dribbler
+      dribblerKickCut();
       break;
     case 'Q':  // Apagar
       powerOff();

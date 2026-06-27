@@ -41,8 +41,22 @@
 #define ENCENDIDO_PIN 2
 
 // Configuración de movimiento
-#define DURACION_ACCION_MS 100  // Duración de cada acción en milisegundos
+#define DURACION_ACCION_MS 100  // Watchdog de MOVIMIENTO: sin refresco 'M' por este tiempo → frenar ruedas
 #define TIEMPO_PATEO_MS 50      // Duración del solenoide activado
+
+// ── Dribbler: oscilación nativa en firmware + watchdog PROPIO (independiente del de movimiento) ──
+// La oscilación on/off limita la corriente media del motor del rodillo (sin sensor; a stall
+// continuo se quema). duty = on/(on+off). Watchdog propio: si Python deja de refrescar el
+// comando 'D' por DRIBBLER_DEFAULT_WDT_MS, el rodillo se apaga (fail-safe). Estos son DEFAULTS;
+// la config real vive en EEPROM (persist.*) y se puede cambiar en runtime con el comando 'C'.
+#define DRIBBLER_DEFAULT_ON_MS   65   // ms — fase encendida
+#define DRIBBLER_DEFAULT_OFF_MS  15   // ms — fase apagada (duty 65/80 = 81%)
+#define DRIBBLER_DEFAULT_WDT_MS  150  // ms — sin refresco 'D' por este tiempo → apagar
+
+// Persistencia EEPROM (persist.*): marca de validez para no leer basura (0xFF) de una EEPROM
+// virgen → si MAGIC no coincide, se escriben y usan los defaults de arriba.
+#define PERSIST_MAGIC   0xD8B1
+#define PERSIST_VERSION 1
 
 // Velocidades de motores (0-255 para PWM)
 #define VELOCIDAD_ADELANTE_IZQ 47

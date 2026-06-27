@@ -5,6 +5,8 @@
 #include <PololuBuzzer.h>
 #include "config.h"
 #include "robot_control.h"
+#include "dribbler.h"
+#include "persist.h"
 
 // Variables globales
 PololuBuzzer buzzer;
@@ -49,6 +51,12 @@ void setup() {
 
   // Inicializar PWM por software
   SoftPWMBegin();
+
+  // Cargar la config del dribbler desde EEPROM (o escribir defaults si está virgen) y aplicarla.
+  // La oscilación on/off del rodillo la maneja el firmware desde aquí en adelante.
+  PersistCfg persistCfg;
+  persistLoad(persistCfg);
+  dribblerSetConfig(persistCfg.drib);
 }
 
 void loop() {
@@ -57,42 +65,43 @@ void loop() {
     digitalWrite(ENCENDIDO_PIN, LOW);
   }
 
-  // Procesar comandos RF
-  if (radio.available()) {
-    // Leer primer byte para determinar tipo de comando
+  // Drenar la FIFO RF: procesar TODOS los paquetes encolados en esta iteración (no uno por
+  // loop). Con el lazo no bloqueante (el solenoide ya no usa delay) la FIFO de 3 niveles no
+  // se desborda aunque lleguen M+D+... casi juntos.
+  while (radio.available()) {
     uint8_t data[5];
     radio.read(&data, sizeof(data));
+    unsigned long now = millis();
 
-    // Verificar si es comando de motor (M) o comando discreto
-    if (data[0] == 'M') {
-      // Comando de motor con velocidades variables
-      // data[0] = 'M'
-      // data[1] = robot_id
-      // data[2] = left_speed (0-255, convertir a -128..127)
-      // data[3] = right_speed (0-255, convertir a -128..127)
-
-      int16_t leftSpeed = (int16_t)data[2] - 128;
-      int16_t rightSpeed = (int16_t)data[3] - 128;
-
-      setMotorSpeeds(leftSpeed, rightSpeed);
-      tiempoInicio = millis();
-    } else if (data[0] == 'D') {
-      // Comando de dribbler con potencia variable (PWM 0-255)
-      // data[0] = 'D'
-      // data[1] = robot_id
-      // data[2] = potencia PWM (0 = apagado, 255 = máximo)
-      uint8_t pwm = data[2];
-      setDribblerSpeed(pwm);
-      tiempoInicio = millis();
-    } else {
-      // Comando discreto tradicional (F, B, L, R, P, S, Q)
-      char comando = data[0];
-      ejecutarComando(comando);
+    switch (data[0]) {
+      case 'M': {  // Motor: data[2]=left+128, data[3]=right+128
+        int16_t leftSpeed  = (int16_t)data[2] - 128;
+        int16_t rightSpeed = (int16_t)data[3] - 128;
+        setMotorSpeeds(leftSpeed, rightSpeed);
+        tiempoInicio = now;          // refresca el watchdog de MOVIMIENTO (solo ruedas)
+        break;
+      }
+      case 'D': {  // Dribbler: data[2]=potencia (0=apagar ya, >0=enganchar+oscilar)
+        dribblerSet(data[2], now);   // el módulo tiene su PROPIO watchdog (no toca tiempoInicio)
+        break;
+      }
+      case 'C': {  // Config dribbler en runtime: data[2]=onMs, data[3]=offMs, data[4]=wdtMs
+        DribblerCfg cfg = { data[2], data[3], data[4] };
+        dribblerSetConfig(cfg);
+        persistSaveDribbler(cfg);    // persiste en EEPROM
+        break;
+      }
+      default:     // Comandos discretos (F,B,L,R,P,S,Q); 'P' corta el rodillo y dispara
+        ejecutarComando(data[0]);
+        break;
     }
   }
 
-  // Detener movimiento después de la duración configurada
-  if (millis() - tiempoInicio >= DURACION_ACCION_MS) {
+  unsigned long now = millis();
+  // Watchdog de MOVIMIENTO: sin refresco 'M' por DURACION_ACCION_MS → frenar SOLO ruedas.
+  if (now - tiempoInicio >= DURACION_ACCION_MS) {
     detenerMovimiento();
   }
+  dribblerUpdate(now);    // oscilación on/off + watchdog propio del rodillo
+  solenoidUpdate(now);    // baja el pin del solenoide tras TIEMPO_PATEO_MS (no bloqueante)
 }
