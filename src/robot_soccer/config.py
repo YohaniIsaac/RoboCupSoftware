@@ -780,8 +780,8 @@ DRIBBLER_PULSE_OFF_MS = 20  # ms — respiro térmico mínimo, imperceptible (0 
 # la envía al inicio de sesión (comando 'C') y el robot oscila el rodillo con este duty de forma
 # autónoma; Python ya NO oscila. duty = ON/(ON+OFF). wdt: sin refresco 'D' por este tiempo el
 # firmware apaga el rodillo (fail-safe propio, independiente del de movimiento). Bytes (0-255).
-DRIBBLER_FW_ON_MS  = 65   # ms — fase encendida (duty 65/80 = 81%)
-DRIBBLER_FW_OFF_MS = 15   # ms — fase apagada
+DRIBBLER_FW_ON_MS = 65  # ms — fase encendida (duty 65/80 = 81%)
+DRIBBLER_FW_OFF_MS = 15  # ms — fase apagada
 DRIBBLER_FW_WDT_MS = 150  # ms — watchdog propio del dribbler en firmware
 
 # Distancia robot-pelota a la que se ENCIENDE el dribbler durante el avance al contacto.

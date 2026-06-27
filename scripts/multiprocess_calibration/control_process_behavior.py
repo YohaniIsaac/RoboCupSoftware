@@ -35,8 +35,8 @@ from robot_soccer.config import (
     DRIBBLE_PWM_FACTOR,
     DRIBBLER_CAPTURE_POWER,
     DRIBBLER_HOLD_POWER,
-    DRIBBLER_PULSE_ON_MS,
-    DRIBBLER_PULSE_OFF_MS,
+    DRIBBLER_FW_ON_MS,
+    DRIBBLER_FW_OFF_MS,
     BEHIND_BALL_APPROACH_PX,
     CONTACT_SETTLE_TIME_S,
     CAMERA_PERSPECTIVE_WIDTH,
@@ -125,8 +125,8 @@ def control_loop_behavior(robot_positions_pipe, frame_pipe, robot_id, serial_por
         'dribble_pwm_factor': DRIBBLE_PWM_FACTOR,
         'dribbler_capture_power': DRIBBLER_CAPTURE_POWER,
         'dribbler_hold_power': DRIBBLER_HOLD_POWER,
-        'dribbler_pulse_on_ms': DRIBBLER_PULSE_ON_MS,
-        'dribbler_pulse_off_ms': DRIBBLER_PULSE_OFF_MS,
+        'dribbler_fw_on_ms': DRIBBLER_FW_ON_MS,
+        'dribbler_fw_off_ms': DRIBBLER_FW_OFF_MS,
         'stuck_movement_threshold_px': STUCK_MOVEMENT_THRESHOLD_PX,
         'stuck_detection_window_s':    STUCK_DETECTION_WINDOW_S,
         'stuck_boost_increment':       STUCK_BOOST_INCREMENT,
@@ -473,8 +473,8 @@ def _draw_behavior_panel(behavior_params, robot, waypoint, robot_available):
 
     cap_pwr = behavior_params.get('dribbler_capture_power', 25)
     hold_pwr = behavior_params.get('dribbler_hold_power', 115)
-    pulse_on = behavior_params.get('dribbler_pulse_on_ms', 50)
-    pulse_off = behavior_params.get('dribbler_pulse_off_ms', 150)
+    pulse_on = behavior_params.get('dribbler_fw_on_ms', 65)
+    pulse_off = behavior_params.get('dribbler_fw_off_ms', 15)
     pulse_mode = "CONTINUO" if pulse_off == 0 else f"ON {pulse_on}ms / OFF {pulse_off}ms"
     cv2.putText(panel, f"Dribbler capture: {cap_pwr} PWM (1/2)", (10, y_offset),
                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
@@ -710,25 +710,25 @@ def _handle_keyboard_behavior(key, robot, target_waypoint, behavior_params,
         result['action'] = 'update_behavior'
         log.info(f"dribbler_hold_power: {behavior_params['dribbler_hold_power']} PWM")
 
-    # Dribbler pulse ON duration (5/6 ±10ms)
+    # Dribbler firmware oscilación ON (5/6 ±5ms; byte 0-255, persiste vía comando 'C')
     elif key == ord('5'):
-        behavior_params['dribbler_pulse_on_ms'] = max(10, behavior_params['dribbler_pulse_on_ms'] - 10)
+        behavior_params['dribbler_fw_on_ms'] = max(10, behavior_params['dribbler_fw_on_ms'] - 5)
         result['action'] = 'update_behavior'
-        log.info(f"dribbler_pulse_on_ms: {behavior_params['dribbler_pulse_on_ms']}ms")
+        log.info(f"dribbler_fw_on_ms: {behavior_params['dribbler_fw_on_ms']}ms")
     elif key == ord('6'):
-        behavior_params['dribbler_pulse_on_ms'] = min(500, behavior_params['dribbler_pulse_on_ms'] + 10)
+        behavior_params['dribbler_fw_on_ms'] = min(255, behavior_params['dribbler_fw_on_ms'] + 5)
         result['action'] = 'update_behavior'
-        log.info(f"dribbler_pulse_on_ms: {behavior_params['dribbler_pulse_on_ms']}ms")
+        log.info(f"dribbler_fw_on_ms: {behavior_params['dribbler_fw_on_ms']}ms")
 
-    # Dribbler pulse OFF duration (7/8 ±10ms, 0=continuo)
+    # Dribbler firmware oscilación OFF (7/8 ±5ms, 0=continuo; byte 0-255)
     elif key == ord('7'):
-        behavior_params['dribbler_pulse_off_ms'] = max(0, behavior_params['dribbler_pulse_off_ms'] - 10)
+        behavior_params['dribbler_fw_off_ms'] = max(0, behavior_params['dribbler_fw_off_ms'] - 5)
         result['action'] = 'update_behavior'
-        log.info(f"dribbler_pulse_off_ms: {behavior_params['dribbler_pulse_off_ms']}ms (0=continuo)")
+        log.info(f"dribbler_fw_off_ms: {behavior_params['dribbler_fw_off_ms']}ms (0=continuo)")
     elif key == ord('8'):
-        behavior_params['dribbler_pulse_off_ms'] = min(500, behavior_params['dribbler_pulse_off_ms'] + 10)
+        behavior_params['dribbler_fw_off_ms'] = min(255, behavior_params['dribbler_fw_off_ms'] + 5)
         result['action'] = 'update_behavior'
-        log.info(f"dribbler_pulse_off_ms: {behavior_params['dribbler_pulse_off_ms']}ms (0=continuo)")
+        log.info(f"dribbler_fw_off_ms: {behavior_params['dribbler_fw_off_ms']}ms (0=continuo)")
 
     return result
 
@@ -757,8 +757,8 @@ def _save_behavior_to_config(behavior_params):
         'DRIBBLE_PWM_FACTOR': f"{behavior_params.get('dribble_pwm_factor', 1.0)}",
         'DRIBBLER_CAPTURE_POWER': f"{behavior_params.get('dribbler_capture_power', 25)}",
         'DRIBBLER_HOLD_POWER': f"{behavior_params.get('dribbler_hold_power', 115)}",
-        'DRIBBLER_PULSE_ON_MS': f"{behavior_params.get('dribbler_pulse_on_ms', 50)}",
-        'DRIBBLER_PULSE_OFF_MS': f"{behavior_params.get('dribbler_pulse_off_ms', 150)}",
+        'DRIBBLER_FW_ON_MS': f"{behavior_params.get('dribbler_fw_on_ms', 65)}",
+        'DRIBBLER_FW_OFF_MS': f"{behavior_params.get('dribbler_fw_off_ms', 15)}",
         'BEHIND_BALL_APPROACH_PX': f"{behavior_params.get('behind_ball_approach_px', BEHIND_BALL_APPROACH_PX)}",
         'CONTACT_SETTLE_TIME_S': f"{behavior_params.get('contact_settle_time_s', CONTACT_SETTLE_TIME_S)}",
         'STUCK_MOVEMENT_THRESHOLD_PX': f"{int(behavior_params.get('stuck_movement_threshold_px', STUCK_MOVEMENT_THRESHOLD_PX))}",
@@ -845,8 +845,8 @@ def control_loop_behavior_pure(perception_pipe, control_state_pipe, keyboard_pip
         'dribble_pwm_factor': DRIBBLE_PWM_FACTOR,
         'dribbler_capture_power': DRIBBLER_CAPTURE_POWER,
         'dribbler_hold_power': DRIBBLER_HOLD_POWER,
-        'dribbler_pulse_on_ms': DRIBBLER_PULSE_ON_MS,
-        'dribbler_pulse_off_ms': DRIBBLER_PULSE_OFF_MS,
+        'dribbler_fw_on_ms': DRIBBLER_FW_ON_MS,
+        'dribbler_fw_off_ms': DRIBBLER_FW_OFF_MS,
         'behind_ball_approach_px': BEHIND_BALL_APPROACH_PX,
         'contact_settle_time_s': CONTACT_SETTLE_TIME_S,
         'stuck_movement_threshold_px': STUCK_MOVEMENT_THRESHOLD_PX,
@@ -1087,8 +1087,8 @@ def control_loop_behavior_pure(perception_pipe, control_state_pipe, keyboard_pip
                                 'dribble_pwm_factor': (0.5, 2.0),
                                 'dribbler_capture_power': (0, 255),
                                 'dribbler_hold_power': (0, 255),
-                                'dribbler_pulse_on_ms': (10, 500),
-                                'dribbler_pulse_off_ms': (0, 500),
+                                'dribbler_fw_on_ms': (10, 255),
+                                'dribbler_fw_off_ms': (0, 255),
                                 'behind_ball_approach_px': (30, 120),
                                 'contact_settle_time_s': (0.05, 2.0),
                                 'stuck_movement_threshold_px': (2, 30),
