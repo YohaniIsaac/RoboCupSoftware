@@ -58,6 +58,10 @@ class SerialManager:
         self.worker_thread = None
         self.running = False
         self.response_buffer = []  # Buffer para respuestas del Arduino
+        # Telemetría/diagnóstico (D1): se clasifican las respuestas YA leídas por el worker
+        # (observación, no se envía nada extra). _telem_lines acotado; _telem_err cuenta ERRORs.
+        self._telem_lines = []     # [(ts, linea_TELEM)]
+        self._telem_err = 0        # nº de ERROR de entrega desde el último drain
 
         # Límite de tamaño de cola (medida de seguridad)
         # Con "Last Command Wins" las colas no deberían crecer mucho
@@ -420,6 +424,34 @@ class SerialManager:
 
         return responses
 
+    def _classify(self, line):
+        """Clasifica una respuesta del transmisor para telemetría (D1). LLAMAR BAJO self.lock.
+
+        Observación pura: la línea ya la leyó el worker; solo se mira el prefijo y se guarda
+        (TELEM, de baja frecuencia) o se cuenta (ERROR de entrega). O(1), sin re-lock.
+        """
+        if line.startswith('TELEM'):
+            self._telem_lines.append((time.time(), line))
+            if len(self._telem_lines) > 128:        # acotar memoria
+                del self._telem_lines[0]
+        elif 'ERROR' in line:
+            self._telem_err += 1
+
+    def drain_telemetry(self):
+        """Devuelve y limpia las líneas TELEM acumuladas + el contador de ERROR (D1).
+
+        Lo consume el RFController a baja frecuencia para loguear/volcar la telemetría.
+
+        Returns:
+            (list[(ts, str)], int): líneas TELEM con timestamp, y nº de ERROR desde el último drain.
+        """
+        with self.lock:
+            lines = self._telem_lines
+            self._telem_lines = []
+            err = self._telem_err
+            self._telem_err = 0
+        return lines, err
+
     def _worker(self):
         """Hilo de trabajo para enviar comandos y recibir respuestas.
 
@@ -450,6 +482,7 @@ class SerialManager:
                         if response:
                             with self.lock:
                                 self.response_buffer.append(response)
+                                self._classify(response)
                     except Exception:
                         pass
                 else:
@@ -519,6 +552,7 @@ class SerialManager:
                                 log.debug("Recibido: %s", response)
                                 with self.lock:
                                     self.response_buffer.append(response)
+                                    self._classify(response)
                                 last_response_time = time.time()
                         except Exception as read_error:
                             log.warning("Error leyendo respuesta: %s", read_error)

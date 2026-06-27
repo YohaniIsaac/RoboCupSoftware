@@ -333,6 +333,46 @@ class RFController:
 
         return success
 
+    def poll_telemetry(self):
+        """Lee la telemetría del firmware acumulada en el serial (D1).
+
+        Drena las líneas TELEM que el SerialManager ya capturó (piggyback en los ACK del
+        nRF24) y las parsea a dicts. Observación: NO envía nada, solo lee lo ya emitido.
+
+        Returns:
+            (list[dict], int): telemetrías parseadas y nº de ERROR de entrega desde el último
+            poll. Cada dict: {robot, dbg, on, off, wdt, eng, pwr, ev, m, d, t}.
+        """
+        lines, err = self.serial_manager.drain_telemetry()
+        out = []
+        for ts, line in lines:
+            d = self._parse_telem(line)
+            if d is not None:
+                d['t'] = ts
+                out.append(d)
+        return out, err
+
+    @staticmethod
+    def _parse_telem(line):
+        """Parsea 'TELEM R2 dbg=1 cfg=65/15/150 eng=1 pwr=50 ev=1 m=153 d=2' a dict (o None)."""
+        try:
+            toks = line.split()
+            if len(toks) < 2 or toks[0] != 'TELEM' or not toks[1].startswith('R'):
+                return None
+            d = {'robot': int(toks[1][1:])}
+            for tok in toks[2:]:
+                if '=' not in tok:
+                    continue
+                k, v = tok.split('=', 1)
+                if k == 'cfg':
+                    on, off, wdt = v.split('/')
+                    d['on'], d['off'], d['wdt'] = int(on), int(off), int(wdt)
+                else:
+                    d[k] = int(v)
+            return d
+        except (ValueError, IndexError):
+            return None
+
     def send_tablero(self, cmd_num):
         """Envía un comando al tablero de puntuación.
 

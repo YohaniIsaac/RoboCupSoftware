@@ -238,6 +238,8 @@ def decision_process(
     last_dribbler_keepalive = {rid: 0.0 for rid in robot_ids}
     DRIBBLER_KEEPALIVE = 0.08     # 80ms — refresca el watchdog del firmware (wdt 150ms)
     prev_dribbler_engaged = {rid: False for rid in robot_ids}
+    _last_telem_poll = 0.0        # D1: poll de telemetría del firmware (~1Hz)
+    TELEM_POLL_S = 1.0
 
     # Enviar al firmware la config de oscilación del dribbler (persiste en EEPROM del robot).
     _rf_cfg = behavior_manager.command_manager.rf_controller
@@ -413,6 +415,17 @@ def decision_process(
                     _pulse_dribbler(rf, p, now, last_dribbler_keepalive,
                                     prev_dribbler_engaged, DRIBBLER_KEEPALIVE,
                                     positioning=_positioning)
+
+                # Telemetría del firmware (D1): leer lo que el robot adjuntó al ACK (observación).
+                if now - _last_telem_poll >= TELEM_POLL_S:
+                    _last_telem_poll = now
+                    _tlm, _terr = rf.poll_telemetry()
+                    for _t in _tlm:
+                        log.info("[TELEM] R%s cfg=%s/%s/%s eng=%s pwr=%s ev=%s m=%s d=%s",
+                                 _t.get('robot'), _t.get('on'), _t.get('off'), _t.get('wdt'),
+                                 _t.get('eng'), _t.get('pwr'), _t.get('ev'), _t.get('m'), _t.get('d'))
+                    if _terr:
+                        log.warning("[TELEM] %d ERROR(es) de entrega RF desde el ultimo poll", _terr)
 
             # --- Actualizar posiciones de todos los robots para el planner ---
             _all_robot_data = [
@@ -844,6 +857,8 @@ def decision_process_2v2(
 
     last_dribbler_keepalive = {rid: 0.0 for rid in all_ids}
     prev_dribbler_engaged   = {rid: False for rid in all_ids}
+    _last_telem_poll = 0.0        # D1: poll de telemetría del firmware (~1Hz)
+    TELEM_POLL_S = 1.0
 
     log.info("Decision 2v2 lista. ESPACIO=ambos, R=rojo, B=azul.")
 
@@ -1103,6 +1118,17 @@ def decision_process_2v2(
                     _pulse_dribbler(rf, p, now, last_dribbler_keepalive,
                                     prev_dribbler_engaged, DRIBBLER_KEEPALIVE,
                                     positioning=_positioning)
+
+            # Telemetría del firmware (D1): leer lo que los robots adjuntaron al ACK (observación).
+            if now - _last_telem_poll >= TELEM_POLL_S:
+                _last_telem_poll = now
+                _tlm, _terr = rf.poll_telemetry()
+                for _t in _tlm:
+                    log.info("[TELEM] R%s cfg=%s/%s/%s eng=%s pwr=%s ev=%s m=%s d=%s",
+                             _t.get('robot'), _t.get('on'), _t.get('off'), _t.get('wdt'),
+                             _t.get('eng'), _t.get('pwr'), _t.get('ev'), _t.get('m'), _t.get('d'))
+                if _terr:
+                    log.warning("[TELEM] %d ERROR(es) de entrega RF desde el ultimo poll", _terr)
 
             # --- Obstáculos comunes: todos los robots detectados ---
             _all_robot_data = [
