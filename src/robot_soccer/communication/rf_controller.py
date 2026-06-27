@@ -311,6 +311,41 @@ class RFController:
                       robot_id, on_ms, off_ms, wdt_ms)
         return success
 
+    def set_dribbler_config_sync(self, robot_id, on_ms, off_ms, wdt_ms, timeout=1.5):
+        """Envía la config y ESPERA la confirmación TELEM del firmware (round-trip EEPROM).
+
+        El firmware reescribe EEPROM (solo si cambió), la RELEE y responde por ACK con la
+        config que QUEDÓ guardada. Esto verifica que el robot va a oscilar con esos valores
+        antes de empezar a jugar. Bloqueante; usar solo en arranque/setup, no en hot-path.
+
+        Args:
+            robot_id (int): ID de firmware (1-4).
+            on_ms, off_ms, wdt_ms (int): config a setear.
+            timeout (float): segundos máx. a esperar la confirmación.
+
+        Returns:
+            bool: True si el firmware confirmó cfg=on/off/wdt; False si no llegó o no coincide.
+        """
+        # Descartar telemetría vieja: solo queremos la confirmación de ESTE envío.
+        self.serial_manager.drain_telemetry()
+        if not self.set_dribbler_config(robot_id, on_ms, off_ms, wdt_ms):
+            return False
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            lines, _ = self.serial_manager.drain_telemetry()
+            for _ts, line in lines:
+                d = self._parse_telem(line)
+                if (d is not None and d.get('robot') == robot_id
+                        and d.get('on') == on_ms and d.get('off') == off_ms
+                        and d.get('wdt') == wdt_ms):
+                    log.info("Robot %i: config dribbler confirmada %d/%d/%d",
+                             robot_id, on_ms, off_ms, wdt_ms)
+                    return True
+            time.sleep(0.05)
+        log.warning("Robot %i: SIN confirmacion de config dribbler %d/%d/%d en %.1fs",
+                    robot_id, on_ms, off_ms, wdt_ms, timeout)
+        return False
+
     def stop_robot(self, robot_id):
         """Detiene todos los motores de un robot.
 

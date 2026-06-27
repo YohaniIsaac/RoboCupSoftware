@@ -241,12 +241,22 @@ def decision_process(
     _last_telem_poll = 0.0        # D1: poll de telemetría del firmware (~1Hz)
     TELEM_POLL_S = 1.0
 
-    # Enviar al firmware la config de oscilación del dribbler (persiste en EEPROM del robot).
+    # Config de oscilación del dribbler al firmware (persiste en EEPROM): se ENVÍA y se ESPERA
+    # la confirmación del robot (round-trip EEPROM) antes de jugar. Si no confirma, se advierte
+    # (puede estar usando otra config guardada). El robot oscila el rodillo con este duty.
     _rf_cfg = behavior_manager.command_manager.rf_controller
     if robot_available and _rf_cfg is not None:
+        _unconfirmed = []
         for rid in robot_ids:
-            _rf_cfg.set_dribbler_config(
-                rid + 1, DRIBBLER_FW_ON_MS, DRIBBLER_FW_OFF_MS, DRIBBLER_FW_WDT_MS)
+            if not _rf_cfg.set_dribbler_config_sync(
+                    rid + 1, DRIBBLER_FW_ON_MS, DRIBBLER_FW_OFF_MS, DRIBBLER_FW_WDT_MS):
+                _unconfirmed.append(rid + 1)
+        if _unconfirmed:
+            log.warning("ADVERTENCIA: robots sin confirmar config dribbler: %s "
+                        "(pueden estar usando otra config en EEPROM)", _unconfirmed)
+        else:
+            log.info("Config dribbler confirmada por todos los robots (%d/%d/%d)",
+                     DRIBBLER_FW_ON_MS, DRIBBLER_FW_OFF_MS, DRIBBLER_FW_WDT_MS)
 
     prev_bt_action = None
     last_status_log = 0.0         # throttle de status (0.5 Hz → cada 2s)
@@ -751,11 +761,20 @@ def decision_process_2v2(
         return
     log.info("RF compartido OK en %s", serial_port)
 
-    # Config de oscilación del dribbler al firmware (persiste en EEPROM). El robot oscila el
-    # rodillo con este duty de forma autónoma; Python ya no oscila.
+    # Config de oscilación del dribbler al firmware (persiste en EEPROM). Se ENVÍA y se ESPERA
+    # la confirmación de cada robot (round-trip EEPROM) antes de jugar; si alguno no confirma se
+    # advierte (puede estar con otra config en su EEPROM). El robot oscila el rodillo; Python no.
+    _unconfirmed = []
     for _rid in all_ids:
-        rf.set_dribbler_config(
-            _rid + 1, DRIBBLER_FW_ON_MS, DRIBBLER_FW_OFF_MS, DRIBBLER_FW_WDT_MS)
+        if not rf.set_dribbler_config_sync(
+                _rid + 1, DRIBBLER_FW_ON_MS, DRIBBLER_FW_OFF_MS, DRIBBLER_FW_WDT_MS):
+            _unconfirmed.append(_rid + 1)
+    if _unconfirmed:
+        log.warning("ADVERTENCIA: robots sin confirmar config dribbler: %s "
+                    "(pueden estar usando otra config en EEPROM)", _unconfirmed)
+    else:
+        log.info("Config dribbler confirmada por todos los robots (%d/%d/%d)",
+                 DRIBBLER_FW_ON_MS, DRIBBLER_FW_OFF_MS, DRIBBLER_FW_WDT_MS)
 
     # --- Crear jugadores ---
     players_red  = [Player(rid, 0, 0, 0.0, team='red')  for rid in team_red_ids]
