@@ -38,6 +38,7 @@ _STATUS = re.compile(r"\[STATUS\]\s*R(\d+)\s*\|\s*(.*)$")
 _CONTACT   = re.compile(r"CONTACTO(?:\s+INMEDIATO)?:\s*L=([\d.]+)px\s+D=([\d.]+)px")
 _CONFIRMED = re.compile(r"POSESION CONFIRMADA:\s*L=([\d.]+)px\s+D=([\d.]+)px\s+held=([\d.]+)s")
 _LOST      = re.compile(r"EMPUJE PELOTA SE FUE:\s*db=([\d.]+)")
+_AIMLOST   = re.compile(r"TIRO FUERA:\s*slack=([-\d.]+)")
 _CONE      = re.compile(r"cono=(OK|FUERA)\(slack=([-\d.]+)")
 _OVERSHOOT = re.compile(r"OVERSHOOT OK:\s*avance=([\d.]+)px")   # logs previos al criterio de posesión
 _STALL     = re.compile(r"EMPUJE TRABADO:\s*avance=([\d.]+)px")  # logs previos al criterio de posesión
@@ -147,6 +148,10 @@ def parse_lines(lines, db_threshold=DEFAULT_DB_THRESHOLD) -> list[dict]:
             m = _LOST.search(msg)
             if m:
                 _close(rid, "se_fue", t_sec, dist_final=float(m.group(1)))
+                continue
+            m = _AIMLOST.search(msg)
+            if m:
+                _close(rid, "tiro_fuera", t_sec, slack=float(m.group(1)))
                 continue
             m = _OVERSHOOT.search(msg)
             if m:
