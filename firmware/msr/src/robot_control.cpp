@@ -64,14 +64,6 @@ void solenoidUpdate(unsigned long now) {
   }
 }
 
-void activarMotorDC() {
-  SoftPWMSet(MOTOR_DC_PIN, 255);
-}
-
-void detenerMotorDC() {
-  SoftPWMSet(MOTOR_DC_PIN, 0);
-}
-
 void setDribblerSpeed(uint8_t pwm) {
   SoftPWMSet(MOTOR_DC_PIN, pwm);
 }
@@ -136,10 +128,6 @@ void ejecutarComando(char comando) {
     case 'P':  // Patear: cortar el rodillo al instante y disparar (no bloqueante, sin pico)
       dribblerKickCut();
       solenoidFire(millis());
-      break;
-    case 'D':  // Activar rodillo
-      activarMotorDC();
-      tiempoInicio = millis();
       break;
     case 'S':  // Detener rodillo (override manual): desenganchar vía el módulo dribbler
       dribblerKickCut();
