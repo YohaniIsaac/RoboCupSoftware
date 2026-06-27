@@ -638,6 +638,14 @@ CONTACT_POSSESSION_LOST_PX = 48     # px — db por encima del cual la pelota se
                                     #      el empuje → re-perseguir (no asentar/patear al vacío).
                                     #      Entre el techo de kicked (35) y el piso de escaped (74).
 
+# --- CONO DE TIRO al arco rival (el arco es un RANGO de líneas de tiro, no un punto) ---
+# La pelota sale en la dirección robot→pelota; para ser gol esa dirección (vista desde la
+# pelota) debe caer entre los dos postes del arco rival. El cono se ENCOGE este margen por
+# lado para cubrir la imprecisión del disparo. Se usa para decidir si la captura conduce a
+# un tiro válido (puntería), aparte del gate mecánico KICK_POINT_TOLERANCE_PX (la pelota en
+# el morro). Paso 1: solo se instrumenta (loggea) — no cambia comportamiento todavía.
+SHOT_CONE_SAFETY_MARGIN_DEG = 6.0   # ° — margen por lado que se resta al semi-ancho del cono
+
 # --- Corrección de paralaje por altura del marker ---
 # El marker ArUco está elevado sobre el campo. Una cámara perspectiva desplaza
 # objetos elevados hacia afuera del centro de la imagen respecto a su posición

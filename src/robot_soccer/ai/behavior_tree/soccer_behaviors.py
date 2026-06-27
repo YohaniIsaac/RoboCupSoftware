@@ -34,6 +34,7 @@ from robot_soccer.config import (
     CONTACT_PUSH_TARGET_DIST_PX,
     CONTACT_POSSESSION_CONFIRM_S,
     CONTACT_POSSESSION_LOST_PX,
+    SHOT_CONE_SAFETY_MARGIN_DEG,
     KICK_POINT_TOLERANCE_PX,
     CONTACT_REACH_MARGIN_PX,
     CONTACT_REACH_MARGIN_HOLD_PX,
@@ -1429,6 +1430,44 @@ def _kick_contact(player_pos, player_angle_deg, ball_pos, reach_margin_px=None):
     return ok, L, D
 
 
+def _shot_aim_ok(blackboard, player_pos, ball_pos):
+    """Cono de tiro: ¿la pelota, disparada en la dirección robot→pelota, entra al arco rival?
+
+    La pelota sale en la dirección del heading ≈ vector robot→pelota. Para ser gol, esa
+    dirección (vista DESDE la pelota) debe caer en el rango angular que subtiende el arco
+    rival entre sus dos postes, ENCOGIDO SHOT_CONE_SAFETY_MARGIN_DEG por lado (imprecisión
+    del disparo). El arco es un RANGO de líneas de tiro, no un punto.
+
+    Es la PUNTERÍA (¿el tiro va al arco?), distinta del gate mecánico KICK_POINT_TOLERANCE_PX
+    (¿la pelota está en el morro?). Ambas son necesarias para un disparo útil.
+
+    Returns:
+        (in_cone, aim_deg, slack_deg): tiro válido (bool), dirección de disparo (°), y la
+        holgura al borde más cercano del cono (>0 dentro, <0 fuera) — para histéresis y medición.
+    """
+    f      = blackboard.field
+    goal   = np.asarray(blackboard.opponent_goal_pos, dtype=float)
+    player = np.asarray(player_pos, dtype=float)
+    ball   = np.asarray(ball_pos, dtype=float)
+
+    # Postes del arco RIVAL: el lado cuyo goal_x está más cerca del centro del arco oponente.
+    if abs(goal[0] - f.goal_right_x) <= abs(goal[0] - f.goal_left_x):
+        gx, ty, by = f.goal_right_x, f.goal_right_top_y, f.goal_right_bottom_y
+    else:
+        gx, ty, by = f.goal_left_x, f.goal_left_top_y, f.goal_left_bottom_y
+
+    aim_deg = float(np.degrees(np.arctan2(ball[1] - player[1], ball[0] - player[0])))
+    # Ángulos a los postes vistos DESDE la pelota.
+    a1 = float(np.degrees(np.arctan2(ty - ball[1], gx - ball[0])))
+    a2 = float(np.degrees(np.arctan2(by - ball[1], gx - ball[0])))
+    diff     = ((a2 - a1 + 180.0) % 360.0) - 180.0   # a2-a1 normalizado a (-180,180]
+    center   = a1 + diff / 2.0                        # bisectriz del cono
+    half_eff = abs(diff) / 2.0 - SHOT_CONE_SAFETY_MARGIN_DEG  # semi-ancho útil (encogido)
+    d        = abs(((aim_deg - center + 180.0) % 360.0) - 180.0)  # |aim − bisectriz|
+    slack    = half_eff - d
+    return (slack >= 0.0), aim_deg, float(slack)
+
+
 def _clear_advance_state(blackboard, player_id):
     """Limpia estado del avance al contacto: para motores, desactiva creep PID."""
     blackboard.command_manager.actions_in_progress.pop(player_id, None)
@@ -2047,10 +2086,11 @@ def _advance_overshoot_push(blackboard, player_id, player_pos):
             blackboard._contact_made          = True
             blackboard._contact_settle_start  = now
             blackboard.last_action            = "settling_contact"
+            _cone, _aim, _slack = _shot_aim_ok(blackboard, player_pos, ball_pos)
             robot_status_logger.emit_event(
                 player_id,
                 f"advance_contact POSESION CONFIRMADA: L={_L:.1f}px D={_D:.1f}px held={held:.2f}s "
-                f"-> asentando {CONTACT_SETTLE_TIME_S:.2f}s..."
+                f"cono={'OK' if _cone else 'FUERA'}(slack={_slack:.0f}°) -> asentando {CONTACT_SETTLE_TIME_S:.2f}s..."
             )
             return NodeStatus.RUNNING
     else:
@@ -2119,9 +2159,11 @@ def _advance_to_contact_start(blackboard):
     contact_ok, _L, _D = _kick_contact(player_pos, blackboard.player.angle, ball_pos)
     if contact_ok:
         push_target = _begin_overshoot_push(blackboard, player_id, player_pos)
+        _cone, _aim, _slack = _shot_aim_ok(blackboard, player_pos, ball_pos)
         robot_status_logger.emit_event(
             player_id,
-            f"advance_contact CONTACTO INMEDIATO: L={_L:.1f}px D={_D:.1f}px -> EMPUJE overshoot "
+            f"advance_contact CONTACTO INMEDIATO: L={_L:.1f}px D={_D:.1f}px "
+            f"cono={'OK' if _cone else 'FUERA'}(slack={_slack:.0f}°) -> EMPUJE overshoot "
             f"(target={push_target[0]},{push_target[1]})"
         )
         return NodeStatus.RUNNING
@@ -2365,9 +2407,11 @@ def _advance_to_contact_running(blackboard):
         contact_ok, _L, _D = _kick_contact(player_pos, blackboard.player.angle, ball_pos)
         if contact_ok:
             push_target = _begin_overshoot_push(blackboard, player_id, player_pos)
+            _cone, _aim, _slack = _shot_aim_ok(blackboard, player_pos, ball_pos)
             robot_status_logger.emit_event(
                 player_id,
-                f"advance_contact CONTACTO: L={_L:.1f}px D={_D:.1f}px -> EMPUJE overshoot "
+                f"advance_contact CONTACTO: L={_L:.1f}px D={_D:.1f}px "
+                f"cono={'OK' if _cone else 'FUERA'}(slack={_slack:.0f}°) -> EMPUJE overshoot "
                 f"(confirmar posesión {CONTACT_POSSESSION_CONFIRM_S:.1f}s, target={push_target[0]},{push_target[1]})"
             )
             return NodeStatus.RUNNING
