@@ -723,6 +723,10 @@ BEHIND_BALL_RECALC_MIN_S  = 0.30  # s  — intervalo mínimo entre recalculacion
                                    #      limita inundación del planner tras un kick (~3Hz máx)
 RIVAL_HOLD_YIELD_S    = 1.5   # s  — tiempo cediendo posesión antes de reintentar captura
 RIVAL_PRESS_MARGIN_PX = 15    # px — margen sobre CAPTURE_ACTIVATE_DISTANCE en posición press
+RIVAL_YIELD_EXIT_MARGIN_PX = 15  # px — histéresis de SALIDA de la cesión: una vez cediendo, solo
+                                 #      dejo de ceder si el rival queda más lejos que yo por este
+                                 #      margen (banda > jitter ArUco ±3-5px). Rompe el forcejeo y el
+                                 #      parpadeo del rodillo en el empate; la ENTRADA sigue en <5px.
 
 # Parámetros de intercepción de pelota en movimiento.
 # Cuando la pelota se desplaza rápido (tras un kick), los robots calculan el punto

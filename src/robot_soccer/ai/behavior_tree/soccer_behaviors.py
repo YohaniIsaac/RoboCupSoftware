@@ -71,6 +71,7 @@ from robot_soccer.config import (
     PATH_PLANNING_OBSTACLE_CLEARANCE,
     RIVAL_HOLD_YIELD_S,
     RIVAL_PRESS_MARGIN_PX,
+    RIVAL_YIELD_EXIT_MARGIN_PX,
     BALL_INTERCEPT_MIN_SPEED_PX_PER_TICK,
     BALL_INTERCEPT_LOOKAHEAD_TICKS,
     BALL_INTERCEPT_MAX_PX,
@@ -2155,6 +2156,14 @@ def _advance_to_contact_running(blackboard):
         rival_id_log   = None
         rival_dist_log = float('inf')
 
+        # Compromiso/histéresis para no oscilar (forcejeo) por el jitter de ±3-5px de ArUco en
+        # el empate: una vez que empecé a ceder (_rival_contact_start activo) me mantengo
+        # cediendo hasta que el rival quede CLARAMENTE más lejos que yo (+RIVAL_YIELD_EXIT_MARGIN_PX).
+        # Para ENTRAR a ceder basta con que esté más cerca, o empate (<5px) con mi ángulo peor.
+        # Sin esto, el "quién está más cerca" se invertía cada frame y el rodillo se prendía/
+        # apagaba en bucle (el parpadeo observado en el partido).
+        already_pressing = getattr(blackboard, '_rival_contact_start', None) is not None
+
         for opp in blackboard.opponents:
             opp_pos       = np.array(opp.get_position(), dtype=float)
             opp_dist_ball = float(np.linalg.norm(opp_pos - ball_pos))
@@ -2163,8 +2172,14 @@ def _advance_to_contact_running(blackboard):
                     ball_pos[1] - opp_pos[1], ball_pos[0] - opp_pos[0]
                 )))
                 opp_head_err  = abs((opp_to_ball_deg - float(opp.angle) + 180) % 360 - 180)
-                yield_on_tie  = abs(opp_dist_ball - dist) < 5 and opp_head_err <= my_head_err
-                if opp_dist_ball < dist or yield_on_tie:
+                if already_pressing:
+                    # Histéresis de salida: sigo cediendo salvo que gane con margen claro.
+                    do_yield = opp_dist_ball <= dist + RIVAL_YIELD_EXIT_MARGIN_PX
+                else:
+                    # Entrada: rival más cerca, o empate (<5px) con mi ángulo peor (mérito).
+                    do_yield = (opp_dist_ball < dist
+                                or (abs(opp_dist_ball - dist) < 5 and opp_head_err <= my_head_err))
+                if do_yield:
                     rival_closer   = True
                     rival_id_log   = opp.id
                     rival_dist_log = opp_dist_ball
