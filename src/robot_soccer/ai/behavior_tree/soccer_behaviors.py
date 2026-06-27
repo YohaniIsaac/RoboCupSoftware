@@ -2468,6 +2468,19 @@ def _advance_to_contact_running(blackboard):
             )
             return NodeStatus.FAILURE
 
+        # Tiro claramente fuera del arco al acercarse (la pelota no está en ninguna línea de
+        # tiro desde aquí): capturar daría un disparo perdido → re-stage (behind_ball re-arma
+        # la línea). Permisivo + histéresis, mismo criterio que en empuje/asentamiento.
+        if dist <= CAPTURE_ACTIVATE_DISTANCE_PX:
+            _aim_lost, _slack = _aim_shot_lost(blackboard, player_pos, ball_pos, time.time())
+            if _aim_lost:
+                _clear_advance_state(blackboard, player_id)
+                robot_status_logger.emit_event(
+                    player_id,
+                    f"advance_contact APPROACH TIRO FUERA: slack={_slack:.0f}° -> re-stage"
+                )
+                return NodeStatus.FAILURE
+
         # Recalcular target. Zona gruesa (dist > CAPTURE_ACTIVATE_DISTANCE_PX): seguir la
         # pelota cada tick (el guard <20px de move_robot_to filtra el jitter, el PID cierra
         # suave). Zona fina (≤): NO seguir frame a frame... EXCEPTO si el robot ya llegó al
