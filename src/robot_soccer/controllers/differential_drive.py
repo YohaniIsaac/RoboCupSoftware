@@ -492,13 +492,19 @@ class DifferentialDriveController:
 
         if should_rotate:
             # === MODO ROTACIÓN PURA (v=0, mismo PID angular) ===
-            # Para rotación INLINE (dentro de move_to_position), escalamos el PID
-            # directamente al rango del robot sin el perfil de rampa de rotate_to_angle.
-            # Razón: el perfil de rampa tiene piso en min_speed (17 PWM para Robot 0),
-            # y con kp típico el PID cae por debajo de ese piso desde ~35°, produciendo
-            # velocidad constante mínima. La escala directa + clamp da el mismo resultado
-            # para ángulos pequeños pero evita el artefacto de "rampa empieza a 25°".
-            raw_pwm = abs(omega_raw) * robot_max_speed
+            # Escala directa al rango del robot + clamp (sin el perfil de rampa de
+            # rotate_to_angle), PERO con gain scheduling como rotate_to_angle: LEJOS del
+            # objetivo (|error| > angle_near) la ganancia agresiva kp_angle_rotation_far hace
+            # el giro RÁPIDO (requisito: error de rumbo > ~30° ⇒ giro veloz). Antes la inline
+            # usaba solo kp_angle (0.35), que pisaba en robot_min_speed (~19 PWM) y hacía
+            # lentísimo el giro de cesión/reubicación (move_to_intercept). CERCA (|error| <=
+            # angle_near) vuelve a kp_angle (rampa cruda de un paso) para frenar; el modo sale
+            # a exit_thresh.
+            if abs(angle_error) > self.angle_near:
+                omega_eff = self.kp_angle_rotation_far * angle_error + i_w + d_w
+            else:
+                omega_eff = omega_raw
+            raw_pwm = abs(omega_eff) * robot_max_speed
             rotation_speed = int(max(robot_min_speed, min(robot_max_speed, raw_pwm)))
 
             # Compensación de asimetría de motores
