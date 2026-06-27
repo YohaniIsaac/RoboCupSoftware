@@ -616,26 +616,15 @@ KICK_POINT_ANGLE_OFFSET_DEG = 0.0  # ° — offset angular entre el eje del mark
 # de detectar contacto (el creep es lento, pwm=CAPTURE_CREEP_SPEED_PWM).
 CONTACT_APPROACH_OVERSHOOT_PX = 10  # px — overshoot del target del creep pasado el kick_point
 
-# --- FASE DE EMPUJE DEL OVERSHOOT (opción 1: avanzar CON la pelota tras el contacto) ---
+# --- FASE DE EMPUJE DEL OVERSHOOT (avanzar CON la pelota tras el contacto) ---
 # Al detectar contacto (L <= KICK_POINT_OFFSET_PX + CONTACT_REACH_MARGIN_PX) el robot YA NO
-# frena: marca posesión (arranca el tope POSSESSION_MAX_TIME_S como salvaguarda) y EMPUJA la
-# pelota un poco más AVANZANDO EN SU HEADING ACTUAL (recto, sin re-apuntar). Termina el empuje
-# (→ asentamiento + disparo) cuando el robot avanzó CONTACT_PUSH_DISTANCE_PX desde el punto de
-# contacto, o se trabó, o vence el tope de posesión (rama TopePosesion → disparo forzado).
-CONTACT_PUSH_DISTANCE_PX = 12       # px — avance del robot (desde el punto de contacto) que
-                                    #      cuenta como overshoot completo → asienta y patea.
+# frena ni patea al toque: marca posesión (arranca POSSESSION_MAX_TIME_S como salvaguarda) y
+# sigue EMPUJANDO SUAVE EN SU HEADING ACTUAL (recto, sin re-apuntar) como TEST de captura. El
+# fin del empuje lo decide la confirmación de posesión (bloque siguiente), no este target.
 CONTACT_PUSH_TARGET_DIST_PX = 30    # px — distancia del target FIJO de empuje, adelante en el
-                                    #      heading actual. Debe ser > CONTACT_PUSH_DISTANCE_PX +
-                                    #      2*ROBOT_POSITION_THRESHOLD para que el STOP PREDICTIVO no
-                                    #      frene antes de completar el empuje (la parada la decide
-                                    #      la medición de avance, no el arrival del controlador).
-CONTACT_PUSH_STALL_WINDOW_S = 0.6   # s  — ventana para detectar trabado (robot pegado a la pelota
-                                    #      sin avanzar; el creep ya está en su techo CREEP_BASE_MAX_PWM
-                                    #      y la presión de la pelota lo frena).
-CONTACT_PUSH_STALL_PX = 3           # px — avance mínimo dentro de la ventana; por debajo = trabado →
-                                    #      asienta igual (no esperar un overshoot físicamente
-                                    #      imposible). [push_pwm pendiente: subir el techo del creep
-                                    #      para vencer la presión es trabajo futuro con datos reales.]
+                                    #      heading actual. Solo conduce el empuje suave; debe ser
+                                    #      lo bastante grande para que el STOP PREDICTIVO no frene
+                                    #      el creep antes (la parada real la decide la posesión).
 
 # --- CONFIRMACIÓN DE POSESIÓN durante el empuje (criterio por db, no por avance) ---
 # Medido en 11 episodios reales 1-robot: db_max separa el resultado SIN solape — kicked 26-35px,

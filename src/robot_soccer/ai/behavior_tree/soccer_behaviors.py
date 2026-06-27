@@ -31,10 +31,7 @@ from robot_soccer.config import (
     CREEP_BASE_MAX_PWM,
     KICK_POINT_OFFSET_PX,
     CONTACT_APPROACH_OVERSHOOT_PX,
-    CONTACT_PUSH_DISTANCE_PX,
     CONTACT_PUSH_TARGET_DIST_PX,
-    CONTACT_PUSH_STALL_WINDOW_S,
-    CONTACT_PUSH_STALL_PX,
     CONTACT_POSSESSION_CONFIRM_S,
     CONTACT_POSSESSION_LOST_PX,
     KICK_POINT_TOLERANCE_PX,
@@ -2202,8 +2199,8 @@ def _advance_to_contact_running(blackboard):
       Acercamiento: PID activo hasta que dist < CAPTURE_CONFIRM_DISTANCE_PX.
         - Si la pelota escapa (dist > BEHIND_BALL_APPROACH_PX * ADVANCE_ESCAPE_FACTOR) → FAILURE.
         - Al detectar contacto (gate _kick_contact) NO frena: entra a EMPUJE.
-      Empuje (overshoot): avanza CON la pelota en su heading actual (sin re-apuntar) hasta
-        avanzar CONTACT_PUSH_DISTANCE_PX o trabarse → pasa a Asentamiento. Ver _advance_overshoot_push.
+      Empuje (overshoot): empuja suave CON la pelota en su heading actual (sin re-apuntar) y
+        confirma POSESIÓN (pelota pegada sostenida) o la da por perdida. Ver _advance_overshoot_push.
       Asentamiento: robot detenido, espera CONTACT_SETTLE_TIME_S.
         - Si la pelota escapa (dist > CAPTURE_CONFIRM_DISTANCE_PX * SETTLE_ESCAPE_FACTOR) → FAILURE.
         - Tras el tiempo de espera → SUCCESS y se dispara el solenoide.
@@ -2363,15 +2360,15 @@ def _advance_to_contact_running(blackboard):
         # Contacto alcanzado: gate direccional — el solenoide ALCANZÓ la pelota
         # (L <= offset + margen, no corto) y la pelota centrada en la nariz. Aquí NO se
         # frena (ese era el bug del 'frena antes de empujar'): se entra a la FASE DE EMPUJE,
-        # que avanza CON la pelota manteniendo el heading y recién al completar el overshoot
-        # (o trabarse, o vencer el tope de posesión) asienta y patea.
+        # que empuja suave CON la pelota manteniendo el heading y confirma POSESIÓN (pelota
+        # pegada sostenida) o la da por perdida si se aleja; recién entonces asienta y patea.
         contact_ok, _L, _D = _kick_contact(player_pos, blackboard.player.angle, ball_pos)
         if contact_ok:
             push_target = _begin_overshoot_push(blackboard, player_id, player_pos)
             robot_status_logger.emit_event(
                 player_id,
                 f"advance_contact CONTACTO: L={_L:.1f}px D={_D:.1f}px -> EMPUJE overshoot "
-                f"(avance objetivo={CONTACT_PUSH_DISTANCE_PX}px, target={push_target[0]},{push_target[1]})"
+                f"(confirmar posesión {CONTACT_POSSESSION_CONFIRM_S:.1f}s, target={push_target[0]},{push_target[1]})"
             )
             return NodeStatus.RUNNING
 
