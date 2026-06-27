@@ -13,9 +13,10 @@ Verifica los 3 puntos del bench-test de D2:
      del toggle disableDynamicPayloads alrededor del write al tablero.
   3. Telemetría: '?,id' (consulta) y 'G,id,1' (nivel eventos) → aparecen líneas
      'TELEM R.. dbg=.. cfg=on/off/wdt eng=.. pwr=.. ev=.. m=.. d=..'.
-  4. Config EEPROM: 'C,id,on,off,wdt' cambia el duty del dribbler; el firmware reescribe
-     EEPROM, RELEE y responde por TELEM con la config que QUEDÓ guardada (round-trip).
-     Solo se corre en el primer ciclo para no desgastar la EEPROM (~100k escrituras).
+  4. Config EEPROM: 'C,id,on,off,wdt' setea el duty del dribbler; el firmware escribe EEPROM
+     (solo si cambió), RELEE y responde por TELEM con la config que QUEDÓ guardada (round-trip).
+     El duty queda PERSISTIDO (no se restaura) para probarlo el resto del bench; ajustá con
+     --drib-on/--drib-off/--drib-wdt. Solo se corre en el 1er ciclo.
 
 Uso:
     python scripts/integration/bench_d2_telemetry.py --port /dev/ttyUSB0 --robot-id 1
@@ -102,19 +103,15 @@ def phase_tablero(ser: serial.Serial) -> None:
         time.sleep(1.2)
 
 
-def phase_config(ser: serial.Serial, rid: int) -> None:
-    print("\n=== FASE 4: CONFIG EEPROM (escribir + confirmar round-trip) ===")
-    print("    Cambia el duty del dribbler a 50/30 y espera que el firmware confirme por")
-    print("    TELEM la config que QUEDÓ en EEPROM; luego restaura el default 65/15.")
+def phase_config(ser: serial.Serial, rid: int, on_ms: int, off_ms: int, wdt_ms: int) -> None:
+    print("\n=== FASE 4: CONFIG EEPROM (escribir + confirmar, PERSISTE) ===")
+    print(f"    Setea el duty del dribbler a {on_ms}/{off_ms} (wdt {wdt_ms}) y lo DEJA en EEPROM.")
+    print("    El robot oscilará con ese duty el resto del bench (ajustá con --drib-on/--drib-off).")
     # 'C' -> el transmisor reenvía '?' y lee el ACK con la config releída de EEPROM.
-    send(ser, f"C,{rid},50,30,150", "duty 50/30 wdt 150 -> EEPROM (espera TELEM cfg=50/30/150)")
+    send(ser, f"C,{rid},{on_ms},{off_ms},{wdt_ms}",
+         f"duty {on_ms}/{off_ms} wdt {wdt_ms} -> EEPROM (espera TELEM cfg={on_ms}/{off_ms}/{wdt_ms})")
     time.sleep(0.8)
-    send(ser, f"?,{rid}", "releer config persistida")
-    time.sleep(0.6)
-    # Restaurar el default del sistema para no dejar el robot con otra config tras el bench.
-    send(ser, f"C,{rid},65,15,150", "restaurar default 65/15 wdt 150 (espera TELEM cfg=65/15/150)")
-    time.sleep(0.8)
-    send(ser, f"?,{rid}", "confirmar restauración")
+    send(ser, f"?,{rid}", "releer config persistida (debe coincidir con lo seteado)")
     time.sleep(0.6)
 
 
@@ -136,6 +133,9 @@ def main() -> None:
     ap.add_argument("--robot-id", type=int, default=1, help="ID de robot (1-4).")
     ap.add_argument("--skip-motor", action="store_true", help="No mover el robot (fase 1).")
     ap.add_argument("--skip-tablero", action="store_true", help="No tocar el marcador (fase 2).")
+    ap.add_argument("--drib-on", type=int, default=50, help="Dribbler ON ms a persistir (duty a probar).")
+    ap.add_argument("--drib-off", type=int, default=30, help="Dribbler OFF ms a persistir (duty a probar).")
+    ap.add_argument("--drib-wdt", type=int, default=150, help="Dribbler watchdog ms a persistir.")
     args = ap.parse_args()
     rid = args.robot_id
 
@@ -156,15 +156,16 @@ def main() -> None:
         while True:
             cycle += 1
             print(f"\n########################  CICLO {cycle}  ########################")
+            if cycle == 1:
+                # Solo en el 1er ciclo: setea el duty a probar y lo deja persistido en EEPROM,
+                # así TODO el bench (incluido este ciclo) usa ese duty. El firmware ya no
+                # reescribe si el valor no cambió, pero igual lo corremos una sola vez.
+                phase_config(ser, rid, args.drib_on, args.drib_off, args.drib_wdt)
             if not args.skip_motor:
                 phase_robots(ser, rid)
                 phase_combo(ser, rid)
             if not args.skip_tablero:
                 phase_tablero(ser)
-            if cycle == 1:
-                # Solo una vez por corrida: cada 'C' reescribe EEPROM y no queremos
-                # desgastarla en un bench que corre en bucle. Re-ejecutá el script para repetir.
-                phase_config(ser, rid)
             phase_telemetry(ser, rid)
             print("\n... (pausa 3s antes del próximo ciclo; Ctrl+C para terminar)")
             time.sleep(3.0)
