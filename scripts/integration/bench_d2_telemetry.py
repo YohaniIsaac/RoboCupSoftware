@@ -74,6 +74,21 @@ def phase_robots(ser: serial.Serial, rid: int) -> None:
     send(ser, f"D,{rid},0", "dribbler OFF")     # apagado explícito e inmediato
 
 
+def phase_combo(ser: serial.Serial, rid: int) -> None:
+    print("\n=== FASE 1b: MOTOR + DRIBBLER SIMULTÁNEOS ===")
+    print("    El robot debe AVANZAR y mover el RODILLO A LA VEZ (ambos watchdogs vivos).")
+    # Intercalar M y D en el mismo loop de refresco: no hay un paquete que mande ambos, se
+    # refrescan los dos < su watchdog (motor 100ms, dribbler 150ms) y el firmware corre los dos.
+    t_end = time.time() + 2.5
+    print(f"> HOLD M,{rid},45,45 + D,{rid},50  (2.5s, cada 50ms)")
+    while time.time() < t_end:
+        ser.write((f"M,{rid},45,45\n").encode())
+        ser.write((f"D,{rid},50\n").encode())
+        time.sleep(0.05)
+    send(ser, f"M,{rid},0,0", "stop")
+    send(ser, f"D,{rid},0", "dribbler OFF")
+
+
 def phase_tablero(ser: serial.Serial) -> None:
     print("\n=== FASE 2: TABLERO (toggle DPL — lo crítico) ===")
     print("    Mirá el MARCADOR: debe registrar goles, pausa y resets.")
@@ -124,6 +139,7 @@ def main() -> None:
             print(f"\n########################  CICLO {cycle}  ########################")
             if not args.skip_motor:
                 phase_robots(ser, rid)
+                phase_combo(ser, rid)
             if not args.skip_tablero:
                 phase_tablero(ser)
             phase_telemetry(ser, rid)
