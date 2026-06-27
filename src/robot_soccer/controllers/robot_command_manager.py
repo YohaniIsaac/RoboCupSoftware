@@ -21,6 +21,8 @@ from robot_soccer.config import (
     RRT_OBSTACLE_MOVE_PX,
     RRT_HOLD_REPLAN_PERIOD_S,
     RRT_WAITING_GOAL_CLEAR_TIMEOUT_S,
+    RRT_MAX_PLAN_FAILURES,
+    RRT_NO_ROUTE_RELEASE_S,
     ROTATE_RECOMMAND_MIN_DEG,
     ROBOT_DETECTION_LOST_RAMPDOWN_S,
     ROBOT_MAX_LINEAR_SPEED,
@@ -133,6 +135,8 @@ class RobotCommandManager:
         self._path_projected: dict = {}  # player_id → bool: path termina antes del goal real
         self._waiting_goal_clear: dict = {}  # player_id → True: goal bloqueado, sosteniendo posición
         self._waiting_since: dict = {}  # player_id → float: t en que empezó a esperar goal despejado
+        self._plan_fail_count: dict = {}  # player_id → int: planificaciones descartadas consecutivas
+        self._no_route_since: dict = {}  # player_id → float: t en que entró a hold por sin-ruta
         self._last_sent_pos:  dict = {}  # player_id → (x,y)
         self._last_sent_goal: dict = {}  # player_id → (x,y)
         self._last_replan_t:  dict = {}  # player_id → float timestamp
@@ -310,6 +314,13 @@ class RobotCommandManager:
                             result_goal = result.get('goal') or (0, 0)
                             goal_drift  = math.hypot(result_goal[0] - goal[0],
                                                      result_goal[1] - goal[1])
+                            # Planner sin ruta segura (descarte/sin-ruta): contar fallos
+                            # consecutivos PARA EL GOAL ACTUAL. Tras N (ver bloque 3) el robot
+                            # se detiene en vez de seguir el path obsoleto hacia un obstáculo.
+                            # new_path viene vacío en este caso → no entra a la adopción.
+                            if result.get('failed') and goal_drift < RRT_WAYPOINT_ARRIVAL_PX * 2:
+                                self._plan_fail_count[player_id] = (
+                                    self._plan_fail_count.get(player_id, 0) + 1)
                             # Bug 3: comparación fuzzy (tolerancia 2×ARRIVAL) en vez de igualdad exacta.
                             # Permite adoptar paths planificados para un goal cercano al actual.
                             if new_path and goal_drift < RRT_WAYPOINT_ARRIVAL_PX * 2:
@@ -338,6 +349,8 @@ class RobotCommandManager:
                                     self._path_projected[player_id] = result.get('projected', False)
                                     self._waiting_goal_clear.pop(player_id, None)
                                     self._waiting_since.pop(player_id, None)
+                                    self._plan_fail_count[player_id] = 0  # ruta válida: sale del hold sin-ruta
+                                    self._no_route_since.pop(player_id, None)
                                     self.controllers[player_id]._pid_state.pop(player_id, None)
                                     log.info("R%d: path adoptado %d wp (desde idx %d)%s",
                                              player_id, len(new_path), wp_idx,
@@ -378,10 +391,13 @@ class RobotCommandManager:
                                 if now - self._last_replan_t.get(player_id, 0) >= _replan_cd:
                                     need_replan = True   # pelota se movió significativamente
 
-                        # Goal bloqueado por obstáculo: replan periódico aunque nada
-                        # se mueva, para detectar cuándo el bloqueador despeja el goal.
+                        # Goal bloqueado / sin ruta segura: replan periódico aunque nada
+                        # se mueva, para detectar cuándo se despeja (el bloqueador del goal
+                        # o la congestión que descarta la ruta). Sin esto, un robot detenido
+                        # no genera triggers de replan y no podría recuperarse.
                         if (not need_replan
-                                and self._waiting_goal_clear.get(player_id)
+                                and (self._waiting_goal_clear.get(player_id)
+                                     or self._plan_fail_count.get(player_id, 0) > 0)
                                 and now - self._last_replan_t.get(player_id, 0)
                                 >= RRT_HOLD_REPLAN_PERIOD_S):
                             need_replan = True
@@ -417,7 +433,30 @@ class RobotCommandManager:
                         path   = self._current_paths.get(player_id, [])
                         wp_idx = self._current_wp_idx.get(player_id, 0)
 
-                        if path and wp_idx < len(path):
+                        if self._plan_fail_count.get(player_id, 0) >= RRT_MAX_PLAN_FAILURES:
+                            # Sin ruta segura: el planner descartó la ruta N veces seguidas
+                            # (start/goal atrapados en obstáculo inflado, congestión). Detener
+                            # en vez de seguir el path obsoleto hacia un obstáculo (evita el
+                            # choque observado). Se anula el boost anti-atasco al mandar (0,0)
+                            # (es aditivo con signo del PWM). Sigue replanificando (bloque 2);
+                            # una adopción válida resetea el contador y reanuda. Tras
+                            # RRT_NO_ROUTE_RELEASE_S sin éxito, suelta la acción al BT.
+                            self._current_paths.pop(player_id, None)   # no reanudar la ruta mala
+                            self._current_wp_idx.pop(player_id, None)
+                            started = self._no_route_since.setdefault(player_id, now)
+                            if self.rf_controller:
+                                self.rf_controller.set_motors(player.id + 1, 0, 0)
+                            if now - started > RRT_NO_ROUTE_RELEASE_S:
+                                self._no_route_since.pop(player_id, None)
+                                self._plan_fail_count[player_id] = 0
+                                self._last_sent_goal.pop(player_id, None)  # forzar replan limpio
+                                self.actions_in_progress.pop(player_id, None)
+                                log.warning("R%d: sin ruta segura >%.1fs → soltando acción "
+                                            "(BT reevaluará)", player_id, RRT_NO_ROUTE_RELEASE_S)
+                            else:
+                                log.debug("R%d: sin ruta segura (%d descartes) — detenido",
+                                          player_id, self._plan_fail_count.get(player_id, 0))
+                        elif path and wp_idx < len(path):
                             # Seguir waypoint activo del path planificado.
                             # En el último wp se aplica el umbral efectivo (arrival_threshold);
                             # en los intermedios se mantiene RRT_WAYPOINT_ARRIVAL_PX.
@@ -656,6 +695,10 @@ class RobotCommandManager:
             # La espera y el flag de proyección pertenecen al goal anterior
             self._waiting_goal_clear.pop(player_id, None)
             self._path_projected.pop(player_id, None)
+            # Goal nuevo: arrancar con cuenta de fallos limpia (los descartes eran del
+            # goal anterior) y salir de cualquier hold sin-ruta pendiente.
+            self._plan_fail_count.pop(player_id, None)
+            self._no_route_since.pop(player_id, None)
 
         if direct:
             # Modo directo: descartar cualquier path/hold del planner para que el
@@ -664,6 +707,8 @@ class RobotCommandManager:
             self._current_wp_idx.pop(player_id, None)
             self._waiting_goal_clear.pop(player_id, None)
             self._path_projected.pop(player_id, None)
+            self._plan_fail_count.pop(player_id, None)
+            self._no_route_since.pop(player_id, None)
 
         self.actions_in_progress[player_id] = {
             'type': 'move',

@@ -12,6 +12,8 @@ from robot_soccer.config import (
     BT_ROLE_SWITCH_HYSTERESIS,
     BT_ROLE_COMMITMENT_RATIO,
     BT_ROLE_SWITCH_COOLDOWN_S,
+    ROLE_STEAL_ABSOLUTE_PX,
+    ROLE_STEAL_ATTACKER_MIN_PX,
     DRIBBLER_DISABLED_ROLE_PENALTY,
     is_dribbler_enabled,
 )
@@ -102,9 +104,13 @@ class BehaviorManager:
 
         Reglas en orden de prioridad:
         1. Posesión: si un robot tiene la pelota, es ATACANTE inmediato (sin cooldown).
+        1.5. Proximidad absoluta: si la pelota está libre y un defensor está a
+           <ROLE_STEAL_ABSOLUTE_PX mientras el atacante actual está a
+           >ROLE_STEAL_ATTACKER_MIN_PX, el defensor roba el rol (sin cooldown).
         2. Cooldown: si pasó menos de BT_ROLE_SWITCH_COOLDOWN_S desde el último switch, no cambiar.
         3. Commitment: si el atacante está a <BT_ROLE_COMMITMENT_RATIO del campo de la pelota,
-           está en su secuencia de aproximación — no interrumpir.
+           está en su secuencia de aproximación — no interrumpir. Excepción: si el atacante
+           CEDIÓ la pelota (_yielding_to_rival), su cercanía no blinda su rol.
         4. Histéresis: solo cambiar si el defensor es ×BT_ROLE_SWITCH_HYSTERESIS más cercano
            que el atacante actual.
         """
@@ -121,6 +127,30 @@ class BehaviorManager:
                     self._do_role_switch(p.id, now)
                 return
 
+        # Regla 1.5: override por proximidad absoluta a pelota libre.
+        # Una pelota pegada a un defensor no debe quedar abandonada porque el atacante
+        # actual cedió o está lejos. Salta cooldown/commitment/penalty/histéresis; la
+        # banda ROLE_STEAL_ABSOLUTE_PX/ATTACKER_MIN_PX da histéresis anti-oscilación.
+        # (Tras la Regla 1 ningún COMPAÑERO posee la pelota; basta verificar rivales.)
+        ball_free = not any(o.has_ball() for o in self.opponents)
+        if ball_free:
+            attacker = next((p for p in self.team_players if p.rol == ROL_ATACANTE), None)
+            attacker_d = float(attacker.distance_to_ball(self.ball)) if attacker else 0.0
+            if attacker is not None and attacker_d > ROLE_STEAL_ATTACKER_MIN_PX:
+                nearest_def = min(
+                    (p for p in self.team_players if p.rol != ROL_ATACANTE),
+                    key=lambda p: p.distance_to_ball(self.ball),
+                    default=None,
+                )
+                if nearest_def is not None:
+                    def_dist = float(nearest_def.distance_to_ball(self.ball))
+                    if def_dist < ROLE_STEAL_ABSOLUTE_PX:
+                        log.info("ROL SWITCH (proximidad absoluta): R%d a %.0fpx roba "
+                                 "el rol a R%d (a %.0fpx) — pelota libre",
+                                 nearest_def.id, def_dist, attacker.id, attacker_d)
+                        self._do_role_switch(nearest_def.id, now)
+                        return
+
         # Regla 2: cooldown general
         if now - self._role_last_switch_t < BT_ROLE_SWITCH_COOLDOWN_S:
             return
@@ -134,9 +164,15 @@ class BehaviorManager:
 
         attacker_dist = float(current_attacker.distance_to_ball(self.ball))
 
-        # Regla 3: commitment zone — atacante en secuencia de aproximación
+        # Regla 3: commitment zone — atacante en secuencia de aproximación.
+        # Excepción: si el atacante CEDIÓ la pelota a un rival (_yielding_to_rival, lo
+        # setea should_yield_to_rival en el tick previo), NO está aproximándose; su
+        # cercanía no debe blindar su rol, o un defensor mucho más cercano nunca lo
+        # reemplaza (deadlock observado en 2v2: atacante cedido parado junto a la pelota).
         commitment_px = self.field.ratio_to_px(BT_ROLE_COMMITMENT_RATIO)
-        if attacker_dist < commitment_px:
+        attacker_bb = self.blackboards.get(current_attacker.id)
+        attacker_yielding = bool(getattr(attacker_bb, '_yielding_to_rival', False))
+        if attacker_dist < commitment_px and not attacker_yielding:
             return
 
         # Regla 4: histéresis — buscar defensor significativamente más cercano. Usa distancia

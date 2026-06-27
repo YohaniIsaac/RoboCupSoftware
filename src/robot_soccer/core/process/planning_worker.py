@@ -23,6 +23,24 @@ from robot_soccer.config import (
 log = logging.getLogger(__name__)
 
 
+def _emit_failure(path_queue, goal_pos):
+    """Señala al caller que la planificación falló (sin ruta segura al goal).
+
+    El RobotCommandManager cuenta fallos consecutivos y, tras N, detiene el robot en
+    vez de seguir un path obsoleto hacia un obstáculo. Drena la cola (maxsize=1) antes
+    de poner, igual que el camino de éxito, para no bloquear ni coexistir con un path.
+    Envía el goal ORIGINAL para que el caller lo asocie a su request.
+    """
+    try:
+        path_queue.get_nowait()
+    except Exception:
+        pass
+    try:
+        path_queue.put_nowait({'path': [], 'goal': tuple(goal_pos), 'failed': True})
+    except Exception:
+        pass  # cola llena por race condition — el proceso no debe morir
+
+
 def _release_start(robot_pos, obstacles, clearance, margin):
     """Encoge (o descarta) obstáculos cuyo radio inflado contiene al start.
 
@@ -167,6 +185,7 @@ def planning_worker(ctrl_pipe, path_queue, clearance=None):
                     log.warning("Path RRT* descartado: ultimo wp %s a %.0fpx "
                                 "del goal %s (>%dpx)", path[-1], last_wp_to_goal,
                                 plan_goal, arrival_px)
+                    _emit_failure(path_queue, goal_pos)
                     continue
                 log.info("Path encontrado: %d wp en %.2fs", len(path), elapsed)
                 try:
@@ -182,6 +201,7 @@ def planning_worker(ctrl_pipe, path_queue, clearance=None):
                     pass  # cola llena por race condition — el proceso no debe morir
             else:
                 log.warning("RRT* no encontro ruta en %.2fs", elapsed)
+                _emit_failure(path_queue, goal_pos)
 
     except KeyboardInterrupt:
         pass

@@ -191,6 +191,16 @@ BT_ROLE_SWITCH_HYSTERESIS  = 1.5   # El rival debe ser ×1.5 más cercano para r
 BT_ROLE_COMMITMENT_RATIO   = 0.23  # ratio → ~147px: si atacante está a <N px no se cambia rol
 BT_ROLE_SWITCH_COOLDOWN_S  = 3.0   # s — tiempo mínimo entre cambios de rol
 
+# Override por proximidad absoluta a pelota libre (red de seguridad del arbitraje).
+# Si NINGÚN robot posee la pelota y un defensor está pegado a ella
+# (< ROLE_STEAL_ABSOLUTE_PX) mientras el atacante actual está lejos
+# (> ROLE_STEAL_ATTACKER_MIN_PX), el defensor roba el rol de inmediato, saltando
+# cooldown/commitment/penalty/histéresis. Anclado a distancia física (no ratio): una
+# pelota al alcance de un defensor no debe quedar abandonada por un atacante lejano o
+# que cedió. La banda 70/90 da histéresis anti-oscilación (separación mínima de 20px).
+ROLE_STEAL_ABSOLUTE_PX     = 70    # px — defensor debe estar más cerca que esto para robar
+ROLE_STEAL_ATTACKER_MIN_PX = 90    # px — y el atacante actual más lejos que esto; si no, se conserva
+
 # Cesión inter-equipo en 2v2: el atacante deja de ir a la pelota y se posiciona
 # como interceptor cuando el rival tiene ventaja clara para llegar primero.
 # Score por jugador = dist_to_ball + K_ANGLE_PX_PER_DEG * |heading_error_deg|.
@@ -279,6 +289,14 @@ RRT_REPLAN_COOLDOWN_S    = 0.5   # s  — tiempo mínimo entre replans por posic
                                   #  los obstáculos se movían ~160px antes del replan → colisión)
 RRT_OBSTACLE_MOVE_PX     = 25    # px — trigger replan si un obstáculo se mueve >N px
                                   # (bajado de 40→25: detectar movimiento antes de que el path quede inválido)
+
+# --- Sin ruta segura: detener antes de embestir siguiendo un path obsoleto ---
+# Cuando el planner descarta la ruta N veces seguidas (start/goal atrapados en un
+# obstáculo inflado, congestión), el robot detiene motores en vez de seguir el último
+# path válido hacia un obstáculo. Sigue replanificando; una ruta válida reanuda. Tras
+# RRT_NO_ROUTE_RELEASE_S sin éxito, suelta la acción para que el BT reevalúe.
+RRT_MAX_PLAN_FAILURES  = 3     # planificaciones descartadas consecutivas antes de detener
+RRT_NO_ROUTE_RELEASE_S = 3.0   # s — sin ruta segura este tiempo → soltar acción al BT
 
 # --- Goals/starts degenerados (dentro de un obstáculo inflado) ---
 # Si el goal solicitado cae dentro del radio inflado de un obstáculo (otro robot
