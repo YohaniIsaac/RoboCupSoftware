@@ -763,19 +763,6 @@ DRIBBLER_CAPTURE_POWER = 50  # PWM para atrapar pelota (0-255 directo)
 # Reducida para bajar consumo. NO se usa rotando con la pelota (dribbler off al rotar).
 DRIBBLER_HOLD_POWER = 30  # PWM reducido para sostener pelota (0-255 directo)
 
-# Dribbler CASI CONTINUO durante captura/sostén: pulso ON largo + OFF muy corto. El rodillo
-# gira de forma efectivamente continua (la ventana OFF, ~20ms cada ~0.32s, es imperceptible
-# y casi nunca coincide con el breve instante de contacto), conservando un respiro térmico
-# periódico. Motivación: con el pulsado 80/20 anterior la pelota rebotaba en el rodillo
-# durante las ventanas OFF al llegar al contacto; alargar ON las hace raras.
-# El limitador de corriente PRINCIPAL es el PWM bajo (DRIBBLER_CAPTURE/HOLD_POWER ≈20% de
-# 255), NO el pulsado — por eso pocas transiciones (menos picos de inrush) es seguro. El
-# pulsado solo aporta un respiro térmico en stall sostenido. OFF=0 daría 100% continuo (lo
-# soporta _pulse_dribbler); se deja un OFF mínimo por el historial de quemado. El keepalive
-# interno (DRIBBLER_KEEPALIVE=80ms < watchdog firmware 100ms) refresca dentro del ON largo.
-DRIBBLER_PULSE_ON_MS = 300  # ms — pulso encendido largo (keepalive interno cada 80ms)
-DRIBBLER_PULSE_OFF_MS = 20  # ms — respiro térmico mínimo, imperceptible (0 = 100% continuo)
-
 # Config de oscilación del dribbler que vive en el FIRMWARE (módulo dribbler + EEPROM). Python
 # la envía al inicio de sesión (comando 'C') y el robot oscila el rodillo con este duty de forma
 # autónoma; Python ya NO oscila. duty = ON/(ON+OFF). wdt: sin refresco 'D' por este tiempo el
