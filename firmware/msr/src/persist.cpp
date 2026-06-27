@@ -22,6 +22,11 @@ void persistLoad(PersistCfg& cfg) {
 void persistSaveDebug(uint8_t dbgLevel) {
   PersistCfg cfg;
   EEPROM.get(EE_ADDR, cfg);   // conservar magic/version/dribbler
+  // Escribir solo si cambió: si el bloque ya es válido y el nivel coincide, no tocar la EEPROM.
+  if (cfg.magic == PERSIST_MAGIC && cfg.version == PERSIST_VERSION
+      && cfg.dbgLevel == dbgLevel) {
+    return;
+  }
   cfg.magic    = PERSIST_MAGIC;
   cfg.version  = PERSIST_VERSION;
   cfg.dbgLevel = dbgLevel;
@@ -31,6 +36,14 @@ void persistSaveDebug(uint8_t dbgLevel) {
 void persistSaveDribbler(const DribblerCfg& drib) {
   PersistCfg cfg;
   EEPROM.get(EE_ADDR, cfg);   // conservar magic/version/otros campos
+  // Escribir solo si la config entrante difiere de la guardada (y el bloque es válido).
+  // EEPROM.put ya hace update por byte, pero este guard evita hasta el recorrido de
+  // comparación y deja explícita la intención de "no reescribir si no cambió nada".
+  if (cfg.magic == PERSIST_MAGIC && cfg.version == PERSIST_VERSION
+      && cfg.drib.onMs == drib.onMs && cfg.drib.offMs == drib.offMs
+      && cfg.drib.wdtMs == drib.wdtMs) {
+    return;
+  }
   cfg.magic   = PERSIST_MAGIC;
   cfg.version = PERSIST_VERSION;
   cfg.drib    = drib;
