@@ -94,10 +94,16 @@ void loop() {
       }
       case 'C': {  // Config dribbler en runtime: data[2]=onMs, data[3]=offMs, data[4]=wdtMs
         DribblerCfg cfg = { data[2], data[3], data[4] };
-        dribblerSetConfig(cfg);
-        telemetryConfig(cfg);
-        persistSaveDribbler(cfg);    // persiste en EEPROM
+        persistSaveDribbler(cfg);    // escribe EEPROM
+        // Releer de EEPROM y aplicar lo que QUEDÓ guardado (= lo que el firmware va a usar),
+        // reflejarlo en la telemetría y RESPONDER SIEMPRE (aunque el nivel sea 0): confirma el
+        // round-trip de la config al host.
+        PersistCfg pc;
+        persistLoad(pc);
+        dribblerSetConfig(pc.drib);
+        telemetryConfig(pc.drib);
         telemetrySetEvent(DBG_EV_CONFIG);
+        telemetryForcePending();
         break;
       }
       case 'G': {  // Debug/telemetría: data[2]=nivel (0=partido,1=eventos,2=verbose). Persiste.

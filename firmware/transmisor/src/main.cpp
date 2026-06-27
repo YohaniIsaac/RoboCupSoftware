@@ -277,6 +277,10 @@ void loop() {
         } else {
           Serial.println("ERROR: Fallo al transmitir");
         }
+        // Confirmación de config: la telemetría del 'C' viaja en el ACK del SIGUIENTE paquete;
+        // mandar un '?' para traerla → el robot confirma los valores que guardó/usará.
+        uint8_t q[5] = {'?', cfgCmd.robotId, 0, 0, 0};
+        radio.write(&q, sizeof(q));
         readAckTelemetry(cfgCmd.robotId);
         break;
       }
