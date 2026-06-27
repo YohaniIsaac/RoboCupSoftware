@@ -36,8 +36,10 @@ _EVENT  = re.compile(r"\[EVENT\s*\]\s*R(\d+)\s*\|\s*(.*)$")
 _STATUS = re.compile(r"\[STATUS\]\s*R(\d+)\s*\|\s*(.*)$")
 
 _CONTACT   = re.compile(r"CONTACTO(?:\s+INMEDIATO)?:\s*L=([\d.]+)px\s+D=([\d.]+)px")
-_OVERSHOOT = re.compile(r"OVERSHOOT OK:\s*avance=([\d.]+)px")
-_STALL     = re.compile(r"EMPUJE TRABADO:\s*avance=([\d.]+)px")
+_CONFIRMED = re.compile(r"POSESION CONFIRMADA:\s*L=([\d.]+)px\s+D=([\d.]+)px\s+held=([\d.]+)s")
+_LOST      = re.compile(r"EMPUJE PELOTA SE FUE:\s*db=([\d.]+)")
+_OVERSHOOT = re.compile(r"OVERSHOOT OK:\s*avance=([\d.]+)px")   # logs previos al criterio de posesión
+_STALL     = re.compile(r"EMPUJE TRABADO:\s*avance=([\d.]+)px")  # logs previos al criterio de posesión
 _SETTLE_OK = re.compile(r"ASENTAMIENTO OK:\s*t=([\d.]+)s\s+L=([\d.]+)px\s+D=([\d.]+)px")
 _KICK      = re.compile(r"KICK SOLENOIDE")
 _ESCAPE    = re.compile(r"PELOTA ESCAPO[^:]*:\s*dist=([\d.]+)")
@@ -130,6 +132,15 @@ def parse_lines(lines, db_threshold=DEFAULT_DB_THRESHOLD) -> list[dict]:
             if rid not in open_ep:
                 continue
             open_ep[rid]["events"].append(msg.strip())
+            m = _CONFIRMED.search(msg)
+            if m:
+                open_ep[rid]["push"] = {"end": "posesion_confirmada", "L": float(m.group(1)),
+                                        "D": float(m.group(2)), "held": float(m.group(3))}
+                continue
+            m = _LOST.search(msg)
+            if m:
+                _close(rid, "se_fue", t_sec, dist_final=float(m.group(1)))
+                continue
             m = _OVERSHOOT.search(msg)
             if m:
                 open_ep[rid]["push"] = {"end": "overshoot_ok", "avance": float(m.group(1))}
