@@ -49,8 +49,8 @@
 // continuo se quema). duty = on/(on+off). Watchdog propio: si Python deja de refrescar el
 // comando 'D' por DRIBBLER_DEFAULT_WDT_MS, el rodillo se apaga (fail-safe). Estos son DEFAULTS;
 // la config real vive en EEPROM (persist.*) y se puede cambiar en runtime con el comando 'C'.
-#define DRIBBLER_DEFAULT_ON_MS   65   // ms — fase encendida
-#define DRIBBLER_DEFAULT_OFF_MS  15   // ms — fase apagada (duty 65/80 = 81%)
+#define DRIBBLER_DEFAULT_ON_MS   60   // ms — fase encendida
+#define DRIBBLER_DEFAULT_OFF_MS  20   // ms — fase apagada (duty 60/80 = 75%)
 #define DRIBBLER_DEFAULT_WDT_MS  150  // ms — sin refresco 'D' por este tiempo → apagar
 
 // Persistencia EEPROM (persist.*): marca de validez para no leer basura (0xFF) de una EEPROM

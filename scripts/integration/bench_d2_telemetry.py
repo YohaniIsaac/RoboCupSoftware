@@ -133,8 +133,8 @@ def main() -> None:
     ap.add_argument("--robot-id", type=int, default=1, help="ID de robot (1-4).")
     ap.add_argument("--skip-motor", action="store_true", help="No mover el robot (fase 1).")
     ap.add_argument("--skip-tablero", action="store_true", help="No tocar el marcador (fase 2).")
-    ap.add_argument("--drib-on", type=int, default=50, help="Dribbler ON ms a persistir (duty a probar).")
-    ap.add_argument("--drib-off", type=int, default=30, help="Dribbler OFF ms a persistir (duty a probar).")
+    ap.add_argument("--drib-on", type=int, default=60, help="Dribbler ON ms a persistir (duty a probar).")
+    ap.add_argument("--drib-off", type=int, default=20, help="Dribbler OFF ms a persistir (duty a probar).")
     ap.add_argument("--drib-wdt", type=int, default=150, help="Dribbler watchdog ms a persistir.")
     args = ap.parse_args()
     rid = args.robot_id
