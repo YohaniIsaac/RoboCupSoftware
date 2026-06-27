@@ -35,6 +35,8 @@ from robot_soccer.config import (
     CONTACT_POSSESSION_CONFIRM_S,
     CONTACT_POSSESSION_LOST_PX,
     SHOT_CONE_SAFETY_MARGIN_DEG,
+    SHOT_AIM_ABORT_MARGIN_DEG,
+    SHOT_AIM_LOST_HOLD_S,
     KICK_POINT_TOLERANCE_PX,
     CONTACT_REACH_MARGIN_PX,
     CONTACT_REACH_MARGIN_HOLD_PX,
@@ -1442,8 +1444,11 @@ def _shot_aim_ok(blackboard, player_pos, ball_pos):
     (¿la pelota está en el morro?). Ambas son necesarias para un disparo útil.
 
     Returns:
-        (in_cone, aim_deg, slack_deg): tiro válido (bool), dirección de disparo (°), y la
-        holgura al borde más cercano del cono (>0 dentro, <0 fuera) — para histéresis y medición.
+        (in_cone, aim_deg, slack_deg):
+          slack_deg = holgura al borde del cono REAL (postes): >0 dentro, <0 fuera. Es la base
+            del ABORTO (cancelar solo si slack < -SHOT_AIM_ABORT_MARGIN_DEG, claramente fuera).
+          in_cone   = dentro del cono CON margen de puntería (slack >= SHOT_CONE_SAFETY_MARGIN_DEG):
+            "buena puntería". Lo usará el approach (paso 3); no es el umbral de aborto.
     """
     f      = blackboard.field
     goal   = np.asarray(blackboard.opponent_goal_pos, dtype=float)
@@ -1460,12 +1465,30 @@ def _shot_aim_ok(blackboard, player_pos, ball_pos):
     # Ángulos a los postes vistos DESDE la pelota.
     a1 = float(np.degrees(np.arctan2(ty - ball[1], gx - ball[0])))
     a2 = float(np.degrees(np.arctan2(by - ball[1], gx - ball[0])))
-    diff     = ((a2 - a1 + 180.0) % 360.0) - 180.0   # a2-a1 normalizado a (-180,180]
-    center   = a1 + diff / 2.0                        # bisectriz del cono
-    half_eff = abs(diff) / 2.0 - SHOT_CONE_SAFETY_MARGIN_DEG  # semi-ancho útil (encogido)
-    d        = abs(((aim_deg - center + 180.0) % 360.0) - 180.0)  # |aim − bisectriz|
-    slack    = half_eff - d
-    return (slack >= 0.0), aim_deg, float(slack)
+    diff   = ((a2 - a1 + 180.0) % 360.0) - 180.0     # a2-a1 normalizado a (-180,180]
+    center = a1 + diff / 2.0                          # bisectriz del cono
+    half   = abs(diff) / 2.0                          # semi-ancho del cono REAL (postes)
+    d      = abs(((aim_deg - center + 180.0) % 360.0) - 180.0)  # |aim − bisectriz|
+    slack  = half - d                                 # holgura al poste real
+    in_cone = slack >= SHOT_CONE_SAFETY_MARGIN_DEG     # dentro con margen (puntería holgada)
+    return bool(in_cone), aim_deg, float(slack)
+
+
+def _aim_shot_lost(blackboard, player_pos, ball_pos, now):
+    """True si el tiro está CLARAMENTE fuera del arco de forma SOSTENIDA (histéresis).
+
+    Permisivo a propósito (ver SHOT_AIM_ABORT_MARGIN_DEG): un tiro al borde o levemente fuera se
+    intenta igual; solo se da por perdido cuando slack < -SHOT_AIM_ABORT_MARGIN_DEG durante
+    SHOT_AIM_LOST_HOLD_S continuos. La histéresis filtra el jitter de ArUco (~±5° a corta dist).
+    Devuelve (lost, slack) — slack para logging.
+    """
+    _, _aim, slack = _shot_aim_ok(blackboard, player_pos, ball_pos)
+    if slack < -SHOT_AIM_ABORT_MARGIN_DEG:
+        if getattr(blackboard, '_aim_lost_start', None) is None:
+            blackboard._aim_lost_start = now
+        return (now - blackboard._aim_lost_start) >= SHOT_AIM_LOST_HOLD_S, slack
+    blackboard._aim_lost_start = None
+    return False, slack
 
 
 def _clear_advance_state(blackboard, player_id):
@@ -2072,6 +2095,20 @@ def _advance_overshoot_push(blackboard, player_id, player_pos):
         )
         return NodeStatus.FAILURE
 
+    # ¿El tiro quedó CLARAMENTE fuera del arco, sostenido? Capturar aquí daría un disparo perdido:
+    # mejor re-perseguir/re-armar la línea. Permisivo (solo certeza de fallo) + histéresis (jitter).
+    aim_lost, _slack = _aim_shot_lost(blackboard, player_pos, ball_pos, now)
+    if aim_lost:
+        _clear_advance_state(blackboard, player_id)
+        blackboard._overshoot_pushing     = False
+        blackboard._possession_hold_start = None
+        blackboard.player._has_ball       = False
+        robot_status_logger.emit_event(
+            player_id,
+            f"advance_contact EMPUJE TIRO FUERA: slack={_slack:.0f}° ({SHOT_AIM_LOST_HOLD_S:.1f}s) -> re-perseguir"
+        )
+        return NodeStatus.FAILURE
+
     # ¿Pegada y centrada? (gate direccional). Acumula posesión sostenida; si se descentra (sin
     # pasar el umbral de pérdida) reinicia el cronómetro y sigue empujando para re-cerrar.
     contact_ok, _L, _D = _kick_contact(player_pos, blackboard.player.angle, ball_pos)
@@ -2146,6 +2183,7 @@ def _advance_to_contact_start(blackboard):
     blackboard._rival_contact_start  = None
     blackboard._overshoot_pushing        = False
     blackboard._possession_hold_start    = None
+    blackboard._aim_lost_start           = None
 
     # Guardar timestamp y ángulo inicial para timeout y detección de deriva
     blackboard._advance_start_time      = time.time()
@@ -2458,6 +2496,17 @@ def _advance_to_contact_running(blackboard):
     # ──────────────────────────────
     # FASE 2: Asentamiento (robot quieto)
     # ──────────────────────────────
+    # Tiro claramente fuera del arco (sostenido) durante el asentamiento → re-stage TEMPRANO,
+    # sin esperar a cerrar el asentamiento: la pelota se descentró fuera de toda línea de tiro.
+    aim_lost, _slack = _aim_shot_lost(blackboard, player_pos, ball_pos, time.time())
+    if aim_lost:
+        blackboard.player._has_ball = False
+        robot_status_logger.emit_event(
+            player_id,
+            f"advance_contact ASENTAMIENTO TIRO FUERA: slack={_slack:.0f}° -> re-stage"
+        )
+        return NodeStatus.FAILURE
+
     # Pelota escapó durante el asentamiento
     if dist > CAPTURE_CONFIRM_DISTANCE_PX * SETTLE_ESCAPE_FACTOR:
         blackboard.player._has_ball = False

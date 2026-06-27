@@ -640,11 +640,18 @@ CONTACT_POSSESSION_LOST_PX = 48     # px — db por encima del cual la pelota se
 
 # --- CONO DE TIRO al arco rival (el arco es un RANGO de líneas de tiro, no un punto) ---
 # La pelota sale en la dirección robot→pelota; para ser gol esa dirección (vista desde la
-# pelota) debe caer entre los dos postes del arco rival. El cono se ENCOGE este margen por
-# lado para cubrir la imprecisión del disparo. Se usa para decidir si la captura conduce a
-# un tiro válido (puntería), aparte del gate mecánico KICK_POINT_TOLERANCE_PX (la pelota en
-# el morro). Paso 1: solo se instrumenta (loggea) — no cambia comportamiento todavía.
-SHOT_CONE_SAFETY_MARGIN_DEG = 6.0   # ° — margen por lado que se resta al semi-ancho del cono
+# pelota) debe caer entre los dos postes del arco rival. _shot_aim_ok devuelve `slack` = holgura
+# al poste REAL (>0 dentro, <0 fuera) e `in_cone` = dentro CON este margen (puntería holgada).
+# Es la PUNTERÍA, aparte del gate mecánico KICK_POINT_TOLERANCE_PX (la pelota en el morro).
+SHOT_CONE_SAFETY_MARGIN_DEG = 6.0   # ° — margen de puntería holgada (in_cone). Lo usará el approach
+                                    #      (paso 3) para apuntar con holgura; el ABORTO usa lo de abajo.
+
+# Aborto por puntería durante captura/asentamiento: SOLO se cancela si el tiro está CLARAMENTE
+# fuera del arco (slack < -ABORT_MARGIN), de forma SOSTENIDA. Permisivo a propósito: un tiro al
+# borde o levemente fuera se intenta igual (el arco es un rango y vale el intento); solo se aborta
+# con certeza de fallo. La histéresis filtra el jitter de ArUco (~±5° en el aim a corta distancia).
+SHOT_AIM_ABORT_MARGIN_DEG = 6.0     # ° — grados FUERA del poste real para considerar el tiro perdido
+SHOT_AIM_LOST_HOLD_S = 0.4          # s  — el tiro debe estar perdido este tiempo continuo para abortar
 
 # --- Corrección de paralaje por altura del marker ---
 # El marker ArUco está elevado sobre el campo. Una cámara perspectiva desplaza
