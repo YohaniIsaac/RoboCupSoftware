@@ -38,6 +38,7 @@ _STATUS = re.compile(r"\[STATUS\]\s*R(\d+)\s*\|\s*(.*)$")
 _CONTACT   = re.compile(r"CONTACTO(?:\s+INMEDIATO)?:\s*L=([\d.]+)px\s+D=([\d.]+)px")
 _CONFIRMED = re.compile(r"POSESION CONFIRMADA:\s*L=([\d.]+)px\s+D=([\d.]+)px\s+held=([\d.]+)s")
 _LOST      = re.compile(r"EMPUJE PELOTA SE FUE:\s*db=([\d.]+)")
+_CONE      = re.compile(r"cono=(OK|FUERA)\(slack=([-\d.]+)")
 _OVERSHOOT = re.compile(r"OVERSHOOT OK:\s*avance=([\d.]+)px")   # logs previos al criterio de posesión
 _STALL     = re.compile(r"EMPUJE TRABADO:\s*avance=([\d.]+)px")  # logs previos al criterio de posesión
 _SETTLE_OK = re.compile(r"ASENTAMIENTO OK:\s*t=([\d.]+)s\s+L=([\d.]+)px\s+D=([\d.]+)px")
@@ -122,9 +123,12 @@ def parse_lines(lines, db_threshold=DEFAULT_DB_THRESHOLD) -> list[dict]:
                 # nuevo contacto: si había uno abierto sin desenlace, ciérralo como 'reabierto'
                 if rid in open_ep:
                     _close(rid, "reopened", t_sec)
+                _c = _CONE.search(msg)
                 open_ep[rid] = {
                     "robot": rid, "t_start_s": t_sec,
-                    "contact": {"L": float(m.group(1)), "D": float(m.group(2))},
+                    "contact": {"L": float(m.group(1)), "D": float(m.group(2)),
+                                "cone": _c.group(1) if _c else None,
+                                "slack": float(_c.group(2)) if _c else None},
                     "push": {"end": None, "avance": None},
                     "samples": [], "events": [msg.strip()],
                 }
@@ -134,8 +138,11 @@ def parse_lines(lines, db_threshold=DEFAULT_DB_THRESHOLD) -> list[dict]:
             open_ep[rid]["events"].append(msg.strip())
             m = _CONFIRMED.search(msg)
             if m:
+                _c = _CONE.search(msg)
                 open_ep[rid]["push"] = {"end": "posesion_confirmada", "L": float(m.group(1)),
-                                        "D": float(m.group(2)), "held": float(m.group(3))}
+                                        "D": float(m.group(2)), "held": float(m.group(3)),
+                                        "cone": _c.group(1) if _c else None,
+                                        "slack": float(_c.group(2)) if _c else None}
                 continue
             m = _LOST.search(msg)
             if m:
