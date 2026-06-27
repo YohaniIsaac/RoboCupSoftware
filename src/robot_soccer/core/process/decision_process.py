@@ -31,8 +31,9 @@ from robot_soccer.config import (
     CAPTURE_CONFIRM_DISTANCE_PX,
     DRIBBLER_CAPTURE_POWER,
     DRIBBLER_HOLD_POWER,
-    DRIBBLER_PULSE_ON_MS,
-    DRIBBLER_PULSE_OFF_MS,
+    DRIBBLER_FW_ON_MS,
+    DRIBBLER_FW_OFF_MS,
+    DRIBBLER_FW_WDT_MS,
     PATH_PLANNING_OBSTACLE_CLEARANCE,
     RESET_POS,
     RESET_MOVE_FACTOR,
@@ -66,80 +67,61 @@ _POSITIONING_ACTIONS = frozenset({
 })
 
 
-def _pulse_dribbler(rf, p, now, phase_d, timer_d, last_ka_d, prev_d, keepalive_s,
-                    positioning=False):
-    """Pulso keepalive del dribbler de un robot, con resguardo de corriente.
+def _pulse_dribbler(rf, p, now, last_ka_d, prev_d, keepalive_s, positioning=False):
+    """Refresca el ESTADO del dribbler de un robot (la oscilación on/off la hace el firmware).
 
-    Se engancha al AGARRAR (player._dribbler_on, durante el avance recto al contacto) o
-    al tener posesión (_has_ball): usa DRIBBLER_CAPTURE_POWER mientras agarra y
-    DRIBBLER_HOLD_POWER mientras sostiene. Refresca cada keepalive_s (< watchdog firmware
-    de 100ms) y pulsa ON/OFF (DRIBBLER_PULSE_ON/OFF_MS) para limitar la corriente media de
-    stall. set_dribbler ya recorta al cap blando DRIBBLER_MAX_PWM. NO se engancha durante
-    el posicionamiento/rotación (_dribbler_on se limpia allí).
+    Se engancha al AGARRAR (player._dribbler_on, durante el avance recto al contacto) o al
+    tener posesión (_has_ball): usa DRIBBLER_CAPTURE_POWER agarrando y DRIBBLER_HOLD_POWER
+    sosteniendo. Manda set_dribbler(power) a ritmo de keepalive_s mientras está enganchado
+    (refresca el watchdog PROPIO del firmware), y un set_dribbler(0) EXPLÍCITO una sola vez al
+    desenganchar (apagado inmediato, sin esperar el watchdog). Python ya NO oscila: el firmware
+    pulsa el rodillo con el duty configurado (comando 'C' / EEPROM). NO se engancha durante el
+    posicionamiento/rotación (_dribbler_on se limpia allí).
     """
     rid = p.id
     fw_id = rid + 1
     if not is_dribbler_enabled(rid):
-        # Dribbler averiado: nunca pulsar (proteger el componente). El robot captura igual por
+        # Dribbler averiado: nunca energizar (proteger el componente). El robot captura igual por
         # avance+asentamiento+kick. set_dribbler también lo gatea, esto evita RF/eventos inútiles.
         return
     has_ball = getattr(p, '_has_ball', False)
     grabbing = getattr(p, '_dribbler_on', False) and not has_ball
-    # positioning=True: el robot rodea/rota para posicionarse (no captura). Suprimir el
-    # rodillo aunque _has_ball esté enclavado: girar con la pelota descentrada en el morro
-    # la expulsa (lo que vaciaba la posesión contra el borde). Ver _POSITIONING_ACTIONS.
+    # positioning=True: el robot rodea/rota para posicionarse (no captura). Suprimir el rodillo
+    # aunque _has_ball esté enclavado: girar con la pelota descentrada en el morro la expulsa.
     engaged  = (has_ball or getattr(p, '_dribbler_on', False)) and not positioning
     power = DRIBBLER_CAPTURE_POWER if grabbing else DRIBBLER_HOLD_POWER
 
-    # Flanco de subida del enganche: reiniciar el ciclo de pulso. Eventos de flanco
-    # (baja frecuencia, solo en transiciones) para ver en el log cuándo y por qué el
-    # rodillo arranca/para — diagnóstico de captura (¿el dribbler estaba ON al contacto?).
+    # Flancos de enganche (baja frecuencia, solo en transiciones): log de diagnóstico + acción
+    # RF inmediata. En el flanco de BAJADA se manda set_dribbler(0) EXPLÍCITO — antes el apagado
+    # dependía del watchdog, que el tráfico de 'M' del giro mantenía vivo y NO apagaba el rodillo.
     if engaged and not prev_d.get(rid, False):
-        phase_d[rid] = 'on'
-        timer_d[rid] = now
         robot_status_logger.emit_event(
             rid, f"dribbler ON pwr={power} ({'captura' if grabbing else 'sosten'})")
+        rf.set_dribbler(fw_id, power)   # engancha de inmediato
+        last_ka_d[rid] = now
     elif not engaged and prev_d.get(rid, False):
         robot_status_logger.emit_event(rid, "dribbler OFF (fuera de enganche)")
+        rf.set_dribbler(fw_id, 0)       # apagado EXPLÍCITO e inmediato
     prev_d[rid] = engaged
 
     if not engaged:
         return
 
-    pulse_on_s  = DRIBBLER_PULSE_ON_MS  / 1000.0
-    pulse_off_s = DRIBBLER_PULSE_OFF_MS / 1000.0
-    if pulse_off_s <= 0:
-        # Modo continuo (sin pulsado macro)
-        if now - last_ka_d[rid] >= keepalive_s:
-            rf.set_dribbler(fw_id, power)
-            last_ka_d[rid] = now
-        return
-
-    phase_elapsed = now - timer_d[rid]
-    if phase_d[rid] == 'on':
-        if now - last_ka_d[rid] >= keepalive_s:
-            rf.set_dribbler(fw_id, power)
-            last_ka_d[rid] = now
-        if phase_elapsed >= pulse_on_s:
-            rf.set_dribbler(fw_id, 0)
-            phase_d[rid] = 'off'
-            timer_d[rid] = now
-    else:  # 'off'
-        if phase_elapsed >= pulse_off_s:
-            rf.set_dribbler(fw_id, power)
-            last_ka_d[rid] = now
-            phase_d[rid] = 'on'
-            timer_d[rid] = now
+    # Refresco del estado a ritmo de keepalive (alimenta el watchdog del firmware). NO oscila:
+    # manda siempre 'power' (el firmware decide la fase on/off). El cambio captura↔sostén viaja
+    # en el propio power.
+    if now - last_ka_d[rid] >= keepalive_s:
+        rf.set_dribbler(fw_id, power)
+        last_ka_d[rid] = now
 
 
-def _dribbler_view(p, phase_d, positioning=False):
+def _dribbler_view(p, positioning=False):
     """Estado del dribbler para el campo drb= del STATUS (snapshot a 2 Hz).
 
-    Lee los mismos flags que _pulse_dribbler: 'C{pwr}' agarrando (captura), 'H{pwr}'
-    sosteniendo (con pelota), 'off' enganchado pero en ventana de pulso apagado, None
-    desenganchado (rodillo parado). En modo continuo (DRIBBLER_PULSE_OFF_MS=0) la fase es
-    siempre 'on', así que muestra C/H mientras esté enganchado. Con positioning=True el
-    rodillo está suprimido (mismo gate que _pulse_dribbler) → reportar parado (None).
+    Nivel ENGANCHADO (la micro-fase on/off de la oscilación la maneja el firmware, Python no
+    la conoce): 'C{pwr}' agarrando (captura), 'H{pwr}' sosteniendo (con pelota), None
+    desenganchado (rodillo parado), 'avr' averiado. Con positioning=True el rodillo está
+    suprimido (mismo gate que _pulse_dribbler) → reportar parado (None).
     """
     if not is_dribbler_enabled(p.id):
         return 'avr'  # dribbler averiado (DRIBBLER_DISABLED_ROBOT_IDS): nunca se energiza
@@ -148,8 +130,6 @@ def _dribbler_view(p, phase_d, positioning=False):
     has_ball = getattr(p, '_has_ball', False)
     if not (has_ball or getattr(p, '_dribbler_on', False)):
         return None
-    if phase_d.get(p.id, 'on') == 'off':
-        return 'off'
     return f"H{DRIBBLER_HOLD_POWER}" if has_ball else f"C{DRIBBLER_CAPTURE_POWER}"
 
 
@@ -254,12 +234,17 @@ def decision_process(
     last_bt_tick = 0.0
     BT_TICK_INTERVAL = 0.1        # BT decide a 10 Hz
 
-    # Dribbler keepalive: estado independiente por robot
+    # Dribbler: refresco de estado por robot (la oscilación on/off la hace el firmware).
     last_dribbler_keepalive = {rid: 0.0 for rid in robot_ids}
-    DRIBBLER_KEEPALIVE = 0.08     # 80ms < timeout firmware (100ms)
-    dribbler_pulse_phase = {rid: 'on' for rid in robot_ids}
-    dribbler_pulse_timer = {rid: 0.0 for rid in robot_ids}
+    DRIBBLER_KEEPALIVE = 0.08     # 80ms — refresca el watchdog del firmware (wdt 150ms)
     prev_dribbler_engaged = {rid: False for rid in robot_ids}
+
+    # Enviar al firmware la config de oscilación del dribbler (persiste en EEPROM del robot).
+    _rf_cfg = behavior_manager.command_manager.rf_controller
+    if robot_available and _rf_cfg is not None:
+        for rid in robot_ids:
+            _rf_cfg.set_dribbler_config(
+                rid + 1, DRIBBLER_FW_ON_MS, DRIBBLER_FW_OFF_MS, DRIBBLER_FW_WDT_MS)
 
     prev_bt_action = None
     last_status_log = 0.0         # throttle de status (0.5 Hz → cada 2s)
@@ -425,8 +410,7 @@ def decision_process(
                 for p in behavior_manager.team_players:
                     _bb_p = behavior_manager.blackboards.get(p.id)
                     _positioning = bool(_bb_p and _bb_p.last_action in _POSITIONING_ACTIONS)
-                    _pulse_dribbler(rf, p, now, dribbler_pulse_phase,
-                                    dribbler_pulse_timer, last_dribbler_keepalive,
+                    _pulse_dribbler(rf, p, now, last_dribbler_keepalive,
                                     prev_dribbler_engaged, DRIBBLER_KEEPALIVE,
                                     positioning=_positioning)
 
@@ -523,8 +507,7 @@ def decision_process(
                             ball_dist=ball_dist_px if p.id == robot_id else None,
                             kick_lat=kick_lat_px if p.id == robot_id else None,
                             dribbler=_dribbler_view(
-                                p, dribbler_pulse_phase,
-                                positioning=bt_action_p in _POSITIONING_ACTIONS),
+                                p, positioning=bt_action_p in _POSITIONING_ACTIONS),
                             dist=dist_v,
                             rrt_len=rrt_len_p,
                             n_obs=n_obs_p,
@@ -755,6 +738,12 @@ def decision_process_2v2(
         return
     log.info("RF compartido OK en %s", serial_port)
 
+    # Config de oscilación del dribbler al firmware (persiste en EEPROM). El robot oscila el
+    # rodillo con este duty de forma autónoma; Python ya no oscila.
+    for _rid in all_ids:
+        rf.set_dribbler_config(
+            _rid + 1, DRIBBLER_FW_ON_MS, DRIBBLER_FW_OFF_MS, DRIBBLER_FW_WDT_MS)
+
     # --- Crear jugadores ---
     players_red  = [Player(rid, 0, 0, 0.0, team='red')  for rid in team_red_ids]
     players_blue = [Player(rid, 0, 0, 0.0, team='blue') for rid in team_blue_ids]
@@ -854,8 +843,6 @@ def decision_process_2v2(
     last_status_log = 0.0
 
     last_dribbler_keepalive = {rid: 0.0 for rid in all_ids}
-    dribbler_pulse_phase    = {rid: 'on' for rid in all_ids}
-    dribbler_pulse_timer    = {rid: 0.0 for rid in all_ids}
     prev_dribbler_engaged   = {rid: False for rid in all_ids}
 
     log.info("Decision 2v2 lista. ESPACIO=ambos, R=rojo, B=azul.")
@@ -1113,8 +1100,7 @@ def decision_process_2v2(
                 for p in bm.team_players:
                     _bb_p = bm.blackboards.get(p.id)
                     _positioning = bool(_bb_p and _bb_p.last_action in _POSITIONING_ACTIONS)
-                    _pulse_dribbler(rf, p, now, dribbler_pulse_phase,
-                                    dribbler_pulse_timer, last_dribbler_keepalive,
+                    _pulse_dribbler(rf, p, now, last_dribbler_keepalive,
                                     prev_dribbler_engaged, DRIBBLER_KEEPALIVE,
                                     positioning=_positioning)
 
@@ -1344,8 +1330,7 @@ def decision_process_2v2(
                             ball_dist=ball_dist,
                             kick_lat=kick_lat,
                             dribbler=_dribbler_view(
-                                p, dribbler_pulse_phase,
-                                positioning=bt_action in _POSITIONING_ACTIONS),
+                                p, positioning=bt_action in _POSITIONING_ACTIONS),
                             rrt_len=rrt_len,
                             n_obs=n_obs,
                         )
@@ -1389,8 +1374,7 @@ def decision_process_2v2(
                                 # pura: _dribbler_view es O(1) sobre flags ya mantenidos por el
                                 # loop de control (no agrega cómputo ni sincronización).
                                 'dribbler': _dribbler_view(
-                                    p, dribbler_pulse_phase,
-                                    positioning=bool(last_action in _POSITIONING_ACTIONS)),
+                                    p, positioning=bool(last_action in _POSITIONING_ACTIONS)),
                             }
                     viz_state_pipe.send({
                         'players': players_viz,

@@ -104,6 +104,33 @@ class RobotCommandProtocol:
         return f"D,{robot_id},{pwm}"
 
     @staticmethod
+    def format_dribbler_config(robot_id, on_ms, off_ms, wdt_ms):
+        """Formatea la config de oscilación del dribbler (persiste en EEPROM del robot).
+
+        Protocolo transmisor: "C,id,onMs,offMs,wdtMs" → paquete RF 5 bytes
+        ['C', id, onMs, offMs, wdtMs]. El robot la guarda en EEPROM y oscila el rodillo con
+        ese duty de forma autónoma; wdtMs es su watchdog propio (sin refresco 'D' → apaga).
+        Cada valor es un byte (0-255).
+
+        Args:
+            robot_id (int): Identificador del robot (1-4).
+            on_ms (int): Duración de la fase encendida (ms, 0-255).
+            off_ms (int): Duración de la fase apagada (ms, 0-255).
+            wdt_ms (int): Watchdog del dribbler (ms, 0-255).
+
+        Returns:
+            str: Comando formateado "C,{id},{on},{off},{wdt}".
+
+        Example:
+            >>> RobotCommandProtocol.format_dribbler_config(1, 65, 15, 150)
+            'C,1,65,15,150'
+        """
+        on  = max(0, min(255, int(on_ms)))
+        off = max(0, min(255, int(off_ms)))
+        wdt = max(0, min(255, int(wdt_ms)))
+        return f"C,{robot_id},{on},{off},{wdt}"
+
+    @staticmethod
     def format_stop_command(robot_id):
         """Formatea un comando de detención de motores de tracción.
 

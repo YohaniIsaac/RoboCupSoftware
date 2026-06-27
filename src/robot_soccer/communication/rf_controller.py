@@ -294,6 +294,23 @@ class RFController:
 
         return success
 
+    def set_dribbler_config(self, robot_id, on_ms, off_ms, wdt_ms):
+        """Envía la config de oscilación del dribbler (persiste en EEPROM del robot).
+
+        Se manda al inicio de sesión (y cuando se quiera cambiar el duty/watchdog en runtime).
+        NO es hot-path. El firmware oscila el rodillo con este duty; Python ya no oscila.
+        robot_id es el id de firmware (1-4).
+
+        Returns:
+            bool: True si el comando se envió correctamente.
+        """
+        command = self.protocol.format_dribbler_config(robot_id, on_ms, off_ms, wdt_ms)
+        success = self.serial_manager.send_command(command)
+        if success:
+            log.debug("Robot %i: dribbler config on=%d off=%d wdt=%d",
+                      robot_id, on_ms, off_ms, wdt_ms)
+        return success
+
     def stop_robot(self, robot_id):
         """Detiene todos los motores de un robot.
 

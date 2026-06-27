@@ -776,6 +776,14 @@ DRIBBLER_HOLD_POWER = 30  # PWM reducido para sostener pelota (0-255 directo)
 DRIBBLER_PULSE_ON_MS = 300  # ms — pulso encendido largo (keepalive interno cada 80ms)
 DRIBBLER_PULSE_OFF_MS = 20  # ms — respiro térmico mínimo, imperceptible (0 = 100% continuo)
 
+# Config de oscilación del dribbler que vive en el FIRMWARE (módulo dribbler + EEPROM). Python
+# la envía al inicio de sesión (comando 'C') y el robot oscila el rodillo con este duty de forma
+# autónoma; Python ya NO oscila. duty = ON/(ON+OFF). wdt: sin refresco 'D' por este tiempo el
+# firmware apaga el rodillo (fail-safe propio, independiente del de movimiento). Bytes (0-255).
+DRIBBLER_FW_ON_MS  = 65   # ms — fase encendida (duty 65/80 = 81%)
+DRIBBLER_FW_OFF_MS = 15   # ms — fase apagada
+DRIBBLER_FW_WDT_MS = 150  # ms — watchdog propio del dribbler en firmware
+
 # Distancia robot-pelota a la que se ENCIENDE el dribbler durante el avance al contacto.
 # Solo gira cuando está lo bastante cerca para capturar (no desde behind_pos, lejos): da
 # tiempo a que el rodillo tome vueltas justo antes del contacto. Debe ser < BEHIND_BALL_APPROACH_PX
