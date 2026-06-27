@@ -35,6 +35,8 @@ from robot_soccer.config import (
     CONTACT_PUSH_TARGET_DIST_PX,
     CONTACT_PUSH_STALL_WINDOW_S,
     CONTACT_PUSH_STALL_PX,
+    CONTACT_POSSESSION_CONFIRM_S,
+    CONTACT_POSSESSION_LOST_PX,
     KICK_POINT_TOLERANCE_PX,
     CONTACT_REACH_MARGIN_PX,
     CONTACT_REACH_MARGIN_HOLD_PX,
@@ -1975,23 +1977,21 @@ def _creep_ceiling_pwm():
 def _begin_overshoot_push(blackboard, player_id, player_pos):
     """Inicia la FASE DE EMPUJE tras detectar contacto (L <= gate), sin frenar.
 
-    En vez de detener los motores y asentar a ~L=34 (el bug del 'frena antes de empujar'),
-    el robot marca posesión (arranca el tope POSSESSION_MAX_TIME_S como salvaguarda) y sigue
-    AVANZANDO EN SU HEADING ACTUAL (recto, sin re-apuntar) para empujar la pelota un poco más.
-    El target es un punto FIJO CONTACT_PUSH_TARGET_DIST_PX adelante en el eje del robot; la
-    parada (→ asentamiento) la decide _advance_overshoot_push por avance medido o trabado, no
-    el arrival del controlador. Devuelve el push_target emitido (para logging).
+    NO se patea al primer contacto: parar/disparar al toque era el desastre histórico (con el
+    target en el kick_point exacto el robot nunca cerraba el contacto → loop, ver b44af56). El
+    robot marca posesión (arranca el tope POSSESSION_MAX_TIME_S como salvaguarda) y sigue
+    EMPUJANDO SUAVE en su heading actual (recto, sin re-apuntar) hacia un punto fijo
+    CONTACT_PUSH_TARGET_DIST_PX adelante. El empuje es el TEST de captura;
+    _advance_overshoot_push confirma posesión sostenida o detecta que la pelota se fue.
+    Devuelve el push_target emitido (para logging).
     """
-    anchor = np.array(player_pos, dtype=float)
-    blackboard._overshoot_pushing        = True
-    blackboard._overshoot_anchor         = anchor
-    blackboard._overshoot_stall_ref_pos  = anchor.copy()
-    blackboard._overshoot_stall_ref_time = time.time()
-    blackboard.player._has_ball          = True
+    blackboard._overshoot_pushing     = True
+    blackboard._possession_hold_start = None
+    blackboard.player._has_ball       = True
     _possession_mark_contact(blackboard)  # el tope de posesión cuenta desde el contacto
 
     heading_rad = np.radians(blackboard.player.angle + KICK_POINT_ANGLE_OFFSET_DEG)
-    push_target = anchor + CONTACT_PUSH_TARGET_DIST_PX * np.array(
+    push_target = np.array(player_pos, dtype=float) + CONTACT_PUSH_TARGET_DIST_PX * np.array(
         [np.cos(heading_rad), np.sin(heading_rad)]
     )
     push_target = tuple(blackboard.field.clamp(push_target))  # modo directo: mantener en cancha
@@ -2001,67 +2001,66 @@ def _begin_overshoot_push(blackboard, player_id, player_pos):
 
 
 def _advance_overshoot_push(blackboard, player_id, player_pos):
-    """FASE DE EMPUJE: avanza CON la pelota tras el contacto, manteniendo el heading.
+    """FASE DE EMPUJE: confirma POSESIÓN mientras el robot sigue empujando suave.
 
-    Termina (→ asentamiento, settle + re-verificación + disparo) cuando:
-      - el robot avanzó CONTACT_PUSH_DISTANCE_PX desde el punto de contacto (overshoot completo), o
-      - se trabó: avanzó < CONTACT_PUSH_STALL_PX en CONTACT_PUSH_STALL_WINDOW_S (la pelota lo frena y
-        el creep ya está en su techo; insistir solo gasta el presupuesto del tope de posesión).
-    El tope POSSESSION_MAX_TIME_S es la red final y se evalúa aguas arriba (→ forced_kick_and_retreat).
+    El overshoot NO es el fin: es el TEST de captura. El robot sigue empujando en su heading
+    actual y se OBSERVA la pelota (no su propio avance):
+      - se mantiene PEGADA y CENTRADA (gate _kick_contact) de forma sostenida
+        CONTACT_POSSESSION_CONFIRM_S → posesión confirmada → asentar + patear.
+      - se ALEJA (db > CONTACT_POSSESSION_LOST_PX) → la tocó y se fue → FAILURE (re-perseguir),
+        sin asentar al vacío.
+    Medir por db, NO por avance del robot: el robot solo completa el avance cuando la pelota
+    NO lo frena = cuando ya se fue (overshoot completo ⟺ pelota perdida, medido en 11 episodios:
+    db_max kicked 26-35 vs escaped 74-100, sin solape). El trabarse con la pelota pegada cae
+    naturalmente en "posesión sostenida". El tope POSSESSION_MAX_TIME_S es la red final (arriba).
     """
-    now    = time.time()
-    anchor = getattr(blackboard, '_overshoot_anchor', None)
-    if anchor is None:  # defensivo: si faltara el ancla, anclar aquí
-        anchor = np.array(player_pos, dtype=float)
-        blackboard._overshoot_anchor = anchor
+    now      = time.time()
+    ball_pos = np.array(blackboard.ball.get_position(), dtype=float)
+    db       = float(np.linalg.norm(ball_pos - player_pos))
 
-    # Re-asegurar el ceiling del creep cada tick (igual que la fase de acercamiento).
+    # Re-asegurar el ceiling del creep cada tick: el robot SIGUE empujando suave (overshoot
+    # vivo) para cerrar/asentar el contacto, en vez de quedarse quieto al primer db<=gate.
     _ctrl = blackboard.command_manager.controllers.get(player_id)
     if _ctrl:
         _ctrl.max_linear_pwm_override = _creep_ceiling_pwm()
 
-    advance = float(np.linalg.norm(player_pos - anchor))
-
-    # Overshoot completo: el robot avanzó lo pedido empujando la pelota.
-    if advance >= CONTACT_PUSH_DISTANCE_PX:
+    # ¿La pelota se fue? db creció más allá del umbral de pérdida → re-perseguir, no patear al vacío.
+    if db > CONTACT_POSSESSION_LOST_PX:
         _clear_advance_state(blackboard, player_id)
-        blackboard._overshoot_pushing    = False
-        blackboard._contact_made         = True
-        blackboard._contact_settle_start = now
-        blackboard.last_action           = "settling_contact"
+        blackboard._overshoot_pushing     = False
+        blackboard._possession_hold_start = None
+        blackboard.player._has_ball       = False
         robot_status_logger.emit_event(
             player_id,
-            f"advance_contact OVERSHOOT OK: avance={advance:.1f}px -> asentando {CONTACT_SETTLE_TIME_S:.2f}s..."
+            f"advance_contact EMPUJE PELOTA SE FUE: db={db:.0f}px > {CONTACT_POSSESSION_LOST_PX}px -> re-perseguir"
         )
-        return NodeStatus.RUNNING
+        return NodeStatus.FAILURE
 
-    # Detección de trabado: ventana de tiempo sin progreso. Si avanza > umbral, reinicia la
-    # ventana; si la ventana se cumple sin progreso, la pelota frena al robot → asentar igual.
-    stall_ref_pos  = getattr(blackboard, '_overshoot_stall_ref_pos', None)
-    stall_ref_time = getattr(blackboard, '_overshoot_stall_ref_time', now)
-    if stall_ref_pos is None:
-        blackboard._overshoot_stall_ref_pos  = np.array(player_pos, dtype=float)
-        blackboard._overshoot_stall_ref_time = now
-    else:
-        moved = float(np.linalg.norm(player_pos - stall_ref_pos))
-        if moved >= CONTACT_PUSH_STALL_PX:
-            blackboard._overshoot_stall_ref_pos  = np.array(player_pos, dtype=float)
-            blackboard._overshoot_stall_ref_time = now
-        elif (now - stall_ref_time) >= CONTACT_PUSH_STALL_WINDOW_S:
+    # ¿Pegada y centrada? (gate direccional). Acumula posesión sostenida; si se descentra (sin
+    # pasar el umbral de pérdida) reinicia el cronómetro y sigue empujando para re-cerrar.
+    contact_ok, _L, _D = _kick_contact(player_pos, blackboard.player.angle, ball_pos)
+    if contact_ok:
+        if getattr(blackboard, '_possession_hold_start', None) is None:
+            blackboard._possession_hold_start = now
+        held = now - blackboard._possession_hold_start
+        if held >= CONTACT_POSSESSION_CONFIRM_S:
             _clear_advance_state(blackboard, player_id)
-            blackboard._overshoot_pushing    = False
-            blackboard._contact_made         = True
-            blackboard._contact_settle_start = now
-            blackboard.last_action           = "settling_contact"
+            blackboard._overshoot_pushing     = False
+            blackboard._possession_hold_start = None
+            blackboard._contact_made          = True
+            blackboard._contact_settle_start  = now
+            blackboard.last_action            = "settling_contact"
             robot_status_logger.emit_event(
                 player_id,
-                f"advance_contact EMPUJE TRABADO: avance={advance:.1f}px en "
-                f"{CONTACT_PUSH_STALL_WINDOW_S:.1f}s -> asentando..."
+                f"advance_contact POSESION CONFIRMADA: L={_L:.1f}px D={_D:.1f}px held={held:.2f}s "
+                f"-> asentando {CONTACT_SETTLE_TIME_S:.2f}s..."
             )
             return NodeStatus.RUNNING
+    else:
+        blackboard._possession_hold_start = None  # se descentró: reiniciar el sostenido
 
     # Mantener el empuje vivo: si el PID declaró arrival (acción fuera de actions_in_progress),
-    # re-emitir un push_target fijo adelante en el heading actual para que el creep siga.
+    # re-emitir un push_target fijo adelante en el heading actual para seguir cerrando el contacto.
     if player_id not in blackboard.command_manager.actions_in_progress:
         heading_rad = np.radians(blackboard.player.angle + KICK_POINT_ANGLE_OFFSET_DEG)
         push_target = player_pos + CONTACT_PUSH_TARGET_DIST_PX * np.array(
@@ -2109,9 +2108,7 @@ def _advance_to_contact_start(blackboard):
     blackboard._contact_settle_start = None
     blackboard._rival_contact_start  = None
     blackboard._overshoot_pushing        = False
-    blackboard._overshoot_anchor         = None
-    blackboard._overshoot_stall_ref_pos  = None
-    blackboard._overshoot_stall_ref_time = None
+    blackboard._possession_hold_start    = None
 
     # Guardar timestamp y ángulo inicial para timeout y detección de deriva
     blackboard._advance_start_time      = time.time()

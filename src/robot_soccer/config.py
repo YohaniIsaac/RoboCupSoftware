@@ -637,6 +637,18 @@ CONTACT_PUSH_STALL_PX = 3           # px — avance mínimo dentro de la ventana
                                     #      imposible). [push_pwm pendiente: subir el techo del creep
                                     #      para vencer la presión es trabajo futuro con datos reales.]
 
+# --- CONFIRMACIÓN DE POSESIÓN durante el empuje (criterio por db, no por avance) ---
+# Medido en 11 episodios reales 1-robot: db_max separa el resultado SIN solape — kicked 26-35px,
+# escaped 74-100px (hueco entre 35 y 74). Y el "overshoot completo" (robot avanza los 12px) es
+# 100% fallo: el robot solo avanza así cuando la pelota NO lo frena = cuando ya se fue. Por eso
+# el éxito del empuje se mide por POSESIÓN (pelota pegada y centrada sostenida), no por avance.
+CONTACT_POSSESSION_CONFIRM_S = 0.5  # s  — la pelota debe seguir pegada+centrada (gate _kick_contact)
+                                    #      este tiempo continuo mientras el robot empuja, para
+                                    #      confirmar captura → asentar+patear (filtra el toque-y-se-va).
+CONTACT_POSSESSION_LOST_PX = 48     # px — db por encima del cual la pelota se considera ida durante
+                                    #      el empuje → re-perseguir (no asentar/patear al vacío).
+                                    #      Entre el techo de kicked (35) y el piso de escaped (74).
+
 # --- Corrección de paralaje por altura del marker ---
 # El marker ArUco está elevado sobre el campo. Una cámara perspectiva desplaza
 # objetos elevados hacia afuera del centro de la imagen respecto a su posición
