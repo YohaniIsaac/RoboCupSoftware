@@ -1331,54 +1331,6 @@ def move_to_support_position(blackboard):
     return NodeStatus.RUNNING
 
 
-def position_to_defend_goal(blackboard):
-    """Posicionarse para defender la portería.
-
-    Args:
-        blackboard: Pizarra con el estado del juego
-
-    Returns:
-        NodeStatus: Estado de la ejecución (SUCCESS, RUNNING, FAILURE)
-    """
-    # Verificar que existe el gestor de comandos
-    if not hasattr(blackboard, "command_manager"):
-        blackboard.logger.warning(
-            "No command manager found in blackboard. Action may not work properly."
-        )
-        return NodeStatus.FAILURE
-
-    ball_pos = blackboard.ball.get_position()
-    goal_pos = blackboard.own_goal_pos
-
-    # Vector desde la pelota hacia nuestra portería
-    to_ball = np.array(ball_pos) - np.array(goal_pos)
-    distance = np.linalg.norm(to_ball)
-
-    if distance > 0:
-        # Normalizar y escalar para posicionarse entre la pelota y la portería
-        to_ball = to_ball / distance
-        defend_distance = min(
-            distance * 0.6, 200
-        )  # No alejarse demasiado de la portería
-
-        # Posición de defensa
-        defend_pos = tuple(np.array(goal_pos) + to_ball * defend_distance)
-    else:
-        # Fallback
-        defend_pos = tuple(goal_pos)
-
-    # Ordenar movimiento. Punto defensivo tolera llegada en circunferencia.
-    blackboard.command_manager.move_robot_to(
-        blackboard.player.id, defend_pos,
-        arrival_threshold=DEFENSIVE_POS_ARRIVAL_PX,
-    )
-
-    # Registrar la acción
-    blackboard.last_action = "position_to_defend_goal"
-
-    # Este es un comportamiento continuo, siempre está en ejecución
-    return NodeStatus.RUNNING
-
 def is_closest_attacker_to_ball(blackboard):
     """Comprueba si este jugador es el atacante del equipo.
 

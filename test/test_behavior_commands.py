@@ -981,7 +981,6 @@ class ImprovedBehaviorDebugger:
             "block_opponent": "Bloquear al rival más peligroso",
             "move_to_defensive_position": "Posicionarse defensivamente",
             "move_to_support_position": "Buscar posición de apoyo ofensivo",
-            "position_to_defend_goal": "Defender la portería propia",
         }
 
         return descriptions.get(action, "Ejecutar acción")
