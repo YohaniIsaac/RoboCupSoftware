@@ -408,7 +408,7 @@ class DifferentialDriveController:
             self._send_motor_commands(robot, 0, 0)
             return True
 
-        if distance < threshold:
+        if distance <= threshold:
             robot_status_logger.emit_event(
                 robot.id,
                 f"WAYPOINT ALCANZADO: dist={distance:.1f}px"
