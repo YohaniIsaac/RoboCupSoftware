@@ -123,6 +123,7 @@ RECORD_FPS      = 20.0                   # cadencia de playback; el ritmo real s
 MATCH_DURATION_S            = 300.0   # 5 minutos de juego efectivo
 MATCH_OVER_PROMPT_TIMEOUT_S = 15.0    # espera de respuesta en el diálogo de fin; al expirar, guarda
 GOAL_FREEZE_S               = 2.5     # segundos de frame congelado del gol inyectados en el video
+NUM_ID_ORBIT_PX             = 24      # distancia del número identificador al centro del robot (orbita)
 
 # Robots por equipo
 TEAM_RED_IDS  = [0, 1]
@@ -926,10 +927,39 @@ def visualization_process_2v2(perception_pipe, decision_pipe, keyboard_pipe,
         cv2.putText(img, clock_text, ((iw - cw) // 2, 52),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, clk_col, 2, cv2.LINE_AA)
 
+    def _put_rotated_text(img, txt, center, angle_deg, color, scale=0.6, thick=2):
+        """Dibuja `txt` rotado `angle_deg` (con contorno) centrado en `center`,
+        recortado a los límites del frame. Pega solo el glifo, no el fondo."""
+        (tw, th), bl = cv2.getTextSize(txt, cv2.FONT_HERSHEY_SIMPLEX, scale, thick)
+        pad = 6
+        cw, ch = tw + pad * 2, th + bl + pad * 2
+        org = (pad, ch - bl - pad)
+        color_canvas = np.zeros((ch, cw, 3), np.uint8)
+        cv2.putText(color_canvas, txt, org, cv2.FONT_HERSHEY_SIMPLEX, scale, (0, 0, 0), thick + 3, cv2.LINE_AA)
+        cv2.putText(color_canvas, txt, org, cv2.FONT_HERSHEY_SIMPLEX, scale, color, thick, cv2.LINE_AA)
+        mask_canvas = np.zeros((ch, cw), np.uint8)
+        cv2.putText(mask_canvas, txt, org, cv2.FONT_HERSHEY_SIMPLEX, scale, 255, thick + 3, cv2.LINE_AA)
+        M = cv2.getRotationMatrix2D((cw / 2.0, ch / 2.0), -angle_deg, 1.0)
+        rot_color = cv2.warpAffine(color_canvas, M, (cw, ch), flags=cv2.INTER_LINEAR)
+        rot_mask  = cv2.warpAffine(mask_canvas,  M, (cw, ch), flags=cv2.INTER_NEAREST)
+        cx, cy = int(center[0]), int(center[1])
+        x0, y0 = cx - cw // 2, cy - ch // 2
+        ix0, iy0 = max(0, x0), max(0, y0)
+        ix1, iy1 = min(img.shape[1], x0 + cw), min(img.shape[0], y0 + ch)
+        if ix1 <= ix0 or iy1 <= iy0:
+            return
+        sx0, sy0 = ix0 - x0, iy0 - y0
+        sub_color = rot_color[sy0:sy0 + (iy1 - iy0), sx0:sx0 + (ix1 - ix0)]
+        sub_mask  = rot_mask[sy0:sy0 + (iy1 - iy0), sx0:sx0 + (ix1 - ix0)]
+        roi = img[iy0:iy1, ix0:ix1]
+        m = sub_mask > 127
+        roi[m] = sub_color[m]
+
     def _draw_team_markers(img):
         """Quema en el video el arco de cada equipo (color) y el número de cada robot
-        en el color de su equipo. El número va DESPLAZADO arriba del marcador para NO
-        cubrir el ArUco (el video sigue sirviendo para re-detección offline)."""
+        en el color de su equipo. El número ORBITA junto al robot según su orientación
+        y con el dígito rotado, SIN cubrir el centro del marcador ArUco (el video
+        sigue sirviendo para re-detección offline)."""
         iw = img.shape[1]
         cv2.rectangle(img, (0, FIELD_CAM.goal_left_top_y),
                       (FIELD_CAM.goal_left_x, FIELD_CAM.goal_left_bottom_y),
@@ -940,21 +970,28 @@ def visualization_process_2v2(perception_pipe, decision_pipe, keyboard_pipe,
         for rid in ALL_IDS:
             pst = players_state.get(rid, {})
             pos = pst.get('pos')
+            ang = pst.get('angle_deg')
             if pos is None:
                 rd = robots_perc.get(rid)
                 if rd:
                     pos = (rd['x'], rd['y'])
+                    if ang is None:
+                        ang = rd.get('angulo')
             if pos is None:
                 continue
             team = pst.get('team', 'red' if rid in TEAM_RED_IDS else 'blue')
             col  = TEAM_COLOR[team]
             rx, ry = int(pos[0]), int(pos[1])
-            txt = str(rid)
-            (tw, th), _ = cv2.getTextSize(txt, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
-            tx = rx - tw // 2
-            ty = max(th + 2, ry - 20)   # arriba del marcador, sin salir del frame
-            cv2.putText(img, txt, (tx, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 4, cv2.LINE_AA)
-            cv2.putText(img, txt, (tx, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.6, col, 2, cv2.LINE_AA)
+            # Número junto al robot: orbita con su orientación (detrás del heading, para
+            # no estorbar la pelota al frente) y con el dígito rotado como el cuerpo.
+            # Queda fuera del centro → no tapa el ArUco. Sin ángulo: arriba fijo.
+            if ang is not None:
+                ar = math.radians(ang)
+                nx = rx - int(NUM_ID_ORBIT_PX * math.cos(ar))
+                ny = ry - int(NUM_ID_ORBIT_PX * math.sin(ar))
+                _put_rotated_text(img, str(rid), (nx, ny), ang, col)
+            else:
+                _put_rotated_text(img, str(rid), (rx, ry - NUM_ID_ORBIT_PX), 0.0, col)
 
     def _draw_goal_banner(img, team):
         """Banner central translúcido del color del equipo (celebración del gol)."""
