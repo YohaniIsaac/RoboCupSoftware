@@ -83,6 +83,8 @@ from robot_soccer.config import (
     BALL_INTERCEPT_MIN_SPEED_PX_PER_TICK,
     BALL_INTERCEPT_LOOKAHEAD_TICKS,
     BALL_INTERCEPT_MAX_PX,
+    BALL_VEL_EMA_ALPHA,
+    BALL_VEL_STALE_S,
     BEHIND_BALL_RECALC_MIN_S,
     BT_INTERCEPT_ENTER_RATIO,
     BT_INTERCEPT_EXIT_RATIO,
@@ -1651,6 +1653,50 @@ def _compute_circle_ball_lookahead(robot_pos, ball_pos, behind_pos):
     return lookahead, float(abs(np.degrees(delta)))
 
 
+def _update_ball_vel_ema(blackboard, ball_pos):
+    """Mantiene una EMA vectorial de la velocidad de la pelota (px/tick) y la devuelve.
+
+    El estimador anterior usaba una sola resta entre dos frames (~100 ms): el ruido del
+    centroide HSV lo dominaba y un único pico (>umbral) bastaba para extrapolar la pelota
+    decenas de px y calcular un punto "detrás" fantasma fuera de la línea de tiro. La EMA
+    promedia la velocidad como VECTOR: el ruido de dirección aleatoria se cancela y solo el
+    movimiento sostenido sobrevive. Se llama una vez por tick (on_start u on_running, nunca
+    ambos en el mismo tick; el recalc que llama a on_start tras on_running se deduplica abajo).
+
+    Guard de baseline rancia: si pasó más de BALL_VEL_STALE_S desde la última muestra (nodo
+    recién (re)entrado tras intercept, o hueco de detección), no hay referencia fiable para la
+    velocidad → se resetea la EMA a 0 (velocidad desconocida = no extrapolar). Esto es lo que
+    evita el fantasma en la RE-ENTRADA del nodo, que fue el caso observado en el partido.
+
+    Returns:
+        np.ndarray[2]: velocidad suavizada de la pelota en px/tick.
+    """
+    now      = time.time()
+    prev_pos = getattr(blackboard, '_ball_prev_pos', None)
+    prev_t   = getattr(blackboard, '_ball_prev_t', None)
+
+    # Misma muestra dentro del mismo tick (el recalc llama a on_start justo después de
+    # on_running): no re-promediar, devolver la EMA ya calculada este tick.
+    if prev_t is not None and (now - prev_t) < 1e-3:
+        return getattr(blackboard, '_ball_vel_ema', np.zeros(2))
+
+    blackboard._ball_prev_pos = ball_pos.copy()
+    blackboard._ball_prev_t   = now
+
+    # Baseline ausente o rancia → velocidad desconocida: resetear EMA, no extrapolar.
+    if prev_pos is None or prev_t is None or (now - prev_t) > BALL_VEL_STALE_S:
+        blackboard._ball_vel_ema = np.zeros(2)
+        return blackboard._ball_vel_ema
+
+    inst = ball_pos - prev_pos  # px/tick (ticks ~uniformes a BT_TICK_INTERVAL)
+    ema  = getattr(blackboard, '_ball_vel_ema', None)
+    if ema is None:
+        ema = np.zeros(2)
+    ema = BALL_VEL_EMA_ALPHA * inst + (1.0 - BALL_VEL_EMA_ALPHA) * ema
+    blackboard._ball_vel_ema = ema
+    return ema
+
+
 def _move_behind_ball_start(blackboard):
     """on_start: calcula la posición detrás de la pelota y emite el movimiento.
 
@@ -1781,18 +1827,17 @@ def _move_behind_ball_start(blackboard):
         )
         return NodeStatus.FAILURE
 
-    # Intercepción: si la pelota se mueve (tras un kick), apuntar a posición futura.
-    # Usa posición predicha para el target pero posición real para el trigger de
-    # recalculación y los checks de obstáculos (pelota física sigue siendo el obstáculo).
-    prev_pos = getattr(blackboard, '_ball_prev_pos', None)
-    blackboard._ball_prev_pos = ball_pos.copy()
+    # Intercepción: si la pelota se mueve de forma SOSTENIDA (tras un kick), apuntar a su
+    # posición futura. La velocidad sale de la EMA vectorial (ver _update_ball_vel_ema):
+    # filtra el ruido del centroide HSV, que antes disparaba la predicción en falso y dejaba
+    # el punto "detrás" fuera de la línea de tiro. Posición REAL para el trigger de recalc y
+    # los checks de obstáculos (la pelota física sigue siendo el obstáculo).
+    vel   = _update_ball_vel_ema(blackboard, ball_pos)
+    speed = float(np.linalg.norm(vel))
     ball_pos_target = ball_pos.copy()
-    if prev_pos is not None:
-        vel   = ball_pos - prev_pos
-        speed = float(np.linalg.norm(vel))
-        if speed > BALL_INTERCEPT_MIN_SPEED_PX_PER_TICK:
-            lookahead      = min(speed * BALL_INTERCEPT_LOOKAHEAD_TICKS, BALL_INTERCEPT_MAX_PX)
-            ball_pos_target = ball_pos + (vel / speed) * lookahead
+    if speed > BALL_INTERCEPT_MIN_SPEED_PX_PER_TICK:
+        lookahead       = min(speed * BALL_INTERCEPT_LOOKAHEAD_TICKS, BALL_INTERCEPT_MAX_PX)
+        ball_pos_target = ball_pos + (vel / speed) * lookahead
 
     # Vector del arco hacia la pelota (dirección "detrás de la pelota")
     goal_to_ball = ball_pos_target - goal_pos
@@ -1922,8 +1967,9 @@ def _move_behind_ball_running(blackboard):
         robot_status_logger.emit_event(player_id, "behind_ball TOPE POSESION -> abortar a disparo forzado")
         return NodeStatus.FAILURE
 
-    # Actualizar posición anterior de la pelota cada tick para la predicción de intercepción
-    blackboard._ball_prev_pos = ball_pos.copy()
+    # Mantener la EMA de velocidad de la pelota cada tick (filtra ruido para la predicción
+    # de intercepción del staging; ver _update_ball_vel_ema). Mantiene también _ball_prev_pos.
+    _update_ball_vel_ema(blackboard, ball_pos)
 
     # Fase RETROCESO: retrocede hasta que la pelota esté a distancia segura para rotar
     if phase == 'retreat':

@@ -798,15 +798,27 @@ RIVAL_YIELD_EXIT_MARGIN_PX = 15  # px — histéresis de SALIDA de la cesión: u
                                  #      margen (banda > jitter ArUco ±3-5px). Rompe el forcejeo y el
                                  #      parpadeo del rodillo en el empate; la ENTRADA sigue en <5px.
 
-# Parámetros de intercepción de pelota en movimiento.
-# Cuando la pelota se desplaza rápido (tras un kick), los robots calculan el punto
-# de llegada en vez de perseguir la posición actual → anticipan en lugar de perseguir.
-# MIN_SPEED: umbral para ignorar ruido estático de cámara (~3-5 px/tick).
+# Parámetros de intercepción de pelota en movimiento (staging behind-ball).
+# Cuando la pelota se desplaza de forma SOSTENIDA, el atacante calcula el punto de
+# llegada en vez de perseguir la posición actual → anticipa en lugar de perseguir.
+# La velocidad se estima con una EMA vectorial (no con una sola resta entre frames):
+# el ruido del centroide HSV es de dirección aleatoria y se cancela en el promedio
+# vectorial, así que solo el movimiento real sobrevive. Un pico de ruido aislado ya
+# NO crea un punto "detrás" fantasma lejos de la pelota (era la causa del mal staging:
+# con la pelota quieta, un único frame ruidoso >umbral extrapolaba el target ~60px).
+# MIN_SPEED: umbral sobre la velocidad SUAVIZADA para activar la predicción.
 # LOOKAHEAD: ticks hacia adelante a predecir (tick ≈ 0.1s; 3 ticks = ~0.3s).
 # MAX_PX: límite de desplazamiento de predicción para evitar overshoots agresivos.
-BALL_INTERCEPT_MIN_SPEED_PX_PER_TICK = 8    # px/tick — velocidad mínima para activar predicción
-BALL_INTERCEPT_LOOKAHEAD_TICKS       = 3    # ticks   — adelanto de predicción (~0.3s)
-BALL_INTERCEPT_MAX_PX                = 60   # px      — desplazamiento máximo de predicción
+# EMA_ALPHA: peso de la muestra nueva en la EMA (menor = más suave, más robusto a picos).
+# STALE_S: si pasó más de este tiempo sin muestra (nodo recién (re)entrado tras intercept,
+#   o hueco de detección), la baseline es rancia → velocidad desconocida, no extrapolar.
+BALL_INTERCEPT_MIN_SPEED_PX_PER_TICK = 8     # px/tick — velocidad SUAVIZADA mínima para activar predicción
+BALL_INTERCEPT_LOOKAHEAD_TICKS       = 3     # ticks   — adelanto de predicción (~0.3s)
+BALL_INTERCEPT_MAX_PX                = 60    # px      — desplazamiento máximo de predicción
+BALL_VEL_EMA_ALPHA                   = 0.25  # peso de la muestra nueva en la EMA de velocidad de la pelota
+                                             # (0.25: un pico aislado de ~30px no cruza MIN_SPEED; converge a
+                                             #  movimiento real sostenido en ~4 ticks ≈ 0.4s)
+BALL_VEL_STALE_S                     = 0.25  # s — baseline más vieja que esto → no extrapolar (re-entrada/hueco)
 
 # Factor multiplicador de PWM cuando el robot tiene posesión de la pelota.
 # El dribbler genera fricción que frena la rotación/movimiento. Este factor
