@@ -69,6 +69,8 @@ from robot_soccer.config import (
     DEFENDER_YIELD_START_PX,
     DEFENDER_YIELD_CLEAR_PX,
     DEFENDER_YIELD_REVERSE_PWM,
+    DEFENDER_OPPONENT_AVOID_PX,
+    DEFENDER_OPPONENT_CLEAR_PX,
     POST_KICK_COOLDOWN_S,
     SHOT_WAIT_MAX_S,
     POSSESSION_MAX_TIME_S,
@@ -1230,6 +1232,40 @@ def move_to_defensive_position(blackboard):
             return NodeStatus.RUNNING
         blackboard.last_action = "in_defensive_position"
         return NodeStatus.SUCCESS
+
+    # PRIORIDAD 3: no embestir a un rival que esté en el camino al punto defensivo.
+    # El desvío lateral del punto (arriba) protege el destino, pero no la trayectoria
+    # ni el caso de que el rival se cruce mientras avanzamos. Si moverse hacia el
+    # punto acercaría al defensor a un rival ya cercano (rival del lado del avance),
+    # mantener posición orientado a la pelota en vez de incrustarse. Espejo de la
+    # espera que ya se da ante el atacante aliado; aquí NO se retrocede, solo se frena.
+    # Histéresis START/CLEAR para no oscilar.
+    _move_vec  = np.array(defensive_pos, dtype=float) - np.array(player_pos, dtype=float)
+    _move_norm = float(np.linalg.norm(_move_vec))
+    if _move_norm > 1.0:
+        _move_dir = _move_vec / _move_norm
+        _holding  = getattr(blackboard, '_holding_vs_opponent', False)
+        _opp_thr  = DEFENDER_OPPONENT_CLEAR_PX if _holding else DEFENDER_OPPONENT_AVOID_PX
+        for _opp in blackboard.opponents:
+            _op = np.array(_opp.get_position(), dtype=float)
+            if _op[0] == 0 and _op[1] == 0:
+                continue  # rival no detectado
+            _rel = _op - np.array(player_pos, dtype=float)
+            _d   = float(np.linalg.norm(_rel))
+            # Rival cercano Y avanzar me acerca a él (componente positiva en el avance).
+            if _d < _opp_thr and float(_move_dir @ _rel) > 0.0:
+                blackboard._holding_vs_opponent = True
+                if _heading_error_to_ball() > BEHIND_BALL_ALIGN_TOLERANCE_DEG:
+                    blackboard.command_manager.rotate_robot_to(
+                        blackboard.player.id, _angle_to_ball_deg()
+                    )
+                blackboard.last_action = "holding_vs_opponent"
+                robot_status_logger.emit_event(
+                    blackboard.player.id,
+                    f"defensor ESPERA: rival a {_d:.0f}px en el camino -> mantiene posicion"
+                )
+                return NodeStatus.RUNNING
+    blackboard._holding_vs_opponent = False
 
     # No estamos en posición: ordenar movimiento. Punto defensivo tolera
     # llegada en una circunferencia (idea B umbrales dinámicos).

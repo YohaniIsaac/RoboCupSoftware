@@ -181,6 +181,16 @@ DEFENDER_WAIT_MAX_S = 5.0  # s — timeout máximo de espera del defensor
 DEFENDER_YIELD_START_PX   = 70  # px — atacante más cerca que esto → empezar a retroceder
 DEFENDER_YIELD_CLEAR_PX   = 95  # px — atacante más lejos que esto → dejar de ceder
 DEFENDER_YIELD_REVERSE_PWM = 30  # PWM — velocidad de retroceso recto (ambas ruedas, negativo)
+
+# --- Espera del defensor ante un rival en su camino (anti-embestida) ---
+# El punto defensivo (sweeper) puede caer sobre un rival; el desvío lateral del
+# punto no siempre encuentra hueco. Como red de seguridad, si avanzar hacia el
+# punto acercaría al defensor a un rival ya cercano (en la dirección de avance),
+# el defensor MANTIENE posición orientado a la pelota en vez de incrustarse. No
+# retrocede (a diferencia de la cesión al aliado): solo deja de embestir.
+# Histéresis START/CLEAR para no oscilar. Contacto físico centro-a-centro ~60 px.
+DEFENDER_OPPONENT_AVOID_PX = 75   # px — rival en el camino más cerca que esto → esperar
+DEFENDER_OPPONENT_CLEAR_PX = 100  # px — rival más lejos que esto → reanudar avance
 BT_DRIBBLE_SPACING_RATIO = 0.08
 BT_DRIBBLE_GOAL_RATIO = 0.133
 BT_DEFENSIVE_ARRIVAL_RATIO = 0.05   # 32px — umbral de llegada al punto defensivo
