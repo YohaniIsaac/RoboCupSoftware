@@ -122,6 +122,7 @@ RECORD_FPS      = 20.0                   # cadencia de playback; el ritmo real s
 # termina solo (mismo 'exit' que ESC). Base del cronómetro y del recorte del video.
 MATCH_DURATION_S            = 300.0   # 5 minutos de juego efectivo
 MATCH_OVER_PROMPT_TIMEOUT_S = 15.0    # espera de respuesta en el diálogo de fin; al expirar, guarda
+GOAL_FREEZE_S               = 2.5     # segundos de frame congelado del gol inyectados en el video
 
 # Robots por equipo
 TEAM_RED_IDS  = [0, 1]
@@ -855,6 +856,13 @@ def visualization_process_2v2(perception_pipe, decision_pipe, keyboard_pipe,
     _clock_running  = False
     match_over_viz  = False   # True → tiempo agotado (dispara el diálogo de cierre)
 
+    # Freeze de gol en el video: al anotarse se inyectan GOAL_FREEZE_S del frame del
+    # gol (banner de celebración), FUERA del pacing por reloj. rec_extra_frames
+    # acumula esas inyecciones para que el ritmo posterior no se desincronice.
+    rec_extra_frames    = 0
+    goal_freeze_pending = None   # equipo del gol pendiente de congelar en el video
+    goal_freeze_frame   = None   # frame capturado en el instante del gol
+
     def _ask_save_recording(base_frame, n_frames, dur_s,
                             timeout_s=None, default_keep=False, banner=None):
         """Diálogo en la ventana: [S] conserva, [N] descarta. Devuelve bool.
@@ -917,6 +925,52 @@ def visualization_process_2v2(perception_pipe, decision_pipe, keyboard_pipe,
         (cw, _), _ = cv2.getTextSize(clock_text, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
         cv2.putText(img, clock_text, ((iw - cw) // 2, 52),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, clk_col, 2, cv2.LINE_AA)
+
+    def _draw_team_markers(img):
+        """Quema en el video el arco de cada equipo (color) y el número de cada robot
+        en el color de su equipo. El número va DESPLAZADO arriba del marcador para NO
+        cubrir el ArUco (el video sigue sirviendo para re-detección offline)."""
+        iw = img.shape[1]
+        cv2.rectangle(img, (0, FIELD_CAM.goal_left_top_y),
+                      (FIELD_CAM.goal_left_x, FIELD_CAM.goal_left_bottom_y),
+                      TEAM_COLOR['blue'], 2)
+        cv2.rectangle(img, (FIELD_CAM.goal_right_x, FIELD_CAM.goal_right_top_y),
+                      (iw, FIELD_CAM.goal_right_bottom_y),
+                      TEAM_COLOR['red'], 2)
+        for rid in ALL_IDS:
+            pst = players_state.get(rid, {})
+            pos = pst.get('pos')
+            if pos is None:
+                rd = robots_perc.get(rid)
+                if rd:
+                    pos = (rd['x'], rd['y'])
+            if pos is None:
+                continue
+            team = pst.get('team', 'red' if rid in TEAM_RED_IDS else 'blue')
+            col  = TEAM_COLOR[team]
+            rx, ry = int(pos[0]), int(pos[1])
+            txt = str(rid)
+            (tw, th), _ = cv2.getTextSize(txt, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+            tx = rx - tw // 2
+            ty = max(th + 2, ry - 20)   # arriba del marcador, sin salir del frame
+            cv2.putText(img, txt, (tx, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 4, cv2.LINE_AA)
+            cv2.putText(img, txt, (tx, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.6, col, 2, cv2.LINE_AA)
+
+    def _draw_goal_banner(img, team):
+        """Banner central translúcido del color del equipo (celebración del gol)."""
+        hh, ww = img.shape[:2]
+        y1, y2 = hh // 3, 2 * hh // 3
+        overlay = img.copy()
+        cv2.rectangle(overlay, (0, y1), (ww, y2), TEAM_COLOR[team], -1)
+        cv2.addWeighted(overlay, 0.45, img, 0.55, 0, img)
+        label = "GOOOL!  ROJO" if team == 'red' else "GOOOL!  AZUL"
+        (lw, _), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 1.4, 3)
+        cv2.putText(img, label, ((ww - lw) // 2, (y1 + y2) // 2),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.4, (255, 255, 255), 3, cv2.LINE_AA)
+        sc_txt = f"ROJO {score['red']}  -  {score['blue']} AZUL"
+        (sw, _), _ = cv2.getTextSize(sc_txt, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)
+        cv2.putText(img, sc_txt, ((ww - sw) // 2, (y1 + y2) // 2 + 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2, cv2.LINE_AA)
 
     def _finalize_recording(base_frame, timed=False):
         """Cierra el video y pregunta si conservarlo; descarta si no se confirma.
@@ -1007,6 +1061,11 @@ def visualization_process_2v2(perception_pipe, decision_pipe, keyboard_pipe,
                             pass
                         log.info("GOL %s! Marcador R%d - A%d",
                                  goal_event.upper(), score['red'], score['blue'])
+                        # Congelar en el video el frame del gol (celebración): se
+                        # inyecta en el bloque de grabación, fuera del pacing.
+                        goal_freeze_pending = goal_event
+                        goal_freeze_frame   = (last_frame.copy()
+                                               if last_frame is not None else None)
                 except Exception:
                     pass
 
@@ -1062,14 +1121,33 @@ def visualization_process_2v2(perception_pipe, decision_pipe, keyboard_pipe,
                 except Exception:
                     pass
 
-            # Grabar SOLO el tiempo de juego efectivo: el pacing por match_clock_s
-            # (congelado en posicionamiento/gol) recorta esas fases del video. Se
-            # quema marcador + cronómetro; sin overlays de debug.
+            # Inyectar el frame congelado del gol (celebración) FUERA del pacing:
+            # GOAL_FREEZE_S del frame del gol con banner del equipo. rec_extra_frames
+            # mantiene el pacing posterior alineado pese a estas inyecciones.
+            if (video_writer is not None and goal_freeze_pending is not None
+                    and goal_freeze_frame is not None):
+                fr = goal_freeze_frame.copy()
+                _draw_scoreboard(fr, MATCH_DURATION_S - match_clock_s)
+                _draw_team_markers(fr)
+                _draw_goal_banner(fr, goal_freeze_pending)
+                n_freeze = int(GOAL_FREEZE_S * RECORD_FPS)
+                for _ in range(n_freeze):
+                    video_writer.write(fr)
+                rec_frames       += n_freeze
+                rec_extra_frames += n_freeze
+            goal_freeze_pending = None
+            goal_freeze_frame   = None
+
+            # Grabar el tiempo de juego efectivo: pacing por match_clock_s (congelado
+            # en posicionamiento/gol). Quema marcador + cronómetro + identificadores de
+            # equipo (sin tapar el ArUco). rec_extra_frames compensa los freezes de gol.
             if video_writer is not None and last_frame is not None:
-                rec_target = int(min(match_clock_s, MATCH_DURATION_S) * RECORD_FPS)
+                rec_target = (int(min(match_clock_s, MATCH_DURATION_S) * RECORD_FPS)
+                              + rec_extra_frames)
                 if rec_frames < rec_target:
                     rec_frame = last_frame.copy()
                     _draw_scoreboard(rec_frame, MATCH_DURATION_S - match_clock_s)
+                    _draw_team_markers(rec_frame)
                     while rec_frames < rec_target:
                         video_writer.write(rec_frame)
                         rec_frames += 1
