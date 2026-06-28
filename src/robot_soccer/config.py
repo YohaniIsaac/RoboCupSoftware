@@ -760,9 +760,14 @@ SHOT_WAIT_MAX_S = 2.0  # s — espera máx. por línea de tiro libre antes de di
 # (continuamente cerca de la pelota: dist < CIRCLE_BALL_ACTIVATE_DISTANCE_PX) antes de
 # disparar a la fuerza y retirarse. Evita que el robot orbite/forcejee indefinidamente
 # junto a la pelota (oscilación observada de ~11s). La SSL no impone un límite de TIEMPO
-# de posesión en cancha (su regla análoga es de distancia: driblar <=1m); 4s es una
+# de posesión en cancha (su regla análoga es de distancia: driblar <=1m); es una
 # adaptación al campo chico, donde la posesión sin dribbler es frágil.
-POSSESSION_MAX_TIME_S = 4.0          # s  — tope de posesión antes del disparo forzado
+# OJO (medido en 2 partidos 2v2 reales, 2026-06-27): este tope SOLO gobierna la fase
+# advance_to_contact (approach+empuje+asentamiento); NO cubre waiting_for_clear_shot
+# (ese lo acota SHOT_WAIT_MAX_S). En los kicks normales el advance dura ~1.7-2.6s, así
+# que bajarlo a 2s afecta sobre todo el caso de TRABADO (forced kick: medido 4.1-4.2s,
+# ahora ~2s). Riesgo: un advance lento por jitter (>2s, visto 1/6) se vuelve forced kick.
+POSSESSION_MAX_TIME_S = 2.0          # s  — tope de posesión antes del disparo forzado (bajado 4.0→2.0)
 POSSESSION_RELEASE_DISTANCE_PX = 100 # px — la pelota a >N px resetea el cronómetro (posesión perdida)
 
 # Factores de escape para detectar que la pelota se alejó demasiado.
