@@ -982,16 +982,16 @@ def visualization_process_2v2(perception_pipe, decision_pipe, keyboard_pipe,
             team = pst.get('team', 'red' if rid in TEAM_RED_IDS else 'blue')
             col  = TEAM_COLOR[team]
             rx, ry = int(pos[0]), int(pos[1])
-            # Número junto al robot: orbita con su orientación (detrás del heading, para
-            # no estorbar la pelota al frente) y con el dígito rotado como el cuerpo.
-            # Queda fuera del centro → no tapa el ArUco. Sin ángulo: arriba fijo.
+            # Número junto al robot: orbita con su orientación, ubicado del lado del
+            # heading (lado contrario al de antes), con el dígito rotado como el
+            # cuerpo. Queda fuera del centro → no tapa el ArUco. Sin ángulo: abajo fijo.
             if ang is not None:
                 ar = math.radians(ang)
-                nx = rx - int(NUM_ID_ORBIT_PX * math.cos(ar))
-                ny = ry - int(NUM_ID_ORBIT_PX * math.sin(ar))
+                nx = rx + int(NUM_ID_ORBIT_PX * math.cos(ar))
+                ny = ry + int(NUM_ID_ORBIT_PX * math.sin(ar))
                 _put_rotated_text(img, str(rid), (nx, ny), ang, col)
             else:
-                _put_rotated_text(img, str(rid), (rx, ry - NUM_ID_ORBIT_PX), 0.0, col)
+                _put_rotated_text(img, str(rid), (rx, ry + NUM_ID_ORBIT_PX), 0.0, col)
 
     def _draw_goal_banner(img, team):
         """Banner central translúcido del color del equipo (celebración del gol)."""
