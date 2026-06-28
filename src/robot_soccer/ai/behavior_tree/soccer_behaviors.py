@@ -3103,14 +3103,20 @@ def create_defender_tree():
                 ConditionNode(is_ball_in_opponent_possession, "PelotaEnPosesionRival"),
                 ActionNode(block_opponent, "BloquearOponente"),
             ),
-            # Posicionarse para defender la portería.
-            # El defensor NO persigue la pelota libre: se quitó la rama
-            # CapturarPelotaDefensiva (move_to_ball + capture). El role-switcher ya
-            # promueve al robot más cercano a ATACANTE para perseguir; el que queda
-            # defensor cubre la portería. Evita que ambos robots del equipo converjan
-            # sobre la pelota (dejando la portería sola) y la congestión en la zona de
-            # disputa que disparaba el hold-with-stop del planner.
-            ActionNode(position_to_defend_goal, "DefenderPorteria"),
+            # Posicionarse para defender la portería usando move_to_defensive_position
+            # (la MISMA función que la rama de apoyo). El defensor NO persigue la pelota
+            # libre: el role-switcher promueve al robot más cercano a ATACANTE; el que
+            # queda defensor cubre la portería.
+            #
+            # Antes esta rama usaba position_to_defend_goal, que solo calculaba un punto
+            # entre pelota y arco y embestía sin lógica anti-choque. Con la pelota en zona
+            # defensiva (pegada al borde, donde el atacante aliado orbita para encarar) el
+            # defensor se paraba encima de esa órbita y ambos robots del equipo se trababan
+            # (convergían sobre la pelota). Al reusar move_to_defensive_position hereda la
+            # cesión al atacante (retroceso P0), la espera si el atacante está en contacto
+            # (P1) y el desvío lateral del punto alrededor de robots cercanos (P2) — la
+            # maquinaria anti-choque que esta zona no tenía.
+            ActionNode(move_to_defensive_position, "DefenderPorteria"),
         ),
     )
 
