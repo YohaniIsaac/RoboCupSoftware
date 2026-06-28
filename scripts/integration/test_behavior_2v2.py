@@ -124,6 +124,7 @@ MATCH_DURATION_S            = 300.0   # 5 minutos de juego efectivo
 MATCH_OVER_PROMPT_TIMEOUT_S = 15.0    # espera de respuesta en el diálogo de fin; al expirar, guarda
 GOAL_FREEZE_S               = 2.5     # segundos de frame congelado del gol inyectados en el video
 NUM_ID_ORBIT_PX             = 24      # distancia del número identificador al centro del robot (orbita)
+NUM_ID_ROT_OFFSET_DEG       = 90.0    # giro extra del dígito (horario) sobre la orientación del robot
 
 # Robots por equipo
 TEAM_RED_IDS  = [0, 1]
@@ -989,9 +990,10 @@ def visualization_process_2v2(perception_pipe, decision_pipe, keyboard_pipe,
                 ar = math.radians(ang)
                 nx = rx + int(NUM_ID_ORBIT_PX * math.cos(ar))
                 ny = ry + int(NUM_ID_ORBIT_PX * math.sin(ar))
-                _put_rotated_text(img, str(rid), (nx, ny), ang, col)
+                _put_rotated_text(img, str(rid), (nx, ny), ang + NUM_ID_ROT_OFFSET_DEG, col)
             else:
-                _put_rotated_text(img, str(rid), (rx, ry + NUM_ID_ORBIT_PX), 0.0, col)
+                _put_rotated_text(img, str(rid), (rx, ry + NUM_ID_ORBIT_PX),
+                                  NUM_ID_ROT_OFFSET_DEG, col)
 
     def _draw_goal_banner(img, team):
         """Banner central translúcido del color del equipo (celebración del gol)."""
