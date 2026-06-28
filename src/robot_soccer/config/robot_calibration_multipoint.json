@@ -34,7 +34,7 @@
     "deadzone_left_rev": 0,
     "deadzone_right_fwd": 0,
     "deadzone_right_rev": 0,
-    "bias": 0.008
+    "bias": 0.004
   },
   "3": {
     "pwm_min": 19,
