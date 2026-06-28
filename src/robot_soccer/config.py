@@ -191,6 +191,17 @@ DEFENDER_YIELD_REVERSE_PWM = 30  # PWM — velocidad de retroceso recto (ambas r
 # Histéresis START/CLEAR para no oscilar. Contacto físico centro-a-centro ~60 px.
 DEFENDER_OPPONENT_AVOID_PX = 75   # px — rival en el camino más cerca que esto → esperar
 DEFENDER_OPPONENT_CLEAR_PX = 100  # px — rival más lejos que esto → reanudar avance
+
+# --- Offset lateral del defensor consciente del atacante aliado ---
+# En zona defensiva propia, el atacante aliado orbita la pelota para encararla y el
+# punto sweeper del defensor cae sobre esa órbita → ambos aliados se traban. En vez
+# de pararse ahí (o retroceder a la pared), el defensor se corre al flanco OPUESTO al
+# atacante sobre la línea arco→pelota: le deja el carril de staging quedándose
+# goal-side (sin tapar el cono de tiro ni adelantarse). Histéresis en el lado para no
+# oscilar cuando el atacante cruza la línea; si no hay flanco libre (esquina), espera.
+DEFENDER_LATERAL_CLEAR_PX = 90   # px — magnitud del offset perpendicular al flanco opuesto
+DEFENDER_SIDESTEP_BALL_PX = 90   # px — atacante a < esto de la pelota = "disputándola" → engancha el offset
+DEFENDER_SIDESTEP_HYST_PX = 20   # px — banda de histéresis del lado (cruce del atacante para voltear)
 BT_DRIBBLE_SPACING_RATIO = 0.08
 BT_DRIBBLE_GOAL_RATIO = 0.133
 BT_DEFENSIVE_ARRIVAL_RATIO = 0.05   # 32px — umbral de llegada al punto defensivo

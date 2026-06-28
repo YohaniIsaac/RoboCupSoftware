@@ -71,6 +71,9 @@ from robot_soccer.config import (
     DEFENDER_YIELD_REVERSE_PWM,
     DEFENDER_OPPONENT_AVOID_PX,
     DEFENDER_OPPONENT_CLEAR_PX,
+    DEFENDER_LATERAL_CLEAR_PX,
+    DEFENDER_SIDESTEP_BALL_PX,
+    DEFENDER_SIDESTEP_HYST_PX,
     POST_KICK_COOLDOWN_S,
     SHOT_WAIT_MAX_S,
     POSSESSION_MAX_TIME_S,
@@ -1123,12 +1126,6 @@ def move_to_defensive_position(blackboard):
         )
         return NodeStatus.FAILURE
 
-    # PRIORIDAD 0: ceder el paso al atacante aliado si está muy cerca (retroceso
-    # recto). Evita el choque entre aliados dando prioridad de movimiento al atacante.
-    _yield = _defender_yield_to_attacker(blackboard)
-    if _yield is not None:
-        return _yield
-
     ball_pos = blackboard.ball.get_position()
     player_pos = blackboard.player.get_position()
 
@@ -1142,20 +1139,66 @@ def move_to_defensive_position(blackboard):
     def _heading_error_to_ball():
         return abs((_angle_to_ball_deg() - blackboard.player.angle + 180) % 360 - 180)
 
-    # PRIORIDAD 1: Verificar si el atacante está en fase de contacto final con la pelota.
-    # Solo esperar si el atacante está dentro de CAPTURE_ACTIVATE_DISTANCE_PX (fase final),
-    # con un timeout de DEFENDER_WAIT_MAX_S para evitar bloqueo permanente.
-    teammates = blackboard.team_players
-    attacker_in_contact_phase = False
-    for teammate in teammates:
-        if teammate.id != blackboard.player.id and teammate.rol == ROL_ATACANTE:
-            attacker_distance_to_ball = np.linalg.norm(
-                np.array(teammate.get_position()) - np.array(ball_pos)
-            )
-            if attacker_distance_to_ball < CAPTURE_ACTIVATE_DISTANCE_PX:
-                attacker_in_contact_phase = True
-                break
+    # Atacante aliado (rol ATACANTE): se reutiliza en P0/P1/P2.
+    attacker = next(
+        (t for t in blackboard.team_players
+         if t.id != blackboard.player.id and t.rol == ROL_ATACANTE),
+        None,
+    )
 
+    # Geometría sweeper: punto en la línea arco-propio → pelota, a
+    # BT_DEFENDER_STAND_DIST_RATIO del arco (bloquea el ángulo de tiro).
+    _goal = np.array(blackboard.own_goal_pos, dtype=float)
+    _ball = np.array(ball_pos, dtype=float)
+    _goal_to_ball = _ball - _goal
+    _dist_gb = float(np.linalg.norm(_goal_to_ball))
+    if _dist_gb > 1.0:
+        _unit_gb = _goal_to_ball / _dist_gb
+    else:
+        _unit_gb = np.array([1.0 if blackboard.team == 'red' else -1.0, 0.0])
+    _stand_dist = min(
+        blackboard.field.ratio_to_px(BT_DEFENDER_STAND_DIST_RATIO),
+        max(_dist_gb * 0.55, 30.0),
+    )
+    _def_pos = _goal + _unit_gb * _stand_dist
+    _def_pos = np.array(blackboard.field.clamp(_def_pos.astype(int)), dtype=float)
+    _perp = np.array([-_unit_gb[1], _unit_gb[0]], dtype=float)
+    _obs_min = float(PATH_PLANNING_ROBOT_OBSTACLE_RADIUS + PATH_PLANNING_OBSTACLE_CLEARANCE + 5)
+
+    # ¿El atacante aliado disputa la pelota lo bastante cerca como para que el punto
+    # sweeper caiga sobre su zona de trabajo? Entonces el defensor hará un offset
+    # lateral (P2) en vez de pararse encima de su órbita. El gate preserva la rama de
+    # apoyo: con la pelota lejos del arco, el punto sweeper queda lejos del atacante y
+    # no engancha (comportamiento de apoyo sin cambios).
+    _att = None
+    _sidestep = False
+    if attacker is not None:
+        _ap = np.array(attacker.get_position(), dtype=float)
+        if not (_ap[0] == 0 and _ap[1] == 0):
+            _att = _ap
+            if (float(np.linalg.norm(_att - _ball)) < DEFENDER_SIDESTEP_BALL_PX
+                    and float(np.linalg.norm(_def_pos - _att)) < _obs_min):
+                _sidestep = True
+
+    # PRIORIDAD 0 (demotada): retroceso recto solo si NO hay sidestep lateral viable
+    # (defensor acorralado con el atacante en la nariz). El sidestep tiene prioridad:
+    # cede el carril quedándose goal-side en vez de retroceder hacia la pared/arco.
+    if not _sidestep:
+        _yield = _defender_yield_to_attacker(blackboard)
+        if _yield is not None:
+            return _yield
+    elif getattr(blackboard, '_yielding_to_ally', False):
+        # veníamos retrocediendo y ahora hacemos sidestep: limpiar el latch del reverse
+        blackboard._yielding_to_ally = False
+        blackboard.command_manager.actions_in_progress.pop(blackboard.player.id, None)
+
+    # PRIORIDAD 1: si el atacante está en fase de CONTACTO con la pelota
+    # (<CAPTURE_ACTIVATE_DISTANCE_PX), el defensor espera orientado a la pelota para no
+    # interferir en la captura. Timeout DEFENDER_WAIT_MAX_S para no bloquearse.
+    attacker_in_contact_phase = (
+        _att is not None
+        and float(np.linalg.norm(_att - _ball)) < CAPTURE_ACTIVATE_DISTANCE_PX
+    )
     if attacker_in_contact_phase:
         now = time.time()
         if not hasattr(blackboard, '_defender_wait_start') or blackboard._defender_wait_start is None:
@@ -1170,52 +1213,79 @@ def move_to_defensive_position(blackboard):
             return NodeStatus.RUNNING
         blackboard._defender_wait_start = None  # timeout: caer hacia posición defensiva
     else:
-        blackboard._defender_wait_start = None  # atacante lejos: resetear timer
+        blackboard._defender_wait_start = None  # atacante lejos/contacto resuelto: reset
 
-    # PRIORIDAD 2: Posición defensiva dinámica (patrón sweeper).
-    # El defensor se posiciona en la línea arco-propio → pelota,
-    # a BT_DEFENDER_STAND_DIST_RATIO del arco, bloqueando el ángulo de tiro.
-    # Si el punto calculado está dentro del radio de obstáculo de algún robot,
-    # se desplaza lateralmente hasta encontrar un punto libre.
-    _goal = np.array(blackboard.own_goal_pos, dtype=float)
-    _ball = np.array(ball_pos, dtype=float)
-    _goal_to_ball = _ball - _goal
-    _dist_gb = float(np.linalg.norm(_goal_to_ball))
-    if _dist_gb > 1.0:
-        _unit_gb = _goal_to_ball / _dist_gb
+    # PRIORIDAD 2: posición defensiva dinámica (sweeper) con desvío lateral.
+    _corner_wait = False
+    if _sidestep:
+        # Offset lateral al flanco OPUESTO al atacante. Lado del atacante respecto a la
+        # línea arco→pelota con histéresis (no oscilar cuando cruza); si está sobre la
+        # línea y no hay latch previo, el defensor toma el lado hacia el centro del campo.
+        _att_perp = float(np.dot(_att - _ball, _perp))
+        _latch = int(getattr(blackboard, '_def_side', 0))
+        if _att_perp > DEFENDER_SIDESTEP_HYST_PX:
+            _latch = 1
+        elif _att_perp < -DEFENDER_SIDESTEP_HYST_PX:
+            _latch = -1
+        elif _latch == 0:
+            _center = np.array(blackboard.field.center, dtype=float)
+            _latch = -1 if float(np.dot(_center - _def_pos, _perp)) > 0 else 1
+        blackboard._def_side = _latch
+        _def_side = -_latch  # defensor al flanco opuesto al atacante
+
+        def _in_field(pt):
+            c = blackboard.field.clamp((int(pt[0]), int(pt[1])))
+            return c == (int(pt[0]), int(pt[1])), np.array(c, dtype=float)
+
+        _cand = _def_pos + _perp * _def_side * DEFENDER_LATERAL_CLEAR_PX
+        _ok, _cc = _in_field(_cand)
+        if _ok:
+            _def_pos = _cc
+        else:
+            _other = _def_pos - _perp * _def_side * DEFENDER_LATERAL_CLEAR_PX
+            _ok2, _oc = _in_field(_other)
+            if _ok2:
+                _def_pos = _oc
+            else:
+                _corner_wait = True
     else:
-        _unit_gb = np.array([1.0 if blackboard.team == 'red' else -1.0, 0.0])
-
-    _stand_dist = min(
-        blackboard.field.ratio_to_px(BT_DEFENDER_STAND_DIST_RATIO),
-        max(_dist_gb * 0.55, 30.0),
-    )
-    _def_pos = _goal + _unit_gb * _stand_dist
-    _def_pos = np.array(blackboard.field.clamp(_def_pos.astype(int)), dtype=float)
-
-    # Desplazar lateralmente si el punto está bloqueado por algún robot
-    _obs_min = float(PATH_PLANNING_ROBOT_OBSTACLE_RADIUS + PATH_PLANNING_OBSTACLE_CLEARANCE + 5)
-    _perp = np.array([-_unit_gb[1], _unit_gb[0]], dtype=float)
-    _obstacles = (
-        [r for r in blackboard.opponents] +
-        [t for t in blackboard.team_players if t.id != blackboard.player.id]
-    )
-    for _ in range(4):
-        _blocker = None
-        for _rob in _obstacles:
-            _rp = np.array(_rob.get_position(), dtype=float)
-            if _rp[0] == 0 and _rp[1] == 0:
-                continue
-            if float(np.linalg.norm(_def_pos - _rp)) < _obs_min:
-                _blocker = _rp
+        # Sin sidestep (rama de apoyo / atacante lejos): desvío lateral reactivo clásico
+        # — desplaza el punto si CUALQUIER robot lo bloquea. Preserva el comportamiento
+        # previo de la rama support.
+        blackboard._def_side = 0
+        _obstacles = (
+            [r for r in blackboard.opponents] +
+            [t for t in blackboard.team_players if t.id != blackboard.player.id]
+        )
+        for _ in range(4):
+            _blocker = None
+            for _rob in _obstacles:
+                _rp = np.array(_rob.get_position(), dtype=float)
+                if _rp[0] == 0 and _rp[1] == 0:
+                    continue
+                if float(np.linalg.norm(_def_pos - _rp)) < _obs_min:
+                    _blocker = _rp
+                    break
+            if _blocker is None:
                 break
-        if _blocker is None:
-            break
-        _side = float(np.sign(np.dot(np.array(player_pos, dtype=float) - _blocker, _perp)))
-        if _side == 0.0:
-            _side = 1.0
-        _def_pos = _def_pos + _perp * _side * (_obs_min * 0.65)
-        _def_pos = np.array(blackboard.field.clamp(_def_pos.astype(int)), dtype=float)
+            _side = float(np.sign(np.dot(np.array(player_pos, dtype=float) - _blocker, _perp)))
+            if _side == 0.0:
+                _side = 1.0
+            _def_pos = _def_pos + _perp * _side * (_obs_min * 0.65)
+            _def_pos = np.array(blackboard.field.clamp(_def_pos.astype(int)), dtype=float)
+
+    # Esquina sin flanco libre: esperar orientado a la pelota (NO retroceder a la pared).
+    if _corner_wait:
+        if _heading_error_to_ball() > BEHIND_BALL_ALIGN_TOLERANCE_DEG:
+            blackboard.command_manager.rotate_robot_to(
+                blackboard.player.id, _angle_to_ball_deg()
+            )
+        blackboard.last_action = "holding_in_corner"
+        robot_status_logger.emit_event(
+            blackboard.player.id,
+            "defensor ESQUINA: sin flanco libre -> espera orientado a la pelota"
+        )
+        return NodeStatus.RUNNING
 
     defensive_pos = tuple(int(x) for x in _def_pos)
 
