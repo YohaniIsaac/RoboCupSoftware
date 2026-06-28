@@ -216,6 +216,13 @@ class BehaviorManager:
                 from robot_soccer.config import ROL_DEFENSIVO
                 p.set_rol(ROL_DEFENSIVO)
                 self.trees[p.id] = create_defender_tree()
+                # Apagar el latch del rodillo al DEJAR de ser atacante: _dribbler_on solo lo
+                # baja el flujo de ataque (move_behind_ball_start / kick / yield), que ya no
+                # corre para un defensor. Sin esto el rodillo queda enganchado en defensa (los
+                # estados defensivos no están en _POSITIONING_ACTIONS → _pulse_dribbler no lo
+                # suprime). _has_ball NO hace falta: decision_process lo re-deriva por
+                # proximidad cada ciclo; _dribbler_on no se re-deriva en ningún lado.
+                p._dribbler_on = False
             # Reiniciar el cronómetro de posesión: un atacante recién promovido empieza
             # de cero (evita que un valor obsoleto dispare el tope al instante).
             bb = self.blackboards.get(p.id)
