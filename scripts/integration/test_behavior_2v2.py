@@ -955,7 +955,11 @@ def visualization_process_2v2(perception_pipe, decision_pipe, keyboard_pipe,
         rec_dir = ROOT_DIR / RECORD_DIR_NAME / RECORD_SUBDIR
         rec_dir.mkdir(parents=True, exist_ok=True)
         _rec_ts        = time.strftime("%Y%m%d_%H%M%S")
-        rec_tmp_path   = rec_dir / f".{RECORD_SUBDIR}_{_rec_ts}.mp4.part"
+        # OJO: el temporal DEBE terminar en .mp4 — OpenCV/FFMPEG elige el contenedor
+        # por la extensión; una desconocida (p.ej. .part) hace que isOpened() sea
+        # False y el video nunca se graba. Se mantiene oculto con un punto inicial;
+        # al conservarlo se renombra quitando el punto.
+        rec_tmp_path   = rec_dir / f".{RECORD_SUBDIR}_{_rec_ts}.mp4"
         rec_final_path = rec_dir / f"{RECORD_SUBDIR}_{_rec_ts}.mp4"
         video_writer   = cv2.VideoWriter(
             str(rec_tmp_path), cv2.VideoWriter_fourcc(*'mp4v'),
@@ -965,7 +969,7 @@ def visualization_process_2v2(perception_pipe, decision_pipe, keyboard_pipe,
             video_writer = None
             rec_tmp_path = None
         else:
-            log.info("Grabando partido (video limpio) → %s", rec_tmp_path)
+            log.info("Grabando partido → %s", rec_tmp_path)
     except Exception as e:
         log.warning("No se pudo iniciar la grabación: %s", e)
         video_writer = None
