@@ -1,0 +1,1151 @@
+{
+  "mode": "match_2v2",
+  "teams": {
+    "red": [
+      0,
+      1
+    ],
+    "blue": [
+      2,
+      3
+    ]
+  },
+  "robot_id_note": "IDs de código 0-3 (en prosa de la tesis: 1-4)",
+  "duration_wall_s": 372.9,
+  "duration_active_s": 282.3,
+  "play_segments": 11,
+  "score": {
+    "red": 0,
+    "blue": 2
+  },
+  "goals": [
+    {
+      "t_s": 33.52,
+      "team": "blue"
+    },
+    {
+      "t_s": 268.52,
+      "team": "blue"
+    }
+  ],
+  "ball_out_events": 8,
+  "decision_cadence_ms": {
+    "mean": 42.767,
+    "std": 0.862,
+    "p95": 44.315,
+    "max": 50.755,
+    "n": 6600
+  },
+  "perception_in_match": {
+    "camera_fps_session": 19.83,
+    "partido_frames": 5952,
+    "ball_detection_rate_pct": 70.4,
+    "robot_detection_rate_pct": {
+      "0": 100.8,
+      "1": 99.3,
+      "2": 98.9,
+      "3": 98.8
+    },
+    "robots_detected_hist_sampled": {
+      "0": 0,
+      "1": 0,
+      "2": 1,
+      "3": 117,
+      "4": 5488
+    },
+    "n_samples_in_play": 5606
+  },
+  "kicks_team": {
+    "red": 0,
+    "blue": 7
+  },
+  "attack_sequences_team": {
+    "initiated": {
+      "red": 30,
+      "blue": 47
+    },
+    "completed": {
+      "red": 0,
+      "blue": 7
+    }
+  },
+  "role_changes_total": 36,
+  "action_repertoire_in_play": [
+    "advancing_to_contact",
+    "circle_ball",
+    "forced_kick_retreat",
+    "in_defensive_position",
+    "intercept_hold",
+    "intercept_orienting",
+    "kick_immediately",
+    "move_behind_ball",
+    "move_to_defensive_position",
+    "move_to_intercept",
+    "orienting_to_ball",
+    "pushing_overshoot",
+    "retreating_after_kick",
+    "settling_contact",
+    "waiting_for_attacker",
+    "waiting_for_clear_shot"
+  ],
+  "per_robot": {
+    "0": {
+      "team": "red",
+      "kicks": 0,
+      "attack_sequences": {
+        "initiated": 9,
+        "completed": 0,
+        "aborted_by_stage": {
+          "1": 7,
+          "2": 2,
+          "3": 0
+        }
+      },
+      "role_changes": 10,
+      "defender_ball_gains": 0,
+      "defender_captures": 0,
+      "dribbler": {
+        "activations": 0,
+        "on_s": 0.0
+      },
+      "has_ball_s": 0.0,
+      "distance_traveled_px": 2592.9,
+      "tracking_error_mm": {
+        "mean": 4.409,
+        "std": 4.305,
+        "p95": 11.642,
+        "max": 25.997,
+        "n": 2422
+      },
+      "actions": {
+        "advancing_to_contact": {
+          "dwell_s": 15.98,
+          "entries": 3
+        },
+        "in_defensive_position": {
+          "dwell_s": 42.5,
+          "entries": 23
+        },
+        "intercept_hold": {
+          "dwell_s": 0.34,
+          "entries": 1
+        },
+        "intercept_orienting": {
+          "dwell_s": 1.9,
+          "entries": 1
+        },
+        "move_behind_ball": {
+          "dwell_s": 16.44,
+          "entries": 11
+        },
+        "move_to_defensive_position": {
+          "dwell_s": 151.27,
+          "entries": 35
+        },
+        "move_to_intercept": {
+          "dwell_s": 9.5,
+          "entries": 6
+        },
+        "orienting_to_ball": {
+          "dwell_s": 16.3,
+          "entries": 23
+        },
+        "waiting_for_attacker": {
+          "dwell_s": 28.04,
+          "entries": 15
+        }
+      }
+    },
+    "1": {
+      "team": "red",
+      "kicks": 0,
+      "attack_sequences": {
+        "initiated": 21,
+        "completed": 0,
+        "aborted_by_stage": {
+          "1": 12,
+          "2": 8,
+          "3": 0
+        }
+      },
+      "role_changes": 10,
+      "defender_ball_gains": 0,
+      "defender_captures": 0,
+      "dribbler": {
+        "activations": 12,
+        "on_s": 23.95
+      },
+      "has_ball_s": 3.25,
+      "distance_traveled_px": 4194.4,
+      "tracking_error_mm": {
+        "mean": 2.912,
+        "std": 3.706,
+        "p95": 11.856,
+        "max": 27.6,
+        "n": 3508
+      },
+      "actions": {
+        "advancing_to_contact": {
+          "dwell_s": 69.54,
+          "entries": 10
+        },
+        "circle_ball": {
+          "dwell_s": 19.65,
+          "entries": 3
+        },
+        "forced_kick_retreat": {
+          "dwell_s": 0.13,
+          "entries": 1
+        },
+        "in_defensive_position": {
+          "dwell_s": 11.05,
+          "entries": 4
+        },
+        "intercept_hold": {
+          "dwell_s": 3.9,
+          "entries": 3
+        },
+        "intercept_orienting": {
+          "dwell_s": 4.65,
+          "entries": 10
+        },
+        "move_behind_ball": {
+          "dwell_s": 90.92,
+          "entries": 24
+        },
+        "move_to_defensive_position": {
+          "dwell_s": 29.74,
+          "entries": 11
+        },
+        "move_to_intercept": {
+          "dwell_s": 46.32,
+          "entries": 24
+        },
+        "orienting_to_ball": {
+          "dwell_s": 1.11,
+          "entries": 5
+        },
+        "pushing_overshoot": {
+          "dwell_s": 0.99,
+          "entries": 1
+        },
+        "retreating_after_kick": {
+          "dwell_s": 0.85,
+          "entries": 1
+        },
+        "settling_contact": {
+          "dwell_s": 1.16,
+          "entries": 1
+        },
+        "waiting_for_attacker": {
+          "dwell_s": 2.25,
+          "entries": 2
+        }
+      }
+    },
+    "2": {
+      "team": "blue",
+      "kicks": 4,
+      "attack_sequences": {
+        "initiated": 30,
+        "completed": 4,
+        "aborted_by_stage": {
+          "1": 11,
+          "2": 14,
+          "3": 0
+        }
+      },
+      "role_changes": 8,
+      "defender_ball_gains": 0,
+      "defender_captures": 0,
+      "dribbler": {
+        "activations": 11,
+        "on_s": 35.93
+      },
+      "has_ball_s": 14.08,
+      "distance_traveled_px": 4412.6,
+      "tracking_error_mm": {
+        "mean": 4.499,
+        "std": 5.789,
+        "p95": 14.453,
+        "max": 39.505,
+        "n": 3200
+      },
+      "actions": {
+        "advancing_to_contact": {
+          "dwell_s": 55.34,
+          "entries": 11
+        },
+        "forced_kick_retreat": {
+          "dwell_s": 0.13,
+          "entries": 1
+        },
+        "in_defensive_position": {
+          "dwell_s": 26.32,
+          "entries": 14
+        },
+        "intercept_orienting": {
+          "dwell_s": 1.53,
+          "entries": 2
+        },
+        "kick_immediately": {
+          "dwell_s": 0.43,
+          "entries": 4
+        },
+        "move_behind_ball": {
+          "dwell_s": 79.25,
+          "entries": 27
+        },
+        "move_to_defensive_position": {
+          "dwell_s": 39.85,
+          "entries": 15
+        },
+        "move_to_intercept": {
+          "dwell_s": 31.06,
+          "entries": 15
+        },
+        "orienting_to_ball": {
+          "dwell_s": 6.64,
+          "entries": 9
+        },
+        "pushing_overshoot": {
+          "dwell_s": 3.19,
+          "entries": 5
+        },
+        "retreating_after_kick": {
+          "dwell_s": 0.87,
+          "entries": 1
+        },
+        "settling_contact": {
+          "dwell_s": 5.45,
+          "entries": 5
+        },
+        "waiting_for_attacker": {
+          "dwell_s": 27.11,
+          "entries": 13
+        },
+        "waiting_for_clear_shot": {
+          "dwell_s": 5.09,
+          "entries": 3
+        }
+      }
+    },
+    "3": {
+      "team": "blue",
+      "kicks": 3,
+      "attack_sequences": {
+        "initiated": 17,
+        "completed": 3,
+        "aborted_by_stage": {
+          "1": 5,
+          "2": 9,
+          "3": 0
+        }
+      },
+      "role_changes": 8,
+      "defender_ball_gains": 0,
+      "defender_captures": 0,
+      "dribbler": {
+        "activations": 4,
+        "on_s": 26.89
+      },
+      "has_ball_s": 13.39,
+      "distance_traveled_px": 3292.0,
+      "tracking_error_mm": {
+        "mean": 3.62,
+        "std": 4.913,
+        "p95": 13.814,
+        "max": 54.559,
+        "n": 3114
+      },
+      "actions": {
+        "advancing_to_contact": {
+          "dwell_s": 29.45,
+          "entries": 8
+        },
+        "circle_ball": {
+          "dwell_s": 0.3,
+          "entries": 1
+        },
+        "forced_kick_retreat": {
+          "dwell_s": 0.13,
+          "entries": 1
+        },
+        "in_defensive_position": {
+          "dwell_s": 22.36,
+          "entries": 14
+        },
+        "intercept_hold": {
+          "dwell_s": 1.5,
+          "entries": 1
+        },
+        "intercept_orienting": {
+          "dwell_s": 0.56,
+          "entries": 1
+        },
+        "kick_immediately": {
+          "dwell_s": 0.34,
+          "entries": 3
+        },
+        "move_behind_ball": {
+          "dwell_s": 43.51,
+          "entries": 14
+        },
+        "move_to_defensive_position": {
+          "dwell_s": 115.24,
+          "entries": 28
+        },
+        "move_to_intercept": {
+          "dwell_s": 10.04,
+          "entries": 6
+        },
+        "orienting_to_ball": {
+          "dwell_s": 10.17,
+          "entries": 17
+        },
+        "pushing_overshoot": {
+          "dwell_s": 4.01,
+          "entries": 4
+        },
+        "retreating_after_kick": {
+          "dwell_s": 0.85,
+          "entries": 1
+        },
+        "settling_contact": {
+          "dwell_s": 3.16,
+          "entries": 3
+        },
+        "waiting_for_attacker": {
+          "dwell_s": 34.57,
+          "entries": 18
+        },
+        "waiting_for_clear_shot": {
+          "dwell_s": 6.08,
+          "entries": 3
+        }
+      }
+    }
+  },
+  "events": [
+    {
+      "t": 20.52,
+      "event": "play_start"
+    },
+    {
+      "t": 26.31,
+      "event": "dribbler_on",
+      "robot": 2,
+      "mode": "C50"
+    },
+    {
+      "t": 32.99,
+      "event": "kick",
+      "robot": 2
+    },
+    {
+      "t": 32.99,
+      "event": "dribbler_off",
+      "robot": 2
+    },
+    {
+      "t": 33.42,
+      "event": "role_change",
+      "robot": 0,
+      "from_rol": "defensor",
+      "to_rol": "atacante"
+    },
+    {
+      "t": 33.42,
+      "event": "role_change",
+      "robot": 1,
+      "from_rol": "atacante",
+      "to_rol": "defensor"
+    },
+    {
+      "t": 33.52,
+      "event": "goal",
+      "team": "blue"
+    },
+    {
+      "t": 33.55,
+      "event": "play_pause"
+    },
+    {
+      "t": 56.69,
+      "event": "play_start"
+    },
+    {
+      "t": 56.69,
+      "event": "role_change",
+      "robot": 0,
+      "from_rol": "atacante",
+      "to_rol": "defensor"
+    },
+    {
+      "t": 56.69,
+      "event": "role_change",
+      "robot": 1,
+      "from_rol": "defensor",
+      "to_rol": "atacante"
+    },
+    {
+      "t": 63.04,
+      "event": "dribbler_on",
+      "robot": 1,
+      "mode": "C50"
+    },
+    {
+      "t": 67.47,
+      "event": "dribbler_off",
+      "robot": 1
+    },
+    {
+      "t": 68.85,
+      "event": "role_change",
+      "robot": 2,
+      "from_rol": "atacante",
+      "to_rol": "defensor"
+    },
+    {
+      "t": 68.85,
+      "event": "role_change",
+      "robot": 3,
+      "from_rol": "defensor",
+      "to_rol": "atacante"
+    },
+    {
+      "t": 72.88,
+      "event": "ball_out"
+    },
+    {
+      "t": 72.88,
+      "event": "play_pause"
+    },
+    {
+      "t": 73.51,
+      "event": "play_start"
+    },
+    {
+      "t": 74.24,
+      "event": "role_change",
+      "robot": 2,
+      "from_rol": "defensor",
+      "to_rol": "atacante"
+    },
+    {
+      "t": 74.24,
+      "event": "role_change",
+      "robot": 3,
+      "from_rol": "atacante",
+      "to_rol": "defensor"
+    },
+    {
+      "t": 84.74,
+      "event": "dribbler_on",
+      "robot": 2,
+      "mode": "C50"
+    },
+    {
+      "t": 88.64,
+      "event": "dribbler_off",
+      "robot": 2
+    },
+    {
+      "t": 94.22,
+      "event": "ball_out"
+    },
+    {
+      "t": 94.22,
+      "event": "play_pause"
+    },
+    {
+      "t": 95.84,
+      "event": "play_start"
+    },
+    {
+      "t": 105.59,
+      "event": "dribbler_on",
+      "robot": 2,
+      "mode": "C50"
+    },
+    {
+      "t": 108.02,
+      "event": "dribbler_on",
+      "robot": 1,
+      "mode": "C50"
+    },
+    {
+      "t": 108.15,
+      "event": "dribbler_off",
+      "robot": 1
+    },
+    {
+      "t": 111.83,
+      "event": "kick",
+      "robot": 2
+    },
+    {
+      "t": 111.83,
+      "event": "dribbler_off",
+      "robot": 2
+    },
+    {
+      "t": 115.26,
+      "event": "ball_out"
+    },
+    {
+      "t": 115.26,
+      "event": "play_pause"
+    },
+    {
+      "t": 118.62,
+      "event": "play_start"
+    },
+    {
+      "t": 118.62,
+      "event": "role_change",
+      "robot": 0,
+      "from_rol": "defensor",
+      "to_rol": "atacante"
+    },
+    {
+      "t": 118.62,
+      "event": "role_change",
+      "robot": 1,
+      "from_rol": "atacante",
+      "to_rol": "defensor"
+    },
+    {
+      "t": 121.58,
+      "event": "role_change",
+      "robot": 0,
+      "from_rol": "atacante",
+      "to_rol": "defensor"
+    },
+    {
+      "t": 121.58,
+      "event": "role_change",
+      "robot": 1,
+      "from_rol": "defensor",
+      "to_rol": "atacante"
+    },
+    {
+      "t": 134.25,
+      "event": "dribbler_on",
+      "robot": 1,
+      "mode": "C50"
+    },
+    {
+      "t": 135.99,
+      "event": "dribbler_on",
+      "robot": 2,
+      "mode": "C50"
+    },
+    {
+      "t": 136.12,
+      "event": "dribbler_off",
+      "robot": 2
+    },
+    {
+      "t": 140.92,
+      "event": "dribbler_off",
+      "robot": 1
+    },
+    {
+      "t": 141.26,
+      "event": "role_change",
+      "robot": 2,
+      "from_rol": "atacante",
+      "to_rol": "defensor"
+    },
+    {
+      "t": 141.26,
+      "event": "role_change",
+      "robot": 3,
+      "from_rol": "defensor",
+      "to_rol": "atacante"
+    },
+    {
+      "t": 142.33,
+      "event": "role_change",
+      "robot": 2,
+      "from_rol": "defensor",
+      "to_rol": "atacante"
+    },
+    {
+      "t": 142.33,
+      "event": "role_change",
+      "robot": 3,
+      "from_rol": "atacante",
+      "to_rol": "defensor"
+    },
+    {
+      "t": 143.07,
+      "event": "ball_out"
+    },
+    {
+      "t": 143.07,
+      "event": "play_pause"
+    },
+    {
+      "t": 144.14,
+      "event": "play_start"
+    },
+    {
+      "t": 145.51,
+      "event": "role_change",
+      "robot": 2,
+      "from_rol": "atacante",
+      "to_rol": "defensor"
+    },
+    {
+      "t": 145.51,
+      "event": "role_change",
+      "robot": 3,
+      "from_rol": "defensor",
+      "to_rol": "atacante"
+    },
+    {
+      "t": 153.29,
+      "event": "dribbler_on",
+      "robot": 3,
+      "mode": "C50"
+    },
+    {
+      "t": 153.92,
+      "event": "dribbler_on",
+      "robot": 1,
+      "mode": "C50"
+    },
+    {
+      "t": 154.01,
+      "event": "dribbler_off",
+      "robot": 1
+    },
+    {
+      "t": 154.14,
+      "event": "dribbler_on",
+      "robot": 1,
+      "mode": "C50"
+    },
+    {
+      "t": 154.22,
+      "event": "dribbler_off",
+      "robot": 1
+    },
+    {
+      "t": 155.83,
+      "event": "dribbler_on",
+      "robot": 1,
+      "mode": "C50"
+    },
+    {
+      "t": 155.91,
+      "event": "dribbler_off",
+      "robot": 1
+    },
+    {
+      "t": 160.03,
+      "event": "kick",
+      "robot": 3
+    },
+    {
+      "t": 160.03,
+      "event": "dribbler_off",
+      "robot": 3
+    },
+    {
+      "t": 160.37,
+      "event": "role_change",
+      "robot": 0,
+      "from_rol": "defensor",
+      "to_rol": "atacante"
+    },
+    {
+      "t": 160.37,
+      "event": "role_change",
+      "robot": 1,
+      "from_rol": "atacante",
+      "to_rol": "defensor"
+    },
+    {
+      "t": 160.59,
+      "event": "role_change",
+      "robot": 0,
+      "from_rol": "atacante",
+      "to_rol": "defensor"
+    },
+    {
+      "t": 160.59,
+      "event": "role_change",
+      "robot": 1,
+      "from_rol": "defensor",
+      "to_rol": "atacante"
+    },
+    {
+      "t": 173.23,
+      "event": "dribbler_on",
+      "robot": 3,
+      "mode": "C50"
+    },
+    {
+      "t": 180.52,
+      "event": "kick",
+      "robot": 3
+    },
+    {
+      "t": 180.52,
+      "event": "dribbler_off",
+      "robot": 3
+    },
+    {
+      "t": 180.73,
+      "event": "role_change",
+      "robot": 0,
+      "from_rol": "defensor",
+      "to_rol": "atacante"
+    },
+    {
+      "t": 180.73,
+      "event": "role_change",
+      "robot": 1,
+      "from_rol": "atacante",
+      "to_rol": "defensor"
+    },
+    {
+      "t": 182.44,
+      "event": "role_change",
+      "robot": 2,
+      "from_rol": "defensor",
+      "to_rol": "atacante"
+    },
+    {
+      "t": 182.44,
+      "event": "role_change",
+      "robot": 3,
+      "from_rol": "atacante",
+      "to_rol": "defensor"
+    },
+    {
+      "t": 184.71,
+      "event": "ball_out"
+    },
+    {
+      "t": 184.71,
+      "event": "play_pause"
+    },
+    {
+      "t": 187.07,
+      "event": "play_start"
+    },
+    {
+      "t": 187.71,
+      "event": "role_change",
+      "robot": 2,
+      "from_rol": "atacante",
+      "to_rol": "defensor"
+    },
+    {
+      "t": 187.71,
+      "event": "role_change",
+      "robot": 3,
+      "from_rol": "defensor",
+      "to_rol": "atacante"
+    },
+    {
+      "t": 197.7,
+      "event": "dribbler_on",
+      "robot": 3,
+      "mode": "C50"
+    },
+    {
+      "t": 204.67,
+      "event": "kick",
+      "robot": 3
+    },
+    {
+      "t": 204.67,
+      "event": "dribbler_off",
+      "robot": 3
+    },
+    {
+      "t": 212.49,
+      "event": "dribbler_on",
+      "robot": 3,
+      "mode": "C50"
+    },
+    {
+      "t": 218.38,
+      "event": "dribbler_off",
+      "robot": 3
+    },
+    {
+      "t": 223.62,
+      "event": "role_change",
+      "robot": 0,
+      "from_rol": "atacante",
+      "to_rol": "defensor"
+    },
+    {
+      "t": 223.62,
+      "event": "role_change",
+      "robot": 1,
+      "from_rol": "defensor",
+      "to_rol": "atacante"
+    },
+    {
+      "t": 233.83,
+      "event": "dribbler_on",
+      "robot": 1,
+      "mode": "C50"
+    },
+    {
+      "t": 241.14,
+      "event": "dribbler_off",
+      "robot": 1
+    },
+    {
+      "t": 244.42,
+      "event": "ball_out"
+    },
+    {
+      "t": 244.42,
+      "event": "play_pause"
+    },
+    {
+      "t": 247.86,
+      "event": "play_start"
+    },
+    {
+      "t": 248.38,
+      "event": "role_change",
+      "robot": 2,
+      "from_rol": "defensor",
+      "to_rol": "atacante"
+    },
+    {
+      "t": 248.38,
+      "event": "role_change",
+      "robot": 3,
+      "from_rol": "atacante",
+      "to_rol": "defensor"
+    },
+    {
+      "t": 256.1,
+      "event": "dribbler_on",
+      "robot": 2,
+      "mode": "C50"
+    },
+    {
+      "t": 260.14,
+      "event": "dribbler_off",
+      "robot": 2
+    },
+    {
+      "t": 264.13,
+      "event": "dribbler_on",
+      "robot": 2,
+      "mode": "C50"
+    },
+    {
+      "t": 268.03,
+      "event": "kick",
+      "robot": 2
+    },
+    {
+      "t": 268.03,
+      "event": "dribbler_off",
+      "robot": 2
+    },
+    {
+      "t": 268.52,
+      "event": "goal",
+      "team": "blue"
+    },
+    {
+      "t": 268.56,
+      "event": "play_pause"
+    },
+    {
+      "t": 297.65,
+      "event": "play_start"
+    },
+    {
+      "t": 302.36,
+      "event": "dribbler_on",
+      "robot": 1,
+      "mode": "C50"
+    },
+    {
+      "t": 306.27,
+      "event": "dribbler_off",
+      "robot": 1
+    },
+    {
+      "t": 310.01,
+      "event": "ball_out"
+    },
+    {
+      "t": 310.01,
+      "event": "play_pause"
+    },
+    {
+      "t": 310.81,
+      "event": "play_start"
+    },
+    {
+      "t": 318.96,
+      "event": "dribbler_on",
+      "robot": 2,
+      "mode": "C50"
+    },
+    {
+      "t": 326.36,
+      "event": "kick",
+      "robot": 2
+    },
+    {
+      "t": 326.36,
+      "event": "dribbler_off",
+      "robot": 2
+    },
+    {
+      "t": 326.8,
+      "event": "role_change",
+      "robot": 0,
+      "from_rol": "defensor",
+      "to_rol": "atacante"
+    },
+    {
+      "t": 326.8,
+      "event": "role_change",
+      "robot": 1,
+      "from_rol": "atacante",
+      "to_rol": "defensor"
+    },
+    {
+      "t": 327.18,
+      "event": "role_change",
+      "robot": 0,
+      "from_rol": "atacante",
+      "to_rol": "defensor"
+    },
+    {
+      "t": 327.18,
+      "event": "role_change",
+      "robot": 1,
+      "from_rol": "defensor",
+      "to_rol": "atacante"
+    },
+    {
+      "t": 332.78,
+      "event": "ball_out"
+    },
+    {
+      "t": 332.78,
+      "event": "play_pause"
+    },
+    {
+      "t": 336.91,
+      "event": "play_start"
+    },
+    {
+      "t": 348.28,
+      "event": "dribbler_on",
+      "robot": 2,
+      "mode": "C50"
+    },
+    {
+      "t": 349.33,
+      "event": "dribbler_on",
+      "robot": 1,
+      "mode": "C50"
+    },
+    {
+      "t": 349.54,
+      "event": "dribbler_off",
+      "robot": 2
+    },
+    {
+      "t": 349.84,
+      "event": "dribbler_off",
+      "robot": 1
+    },
+    {
+      "t": 350.47,
+      "event": "dribbler_on",
+      "robot": 1,
+      "mode": "C50"
+    },
+    {
+      "t": 350.6,
+      "event": "dribbler_off",
+      "robot": 1
+    },
+    {
+      "t": 351.11,
+      "event": "dribbler_on",
+      "robot": 2,
+      "mode": "C50"
+    },
+    {
+      "t": 351.23,
+      "event": "dribbler_off",
+      "robot": 2
+    },
+    {
+      "t": 365.12,
+      "event": "dribbler_on",
+      "robot": 2,
+      "mode": "C50"
+    },
+    {
+      "t": 365.97,
+      "event": "dribbler_on",
+      "robot": 1,
+      "mode": "C50"
+    },
+    {
+      "t": 366.51,
+      "event": "dribbler_off",
+      "robot": 1
+    },
+    {
+      "t": 367.23,
+      "event": "dribbler_off",
+      "robot": 2
+    },
+    {
+      "t": 367.57,
+      "event": "dribbler_on",
+      "robot": 1,
+      "mode": "C50"
+    },
+    {
+      "t": 367.65,
+      "event": "dribbler_off",
+      "robot": 1
+    },
+    {
+      "t": 367.86,
+      "event": "dribbler_on",
+      "robot": 2,
+      "mode": "C50"
+    },
+    {
+      "t": 367.99,
+      "event": "dribbler_off",
+      "robot": 2
+    }
+  ],
+  "notes": [
+    "Métricas acotadas a tramos con ambos equipos activos (sin init, reset post-gol ni pelota fuera).",
+    "Muestreo por estados de decisión (~25 Hz); el BT publica cambios cada ~100 ms, ninguna acción queda sin muestrear.",
+    "Embudo de ataque: 1=posicionamiento, 2=avance, 3=contacto, 4=disparo; abortos contados por etapa máxima alcanzada.",
+    "tracking_error_mm: distancia del robot al segmento activo de su ruta RRT*, escala por eje px→mm.",
+    "decision_cadence_ms: intervalo entre estados publicados por el proceso de decisión (throttle nominal 40 ms) bajo carga real.",
+    "partido_frames/tasas de detección: contadores del proceso de percepción acotados por game_active (incluyen tramos de pelota fuera)."
+  ],
+  "timestamp_iso": "2026-06-28T19:19:11",
+  "script": "match_2v2"
+}
