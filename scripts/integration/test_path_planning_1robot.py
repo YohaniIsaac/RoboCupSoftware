@@ -56,6 +56,7 @@ from robot_soccer.ai.path_planning.tools_for_path_planing import (
     obstacles_moved,
 )
 from metrics.metrics_capture import save_metrics
+from metrics.session_recorder import SessionRecorder
 
 logging.basicConfig(
     level=logging.INFO,
@@ -708,6 +709,7 @@ def visualization_process(perc_pipe, ctrl_pipe, keyboard_pipe,
 
     window_name = "Test Path Planning 1 Robot"
     cv2.namedWindow(window_name)
+    recorder = SessionRecorder("test_path_planning_1robot")
 
     try:
         while True:
@@ -906,6 +908,7 @@ def visualization_process(perc_pipe, ctrl_pipe, keyboard_pipe,
                             cv2.FONT_HERSHEY_SIMPLEX, 0.35, (180, 180, 180), 1)
 
                 cv2.imshow(window_name, frame)
+                recorder.write(frame)
             else:
                 placeholder = np.zeros(frame_shape, dtype=np.uint8)
                 cv2.putText(placeholder, "Esperando camara...",
@@ -937,6 +940,7 @@ def visualization_process(perc_pipe, ctrl_pipe, keyboard_pipe,
     finally:
         shm.close()
         cv2.destroyAllWindows()
+        recorder.close()
         log.info("Visualizacion finalizada")
 
 
