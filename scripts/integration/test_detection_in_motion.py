@@ -357,8 +357,8 @@ def main():
             rf.stop_robot(pid + 1)
         rf.shutdown()
         cap.release()
+        video_path = recorder.ask_and_close(WINDOW)
         cv2.destroyAllWindows()
-        video_path = recorder.close()
 
     if total == 0:
         log.warning("Sin fotogramas contados; no se guarda nada.")

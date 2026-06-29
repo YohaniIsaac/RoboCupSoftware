@@ -537,9 +537,9 @@ def visualization_process(perception_pipe, control_pipe, keyboard_pipe,
     except KeyboardInterrupt:
         pass
     finally:
+        recorder.ask_and_close(window_name)
         shm.close()
         cv2.destroyAllWindows()
-        recorder.close()
         log.info("Visualizacion finalizada")
 
 

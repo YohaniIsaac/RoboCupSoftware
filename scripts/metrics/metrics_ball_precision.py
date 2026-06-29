@@ -279,8 +279,8 @@ def main():
         pass
     finally:
         cap.release()
+        video_path = recorder.ask_and_close(window)
         cv2.destroyAllWindows()
-        video_path = recorder.close()
 
     if not results:
         print("\nNo se capturó ninguna posición; no se guarda archivo.")
