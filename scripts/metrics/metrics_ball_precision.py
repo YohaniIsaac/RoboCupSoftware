@@ -45,6 +45,7 @@ from robot_soccer.config import (
 from robot_soccer.utils.camera_utils import get_camera_index
 
 from metrics.metrics_capture import save_metrics
+from metrics.session_recorder import SessionRecorder
 
 logging.basicConfig(
     level=logging.INFO,
@@ -220,6 +221,8 @@ def main():
     capturing = False
     samples = []
     frames_seen = 0
+    recorder = SessionRecorder("ball_precision")
+    video_path = None
 
     print("=" * 64)
     print("  MEDICIÓN DE PRECISIÓN DE DETECCIÓN DE PELOTA")
@@ -258,6 +261,7 @@ def main():
             draw_overlay(view, ball_pos, capturing, len(samples),
                          args.frames, results, args.points)
             cv2.imshow(window, view)
+            recorder.write(view)
 
             key = cv2.waitKey(1) & 0xFF
             if key == 27:  # ESC
@@ -276,6 +280,7 @@ def main():
     finally:
         cap.release()
         cv2.destroyAllWindows()
+        video_path = recorder.close()
 
     if not results:
         print("\nNo se capturó ninguna posición; no se guarda archivo.")
@@ -288,6 +293,7 @@ def main():
         "frames_per_point": args.frames,
         "field_real_mm": {"width": FIELD_REAL_WIDTH_MM, "height": FIELD_REAL_HEIGHT_MM},
         "camera_id": camera_id,
+        "video": str(video_path) if video_path else None,
         "error_mm_mean": round(statistics.mean(errors), 2) if errors else None,
         "error_mm_std": round(statistics.stdev(errors), 2) if len(errors) > 1 else 0.0,
         "error_mm_max": round(max(errors), 2) if errors else None,
