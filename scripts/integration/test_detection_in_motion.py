@@ -75,6 +75,7 @@ from robot_soccer.utils.camera_utils import get_camera_index
 from robot_soccer.communication.rf_controller import RFController
 
 from metrics.metrics_capture import save_metrics
+from metrics.session_recorder import SessionRecorder
 
 logging.basicConfig(
     level=logging.INFO,
@@ -268,6 +269,8 @@ def main():
     print("  C = contar | S = stop | ESC = guardar y salir")
     print("=" * 64)
 
+    recorder = SessionRecorder("robot_detection_motion")
+    video_path = None
     try:
         while True:
             frame, datos = acquire(cap, matrix, detector, K, D)
@@ -303,6 +306,7 @@ def main():
             _draw_hud(view, now, motion_until, capturing, total, args.frames,
                       pattern, dur, detected_ids, measured, n_all_detected)
             cv2.imshow(WINDOW, view)
+            recorder.write(view)
 
             if capturing and total >= args.frames:
                 log.info("Alcanzados %d fotogramas contados.", total)
@@ -354,6 +358,7 @@ def main():
         rf.shutdown()
         cap.release()
         cv2.destroyAllWindows()
+        video_path = recorder.close()
 
     if total == 0:
         log.warning("Sin fotogramas contados; no se guarda nada.")
@@ -367,6 +372,7 @@ def main():
     summary = {
         "mode": "multi_motion",
         "camera_id": camera_id,
+        "video": str(video_path) if video_path else None,
         "robots_measured": measured,
         "rot_secs": rot_secs,
         "trans_secs": trans_secs,
