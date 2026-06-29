@@ -34,6 +34,7 @@ sys.path.insert(0, str(ROOT_DIR / "src"))
 sys.path.insert(0, str(ROOT_DIR / "scripts"))
 
 from metrics.metrics_capture import save_metrics
+from metrics.session_recorder import SessionRecorder
 
 from robot_soccer.config import (
     CAMERA_PERSPECTIVE_HEIGHT, CAMERA_PERSPECTIVE_WIDTH,
@@ -404,6 +405,7 @@ def visualization_process(perception_pipe, control_pipe, keyboard_pipe,
 
     window_name = 'Test Chase Ball'
     cv2.namedWindow(window_name)
+    recorder = SessionRecorder("test_chase_ball")
 
     try:
         while True:
@@ -502,6 +504,7 @@ def visualization_process(perception_pipe, control_pipe, keyboard_pipe,
                            cv2.FONT_HERSHEY_SIMPLEX, 0.35, (200, 200, 200), 1)
 
                 cv2.imshow(window_name, frame)
+                recorder.write(frame)
             else:
                 placeholder = np.zeros(frame_shape, dtype=np.uint8)
                 cv2.putText(placeholder, "Esperando frames...",
@@ -536,6 +539,7 @@ def visualization_process(perception_pipe, control_pipe, keyboard_pipe,
     finally:
         shm.close()
         cv2.destroyAllWindows()
+        recorder.close()
         log.info("Visualizacion finalizada")
 
 
