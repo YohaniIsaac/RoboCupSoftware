@@ -306,7 +306,8 @@ def main():
             _draw_hud(view, now, motion_until, capturing, total, args.frames,
                       pattern, dur, detected_ids, measured, n_all_detected)
             cv2.imshow(WINDOW, view)
-            recorder.write(view)
+            if capturing:                 # graba solo mientras se cuentan frames
+                recorder.write(view)
 
             if capturing and total >= args.frames:
                 log.info("Alcanzados %d fotogramas contados.", total)
